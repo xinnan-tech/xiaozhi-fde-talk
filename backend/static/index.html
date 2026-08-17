@@ -1,0 +1,1421 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>访谈助手</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 24px auto; padding: 0 16px; }
+    h2 { margin-bottom: 4px; }
+    .muted { color: #888; font-size: 13px; }
+    .row { margin: 10px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input, textarea, select { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
+    textarea { width: 100%; min-height: 70px; box-sizing: border-box; }
+    button { padding: 6px 14px; border: 0; border-radius: 4px; background: #2563eb; color: #fff; cursor: pointer; }
+    button:disabled { background: #999; cursor: not-allowed; }
+    button.gray { background: #555; }
+    button.red { background: #dc2626; }
+    button.outline { background: transparent; color: #2563eb; border: 1px solid #2563eb; }
+    #status { padding: 6px 10px; background: #f1f5f9; border-radius: 4px; font-size: 13px; }
+    #asr { border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; height: 50vh; box-sizing: border-box; overflow-y: auto; margin-top: 8px; }
+    #asr p { margin: 4px 0; }
+    .seg-id { color: #2563eb; font-size: 12px; margin-right: 6px; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    #coaching { border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; height: 50vh; box-sizing: border-box; overflow-y: auto; }
+    /* 辅导清单筛选按钮 */
+    .coach-filter { display: flex; gap: 6px; margin: 8px 0 0; flex-wrap: wrap; }
+    .coach-filter button { padding: 3px 10px; font-size: 12px; background: #f1f5f9; color: #555; border: 1px solid #e2e8f0; border-radius: 4px; }
+    .coach-filter button:hover { border-color: #2563eb; color: #2563eb; }
+    .coach-filter button.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .coach-filter .count { opacity: .75; margin-left: 4px; font-size: 11px; }
+    .cg { margin-bottom: 10px; }
+    .cg-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+    .cg-title.done { color: #16a34a; } .cg-title.new { color: #dc2626; } .cg-title.todo { color: #2563eb; }
+    .cg-title.skip { color: #888; } .cg-title.ign { color: #aaa; }
+    .item { font-size: 13px; margin: 2px 0; padding-left: 8px; }
+    .item .hint { display: block; font-size: 12px; color: #94a3b8; margin: 1px 0 0; }
+    .item.next { border-left: 3px solid #2563eb; background: #f8fafc; font-weight: 600; padding-left: 5px; }
+    .recomputing { color: #f59e0b; font-style: italic; }
+    .thinking { color: #f59e0b; font-size: 12px; font-style: italic; margin-left: 8px; }
+    #report { white-space: pre-wrap; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:12px; max-height:420px; overflow:auto; }
+    /* 顶部 tab */
+    .tab-nav { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
+    .tab-btn { background: transparent; color: #555; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 16px; font-size: 14px; }
+    .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+    /* 访谈列表 */
+    .iv-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+    .iv-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; cursor: pointer; transition: border-color .15s; }
+    .iv-card:hover { border-color: #2563eb; }
+    .iv-title { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .iv-meta { color: #888; font-size: 12px; margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; }
+    .badge.created { background:#e0e7ff; color:#3730a3; }
+    .badge.active { background:#dcfce7; color:#166534; }
+    .badge.suspended { background:#fef9c3; color:#854d0e; }
+    .badge.ended { background:#f1f5f9; color:#64748b; }
+    .iv-actions { margin-left: auto; display: flex; gap: 6px; }
+    button.mini { padding: 2px 10px; font-size: 12px; background: #64748b; }
+    button.mini.red { background: #dc2626; }
+    button.mini.outline { background: transparent; color: #2563eb; border: 1px solid #2563eb; }
+    .iv-check { width: auto; margin: 0; }
+    .batch-bar { margin-top: 8px; display: flex; gap: 12px; align-items: center; font-size: 13px; }
+    /* 创建表单 */
+    .form-row { margin: 10px 0; }
+    .form-row > label { display:block; font-size: 13px; color:#555; margin-bottom: 4px; }
+    .form-row > input, .form-row > select { width: 100%; box-sizing: border-box; }
+    .field-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    /* 配置页字段 */
+    .cfg-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+    .cfg-row label { min-width: 160px; font-family: monospace; font-size: 12px; color: #555; }
+    .cfg-row input { flex: 1; min-width: 200px; font-family: monospace; font-size: 12px; }
+    .cfg-row input.sensitive { background: #f8fafc; color: #888; letter-spacing: 1px; }
+    .cfg-status { margin-left: 8px; font-size: 12px; }
+    fieldset.cfg-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 16px; margin: 12px 0; }
+    fieldset.cfg-card legend { font-weight: 600; padding: 0 8px; color: #2563eb; }
+  </style>
+</head>
+<body>
+  <!-- 顶部登录栏（全局可见） -->
+  <div class="row" style="justify-content: flex-end;">
+    用户名 <input id="user" value="admin">
+    密码 <input id="pass" value="admin" type="password">
+    <button id="btnLogin" onclick="doLogin()">登录</button>
+    <button id="btnLogout" class="gray" onclick="logout()" disabled>退出</button>
+    <span class="muted" id="tokInfo"></span>
+  </div>
+
+  <nav class="tab-nav">
+    <button id="tabInterviews" class="tab-btn active">🎙️ 访谈</button>
+    <button id="tabConfig" class="tab-btn">⚙️ 后端配置</button>
+  </nav>
+
+  <div id="pageInterviews">
+    <!-- 列表视图 -->
+    <div id="viewList">
+      <div class="row" style="justify-content: space-between;">
+        <h2 style="margin:0;">访谈列表</h2>
+        <div>
+          <button class="outline" onclick="loadInterviews()">刷新</button>
+          <button id="btnNew" onclick="navigate('new')" disabled>＋ 新建访谈</button>
+        </div>
+      </div>
+      <div class="muted" id="loginHint">请先登录。</div>
+      <div id="ivBatchBar" class="batch-bar" style="display:none;">
+        <label><input type="checkbox" id="ivCheckAll" onchange="toggleAllIv(this.checked)"> 全选</label>
+        <button class="red outline" onclick="delSelected()">删除选中（<span id="ivSelCount">0</span>）</button>
+      </div>
+      <div id="ivList" class="iv-list"></div>
+    </div>
+
+    <!-- 创建/编辑视图 -->
+    <div id="viewCreate" style="display:none;">
+      <div class="row" style="justify-content: space-between;">
+        <h2 style="margin:0;" id="createTitle">新建访谈</h2>
+        <button class="outline" onclick="navigate('list')">← 返回列表</button>
+      </div>
+      <div class="muted">填写本次访谈的基本信息；目标越具体，辅导清单越准。</div>
+      <div class="form-row">
+        <label>访谈模板</label>
+        <select id="fTemplate" onchange="loadCreateForm(this.value)"></select>
+      </div>
+      <div class="form-row">
+        <label>名称 *</label>
+        <input id="fTitle" placeholder="如：张三的需求访谈">
+      </div>
+      <div id="fBaseFields" class="field-grid"></div>
+      <div class="form-row">
+        <label>本次访谈目标 *</label>
+        <textarea id="fGoal" placeholder="本次访谈想搞清楚什么"></textarea>
+      </div>
+      <div class="row">
+        <button id="btnSubmit" onclick="submitCreate()">创建</button>
+        <span class="muted" id="createStatus"></span>
+      </div>
+    </div>
+
+    <!-- 详情视图 -->
+    <div id="viewDetail" style="display:none;">
+      <div class="row" style="justify-content: space-between;">
+        <h2 id="dTitle" style="margin:0;">访谈详情</h2>
+        <button class="outline" onclick="backToList()">← 返回列表</button>
+      </div>
+      <div class="iv-meta" id="dMeta"></div>
+      <div class="muted" id="dGoal" style="margin:6px 0;"></div>
+
+      <div class="row" style="margin-top:12px;">
+        <button id="btnStart" onclick="startInterview()" disabled>开始访谈</button>
+        <button id="btnPause" class="gray" onclick="micToggle()" disabled>暂停麦</button>
+        <button id="btnEnd" class="red" onclick="endInterview()" disabled>结束访谈</button>
+      </div>
+
+      <div id="status">未连接</div>
+
+      <div class="cols">
+        <div>
+          <h3>转写</h3>
+          <div id="asr" class="muted">（开麦说话，停顿 ~0.8s 后出一句）</div>
+        </div>
+        <div>
+          <h3>辅导清单 <span id="coachVer" class="muted" style="font-size:12px;"></span><span id="coachThinking" class="thinking" style="display:none;">正在思考之中…</span></h3>
+          <div id="coaching" class="muted">（连上后显示该问什么）</div>
+          <div class="coach-filter" id="coachFilter">
+            <button data-status="all" class="active" onclick="setCoachFilter('all', this)">全部<span class="count" id="cfCountAll"></span></button>
+            <button data-status="done" onclick="setCoachFilter('done', this)">已问清<span class="count" id="cfCountDone"></span></button>
+            <button data-status="new" onclick="setCoachFilter('new', this)">新冒出<span class="count" id="cfCountNew"></span></button>
+            <button data-status="todo" onclick="setCoachFilter('todo', this)">待问<span class="count" id="cfCountTodo"></span></button>
+            <button data-status="skipped" onclick="setCoachFilter('skipped', this)">本次跳过<span class="count" id="cfCountSkipped"></span></button>
+            <button data-status="ignored" onclick="setCoachFilter('ignored', this)">已忽略<span class="count" id="cfCountIgnored"></span></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:16px;">
+        <button id="btnReport" class="gray" onclick="loadReport()" disabled>查看报告</button>
+        <button id="btnDlMd" class="gray" onclick="exportReport('md')" disabled>导出 .md</button>
+        <button id="btnDlHtml" class="gray" onclick="exportReport('html')" disabled>导出 .html</button>
+        <button id="btnDlWord" class="gray" onclick="exportReport('word')" disabled>导出 .docx</button>
+      </div>
+      <h3>报告</h3>
+      <pre id="report" class="muted">（访谈结束后点「查看报告」，LLM 照模板填，~10s）</pre>
+    </div>
+  </div><!-- /pageInterviews -->
+
+  <div id="pageConfig" style="display:none;">
+    <h2>后端配置</h2>
+    <fieldset class="cfg-card" id="diagCard">
+      <legend>🔧 运行自检</legend>
+      <div class="muted" style="margin-bottom: 8px;">
+        点这里测试整套服务是否正常：ASR 连通 + 转写，LLM 连通 + 回复。
+        部署后建议先跑一遍，发现问题不用等到真正访谈时才发现。
+      </div>
+      <div class="row">
+        <button id="btnDiagAll" onclick="runDiag('all')">运行全部</button>
+        <button class="outline" onclick="runDiag('asr')">仅 ASR</button>
+        <button class="outline" onclick="runDiag('llm')">仅 LLM</button>
+        <span class="muted" id="diagStatus"></span>
+      </div>
+      <div id="diagResults" style="margin-top: 10px;"></div>
+    </fieldset>
+    <div class="muted">
+      修改后点击「保存」立即生效（LLM/ASR 客户端会自动重载）。
+      敏感字段显示为 <code>**********</code>，留空 = 保留原值。
+    </div>
+    <div id="configForms"><!-- 分组卡片由 JS 动态生成 --></div>
+  </div>
+
+<!-- 连接竞争：同一访谈已有另一个连接时，问是否接管 -->
+<div id="takeoverModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); align-items:center; justify-content:center; z-index:1000;">
+  <div style="background:#fff; color:#222; padding:22px 26px; border-radius:12px; max-width:380px; box-shadow:0 10px 36px rgba(0,0,0,.32); text-align:center;">
+    <div id="takeoverMsg" style="margin-bottom:18px; font-size:15px; line-height:1.5;">该访谈已有另一个连接，是否接管？</div>
+    <div class="row" style="justify-content:center; gap:10px;">
+      <button onclick="confirmTakeover(true)">接管连接</button>
+      <button class="outline" onclick="confirmTakeover(false)">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const ORIGIN = location.origin;
+const WS_BASE = ORIGIN.replace(/^http/, "ws");
+let token = null, sid = null, ws = null, mr = null, seq = 0, micOn = false;
+// 重连控制：micOn===true 且非用户主动关时，断线自动重连；其它情况一律不连。
+let userIntentionalClose = false;  // 用户主动关闭（返回列表/结束访谈）→ 不重连
+let kicked = false;                // 被另一端接管（收 connection.kicked）→ onclose 不重连
+let pendingTakeoverCancel = false; // pending 时用户点「取消」→ onclose 静默收场不报错
+let reconnectAttempts = 0;          // 当前重连尝试次数
+let reconnectTimer = null;          // 重连退避定时器
+const RECONNECT_CAP_S = 30;          // 单次重连退避上限（服务器 grace=60s，必须在此内连上）
+const RECONNECT_MAX_ATTEMPTS = 6;    // 重连尝试上限：退避序列累计 ~31s，停在 grace 窗口内
+// —— 诊断：连接代际 + 帧/消息计数 + 相对时间戳（排查 4.3 分断连 & 重连无 JSON）——
+let connSeq = 0;                    // WS 连接代际（每次 connectSession +1，区分 ws#1 重连成 ws#2）
+let framesSent = 0, msgsRecv = 0;   // 当前连接已发音频帧数 / 已收 JSON 消息数
+let _diagT0 = 0;                    // 首次连接 performance.now() 基准
+function diagTs() { return _diagT0 ? Math.round((performance.now() - _diagT0) / 1000) + "s" : "-"; }
+// ===== 强制断连重连测试开关（必须保持 0）=====
+// 历史上用来主动断 WS 验证重连复用；线上开着会每 N 秒打断一次访谈，且
+// delay=0 的即时重连会触发 zombie 竞态（旧 handler 未及 unbind、新连接抢先
+// bind），曾导致「重连后音频进得来却不出字」。生产环境一律 0（关闭）。
+const FORCE_RECONNECT_INTERVAL_S = 0;  // 0 = 关闭
+let _forceChurnTimer = null;
+function startForceChurn() {
+  if (FORCE_RECONNECT_INTERVAL_S <= 0 || _forceChurnTimer !== null) return;
+  _forceChurnTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN && micOn) {
+      console.log("ws#" + connSeq, "FORCE-CHURN: close @", diagTs(),
+                  "frames=", framesSent, "msgs=", msgsRecv);
+      // 4000 主动关：onclose 里 shouldReconnect=true → 走正常重连复用 runtime
+      ws.close(4000, "force-churn");
+    }
+  }, FORCE_RECONNECT_INTERVAL_S * 1000);
+}
+function stopForceChurn() {
+  if (_forceChurnTimer !== null) { clearInterval(_forceChurnTimer); _forceChurnTimer = null; }
+}
+let currentTemplate = null;          // 创建表单当前选中的模板完整对象
+let editingId = null;                // 非 null 时表示当前表单处于"编辑已有访谈"模式
+let ivItems = [];                    // 最近一次加载的访谈列表（供 delOne 按 id 查名字，避免内联转义）
+const TOKEN_KEY = "interview_token";
+const USER_KEY = "interview_user";
+
+// ===== 顶部 Tab =====
+function showTab(name) {
+  document.getElementById('pageInterviews').style.display = name === 'interviews' ? '' : 'none';
+  document.getElementById('pageConfig').style.display = name === 'config' ? '' : 'none';
+  document.getElementById('tabInterviews').classList.toggle('active', name === 'interviews');
+  document.getElementById('tabConfig').classList.toggle('active', name === 'config');
+  if (name === 'config') loadConfigPage();
+}
+document.getElementById('tabInterviews').onclick = () => navigate('list');
+document.getElementById('tabConfig').onclick = () => navigate('config');
+
+// ===== 访谈子视图切换 =====
+function showView(name) {
+  ['viewList', 'viewCreate', 'viewDetail'].forEach(v => {
+    document.getElementById(v).style.display = (v === name) ? '' : 'none';
+  });
+}
+
+// ===== hash 路由：URL 随视图变化，刷新/后退可回到原地 =====
+// 形如 #view=detail&id=abc123；视图取值：list / new / edit / detail / config
+function parseHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  return { view: p.get('view') || 'list', id: p.get('id') || '' };
+}
+function navigate(view, id) {
+  const p = new URLSearchParams({ view });
+  if (id) p.set('id', id);
+  const next = '#' + p.toString();
+  if (location.hash === next) applyRoute({ view, id }); // hash 没变不会触发事件，手动应用
+  else location.hash = next;                             // 变了交给 hashchange 应用
+}
+function applyRoute({ view, id }) {
+  // 这些视图都要拉数据，未登录时统一退回列表（hash 保留，登录后自然路由回去）
+  if (['new', 'edit', 'detail', 'config'].includes(view) && !token) {
+    showTab('interviews'); showView('viewList'); return;
+  }
+  if (view === 'config') { showTab('config'); return; }
+  showTab('interviews');
+  if (view === 'new') return openCreate();
+  if (view === 'edit' && id) return openEdit(id);
+  if (view === 'detail' && id) return enterDetail(id);
+  showView('viewList'); loadInterviews(); // list / 未知视图 / 缺 id
+}
+window.addEventListener('hashchange', () => applyRoute(parseHash()));
+
+// ===== 工具 =====
+function esc(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function fmtTime(s) {
+  if (!s) return '';
+  try { return new Date(s).toLocaleString('zh-CN', { hour12: false }); } catch { return s; }
+}
+const STATUS_LABEL = {
+  created: ['待开始', 'created'],
+  setting_up: ['准备中', 'active'],
+  in_progress: ['进行中', 'active'],
+  suspended: ['已暂停', 'suspended'],
+  extracting: ['整理中', 'active'],
+  ended: ['已结束', 'ended'],
+  done: ['已结束', 'ended'],
+};
+function statusBadge(status) {
+  const [label, cls] = STATUS_LABEL[status] || [status, 'created'];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+function ivName(s) {
+  const bi = s.base_info || {};
+  return bi.title || bi.project || '（未命名）';
+}
+
+// ===== 访谈列表 =====
+async function loadInterviews() {
+  const box = document.getElementById('ivList');
+  const hint = document.getElementById('loginHint');
+  const batchBar = document.getElementById('ivBatchBar');
+  if (!token) { hint.style.display = ''; box.innerHTML = ''; batchBar.style.display = 'none'; return; }
+  hint.style.display = 'none';
+  box.innerHTML = '<div class="muted">加载中…</div>';
+  const r = await fetch(`${ORIGIN}/api/v1/interviews`, { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!r.ok) { box.innerHTML = `<div class="muted">加载失败 ${r.status}</div>`; batchBar.style.display = 'none'; return; }
+  const items = (await r.json()).items || [];
+  if (!items.length) { box.innerHTML = '<div class="muted">还没有访谈，点「新建访谈」开始。</div>'; batchBar.style.display = 'none'; return; }
+  batchBar.style.display = '';
+  ivItems = items;
+  box.innerHTML = items.map(s => {
+    const canEdit = ['created', 'suspended'].includes(s.status);
+    return `
+    <div class="iv-card" onclick="navigate('detail','${s.id}')">
+      <div class="iv-title">
+        <span onclick="event.stopPropagation()"><input type="checkbox" class="iv-check" value="${s.id}" onchange="updateSelCount()"></span>
+        ${esc(ivName(s))} ${statusBadge(s.status)}
+        <span class="iv-actions" onclick="event.stopPropagation()">
+          ${canEdit ? `<button class="mini outline" onclick="navigate('edit','${s.id}')">编辑</button>` : ''}
+          <button class="mini red" onclick="delOne('${s.id}')">删除</button>
+        </span>
+      </div>
+      <div class="iv-meta">
+        <span>创建：${fmtTime(s.created_at)}</span>
+        ${s.started_at ? `<span>开始：${fmtTime(s.started_at)}</span>` : ''}
+        ${s.ended_at ? `<span>结束：${fmtTime(s.ended_at)}</span>` : ''}
+      </div>
+      ${s.goal ? `<div class="muted" style="margin-top:4px;">目标：${esc(s.goal)}</div>` : ''}
+    </div>`;
+  }).join('');
+  updateSelCount();
+}
+
+// ===== 新建 / 编辑访谈 =====
+const DURATION_OPTS = [
+  { v: '30', label: '30 分钟（半小时）' },
+  { v: '45', label: '45 分钟' },
+  { v: '60', label: '1 小时' },
+  { v: '120', label: '2 小时' },
+];
+
+// ===== 新建访谈：默认预填 =====
+const INTERVIEW_DEFAULTS = {
+  title: '欣南科技公司售前业务洽谈助手',
+  project: '欣南科技售前',
+  interviewee: '彭经理',
+  duration: '45',
+  goal: '了解欣南售前工作流程，业务洽谈工具的需求，使用场景，部署方式之类',
+};
+
+function nowLocalForInput() {
+  // datetime-local 需要 "YYYY-MM-DDTHH:MM"（本地时区）
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function applyInterviewDefaults() {
+  document.getElementById('fTitle').value = INTERVIEW_DEFAULTS.title;
+  document.getElementById('fGoal').value = INTERVIEW_DEFAULTS.goal;
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  setVal('fbase_project', INTERVIEW_DEFAULTS.project);
+  setVal('fbase_interviewee', INTERVIEW_DEFAULTS.interviewee);
+  setVal('fbase_start_time', nowLocalForInput());
+  setVal('fbase_duration', INTERVIEW_DEFAULTS.duration);
+}
+
+async function openCreate() {
+  if (!token) { alert('请先登录'); return; }
+  editingId = null;
+  showView('viewCreate');
+  document.getElementById('createTitle').textContent = '新建访谈';
+  document.getElementById('btnSubmit').textContent = '创建';
+  document.getElementById('createStatus').textContent = '';
+  document.getElementById('fTemplate').disabled = false;
+  document.getElementById('fTitle').value = '';
+  document.getElementById('fGoal').value = '';
+  const r = await fetch(`${ORIGIN}/api/v1/templates`, { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!r.ok) { document.getElementById('createStatus').textContent = '模板加载失败 ' + r.status; return; }
+  const tpls = (await r.json()).items || [];
+  const sel = document.getElementById('fTemplate');
+  sel.innerHTML = tpls.map(t => `<option value="${t.id}">${t.icon_alt || ''} ${esc(t.name)}</option>`).join('');
+  if (tpls.length) {
+    await loadCreateForm(tpls[0].id);
+    applyInterviewDefaults();   // 模板就绪后填默认值（用户可继续改）
+  }
+}
+
+async function openEdit(id) {
+  if (!token) { alert('请先登录'); return; }
+  const r = await fetch(`${ORIGIN}/api/v1/interviews/${id}`, { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!r.ok) { alert('加载访谈失败 ' + r.status); return; }
+  const d = await r.json();
+  if (!['created', 'suspended'].includes(d.status)) { alert('该访谈当前状态不可编辑'); return; }
+  editingId = id;
+  showView('viewCreate');
+  document.getElementById('createTitle').textContent = '编辑访谈';
+  document.getElementById('btnSubmit').textContent = '保存修改';
+  document.getElementById('createStatus').textContent = '';
+  document.getElementById('fTemplate').value = d.template_id;
+  document.getElementById('fTemplate').disabled = true;
+  await loadCreateForm(d.template_id);
+  // 回填基础信息
+  const bi = d.base_info || {};
+  document.getElementById('fTitle').value = bi.title || '';
+  document.getElementById('fGoal').value = d.goal || '';
+  const fields = (currentTemplate.session && currentTemplate.session.base_fields) || [];
+  fields.forEach(f => {
+    const el = document.getElementById('fbase_' + f.key);
+    if (!el) return;
+    if (f.type === 'duration') {
+      // 由 start_time/end_time 反推时长，匹配预设；否则用已存 duration
+      let mins = 60;
+      if (bi.start_time && bi.end_time) {
+        const diff = Math.round((new Date(bi.end_time) - new Date(bi.start_time)) / 60000);
+        if (DURATION_OPTS.some(o => o.v === String(diff))) mins = diff;
+      } else if (bi.duration) {
+        mins = parseInt(bi.duration, 10) || 60;
+      }
+      el.value = String(mins);
+    } else {
+      el.value = bi[f.key] || '';
+    }
+  });
+}
+
+async function loadCreateForm(templateId) {
+  const r = await fetch(`${ORIGIN}/api/v1/templates/${templateId}`, { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!r.ok) return;
+  currentTemplate = await r.json();
+  const fields = (currentTemplate.session && currentTemplate.session.base_fields) || [];
+  document.getElementById('fBaseFields').innerHTML = fields.map(f => {
+    if (f.type === 'duration') {
+      const opts = DURATION_OPTS.map(o => `<option value="${o.v}">${o.label}</option>`).join('');
+      return `<div class="form-row"><label>${esc(f.label || f.key)}</label><select id="fbase_${f.key}">${opts}</select></div>`;
+    }
+    const inputType = f.type === 'datetime' ? 'datetime-local' : 'text';
+    return `<div class="form-row"><label>${esc(f.label || f.key)}</label><input id="fbase_${f.key}" type="${inputType}"></div>`;
+  }).join('');
+}
+
+// datetime-local 值 "YYYY-MM-DDTHH:MM"（本地时区）+ 分钟 → 同格式串
+function addMinutesToLocal(datetimeLocalStr, minutes) {
+  const d = new Date(datetimeLocalStr);
+  if (isNaN(d.getTime())) return '';
+  d.setMinutes(d.getMinutes() + minutes);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function collectBaseInfo() {
+  const base_info = { title: document.getElementById('fTitle').value.trim() };
+  const fields = (currentTemplate.session && currentTemplate.session.base_fields) || [];
+  fields.forEach(f => {
+    const el = document.getElementById('fbase_' + f.key);
+    if (!el) return;
+    const v = el.value;
+    if (v) base_info[f.key] = v;
+  });
+  // 结束时间由「开始时间 + 访谈时长」前端计算（用户不直接填结束时间）
+  if (base_info.start_time && base_info.duration) {
+    base_info.end_time = addMinutesToLocal(base_info.start_time, parseInt(base_info.duration, 10));
+  }
+  return base_info;
+}
+
+async function submitCreate() {
+  if (!currentTemplate) return;
+  const title = document.getElementById('fTitle').value.trim();
+  const goal = document.getElementById('fGoal').value.trim();
+  const statusEl = document.getElementById('createStatus');
+  if (!title) { statusEl.textContent = '请填写名称'; return; }
+  if (!goal) { statusEl.textContent = '请填写目标'; return; }
+  const base_info = collectBaseInfo();
+  const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+
+  if (editingId) {
+    statusEl.textContent = '保存中…';
+    const r = await fetch(`${ORIGIN}/api/v1/interviews/${editingId}`, {
+      method: 'PATCH', headers, body: JSON.stringify({ base_info, goal }),
+    });
+    if (!r.ok) { statusEl.textContent = '保存失败 ' + r.status + ' ' + await r.text(); return; }
+    editingId = null;
+    statusEl.textContent = '';
+    navigate('list');
+    return;
+  }
+
+  statusEl.textContent = '创建中…';
+  const r = await fetch(`${ORIGIN}/api/v1/interviews`, {
+    method: 'POST', headers, body: JSON.stringify({ template_id: currentTemplate.id, base_info, goal }),
+  });
+  if (!r.ok) { statusEl.textContent = '创建失败 ' + r.status + ' ' + await r.text(); return; }
+  document.getElementById('fTitle').value = '';
+  document.getElementById('fGoal').value = '';
+  statusEl.textContent = '';
+  navigate('list');
+}
+
+// ===== 删除（单个 / 批量）=====
+async function delOne(id) {
+  const found = ivItems.find(x => x.id === id);
+  const name = found ? ivName(found) : '该访谈';
+  if (!confirm(`确认删除访谈「${name}」？此操作不可撤销。`)) return;
+  const r = await fetch(`${ORIGIN}/api/v1/interviews/${id}`, {
+    method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token },
+  });
+  if (!r.ok) { alert('删除失败 ' + r.status + ' ' + await r.text()); return; }
+  await loadInterviews();
+}
+
+function updateSelCount() {
+  const checks = document.querySelectorAll('.iv-check');
+  const n = Array.from(checks).filter(c => c.checked).length;
+  document.getElementById('ivSelCount').textContent = n;
+  const all = document.getElementById('ivCheckAll');
+  if (all) all.checked = checks.length > 0 && n === checks.length;
+}
+
+function toggleAllIv(checked) {
+  document.querySelectorAll('.iv-check').forEach(c => c.checked = checked);
+  updateSelCount();
+}
+
+async function delSelected() {
+  const ids = Array.from(document.querySelectorAll('.iv-check:checked')).map(c => c.value);
+  if (!ids.length) { alert('请先勾选要删除的访谈'); return; }
+  if (!confirm(`确认删除选中的 ${ids.length} 个访谈？此操作不可撤销。`)) return;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    const r = await fetch(`${ORIGIN}/api/v1/interviews/${id}`, {
+      method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token },
+    });
+    if (r.ok) ok++; else fail++;
+  }
+  if (fail) alert(`完成：成功 ${ok} 个，失败 ${fail} 个`);
+  await loadInterviews();
+}
+
+// ===== 访谈详情 =====
+async function enterDetail(sessionId) {
+  sid = sessionId;
+  showView('viewDetail');
+  // 重置 UI 到初始态
+  const asr = document.getElementById('asr');
+  asr.className = 'muted'; asr.textContent = '（开麦说话，停顿 ~0.8s 后出一句）';
+  const coaching = document.getElementById('coaching');
+  coaching.className = 'muted'; coaching.textContent = '（连上后显示该问什么）';
+  document.getElementById('coachVer').textContent = '';
+  document.getElementById('coachThinking').style.display = 'none';
+  // 重置辅导清单筛选：默认「全部」+ 清空上一会话的 items 和 count
+  currentCoachFilter = 'all';
+  currentCoachItems = [];
+  document.querySelectorAll('#coachFilter button').forEach(b => b.classList.toggle('active', b.dataset.status === 'all'));
+  ['cfCountAll', 'cfCountDone', 'cfCountNew', 'cfCountTodo', 'cfCountSkipped', 'cfCountIgnored']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ''; });
+  const report = document.getElementById('report');
+  report.className = 'muted'; report.textContent = '（访谈结束后点「查看报告」，LLM 照模板填，~10s）';
+  ['btnDlMd', 'btnDlHtml', 'btnDlWord'].forEach(id => document.getElementById(id).disabled = true);
+
+  const r = await fetch(`${ORIGIN}/api/v1/interviews/${sessionId}`, { headers: { 'Authorization': 'Bearer ' + token } });
+  if (!r.ok) { setStatus('加载访谈失败 ' + r.status); return; }
+  const d = await r.json();
+  document.getElementById('dTitle').textContent = ivName(d);
+  document.getElementById('dMeta').innerHTML =
+    `${statusBadge(d.status)}<span>创建：${fmtTime(d.created_at)}</span>` +
+    (d.started_at ? `<span>开始：${fmtTime(d.started_at)}</span>` : '') +
+    (d.ended_at ? `<span>结束：${fmtTime(d.ended_at)}</span>` : '');
+  document.getElementById('dGoal').textContent = d.goal ? '目标：' + d.goal : '';
+
+  // 回放历史转写与辅导清单（断线重连/查看已结束访谈时可见）
+  if (Array.isArray(d.transcript) && d.transcript.length) {
+    asr.className = ''; asr.textContent = '';
+    d.transcript.forEach(seg => addAsr(seg.seg_id, seg.text));
+  }
+  if (Array.isArray(d.items) && d.items.length) {
+    renderCoaching({ phase: 'final', version: 0, items: d.items });
+  }
+
+  // 已结束的访谈只读；进行中/已暂停的显示「继续访谈」
+  const readonly = ['ended', 'done'].includes(d.status);
+  const active = ['in_progress', 'suspended', 'setting_up'].includes(d.status);
+  const btnStart = document.getElementById('btnStart');
+  btnStart.textContent = active ? '继续访谈' : '开始访谈';
+  btnStart.disabled = readonly;
+  document.getElementById('btnPause').disabled = true;
+  // 活跃的访谈不连接也能直接结束（endInterview 未连接时走 REST end）
+  document.getElementById('btnEnd').disabled = !active;
+  // 报告仅结束后可生成/下载
+  document.getElementById('btnReport').disabled = !readonly;
+  setStatus(readonly ? '该访谈已结束（只读）' : '点「' + btnStart.textContent + '」连接并开麦');
+
+  // 首评未生成且访谈未开聊：预热生成定制问题（幂等）。不等它完成即可开始访谈——
+  // WS 连上后由服务端推送接管，本地替换自动跳过（ws 非空 / 已切换会话）。
+  if (!d.first_batch_generated && !(Array.isArray(d.transcript) && d.transcript.length) && !readonly) {
+    (async () => {
+      const thinking = document.getElementById('coachThinking');
+      thinking.style.display = '';
+      setStatus('正在为这次访谈定制问题…');
+      try {
+        const r2 = await fetch(`${ORIGIN}/api/v1/interviews/${sessionId}/first-batch`,
+          { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+        const g = r2.ok ? await r2.json() : null;
+        if (g && g.generated && Array.isArray(g.items) && ws === null && sid === sessionId) {
+          renderCoaching({ phase: 'final', version: 0, items: g.items });
+          setStatus('问题已按本次访谈定制');
+        } else if (!g || !g.generated) {
+          setStatus('问题定制未完成，先用模板问题');
+        }
+      } catch {} finally { thinking.style.display = 'none'; }
+    })();
+  }
+}
+
+function backToList() {
+  // 仅断开连接（服务端会把访谈寄存为暂停态，可再回来继续），不主动结束
+  userIntentionalClose = true;       // 标记：用户主动离开，不再自动重连
+  stopForceChurn();                  // 停掉强制断连测试定时器
+  if (reconnectTimer !== null) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (mr && mr.state !== 'inactive') { try { mr.stop(); } catch {} }
+  if (ws && ws.readyState === WebSocket.OPEN) { try { ws.close(); } catch {} }
+  ws = null; mr = null; micOn = false; sid = null;
+  navigate('list');
+}
+
+// ===== 连接 WS + 开麦 =====
+const AUDIO_PARAMS = { format: "opus", sample_rate: 16000, channels: 1, frame_duration: 60 };
+
+// 重连退避：0s（立即）→ 1s → 2s → 4s → 8s → 16s → 30s（封顶）
+// 服务器 grace=60s：重连必须在此窗口内连上并重送 listen:start，否则会话永久 suspended。
+function nextReconnectDelay(attempt) {
+  if (attempt <= 1) return 0;  // 第 1 次立即
+  const exp = Math.min(attempt - 2, 5);  // 0,1,2,3,4,5
+  return Math.min(RECONNECT_CAP_S, 1 << exp);
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer !== null) return;     // 已在排队，不重复
+  if (userIntentionalClose || !micOn) return;  // 用户已主动关 / 已停麦：不再连
+  if (!sid) return;                         // 没有活跃会话
+  reconnectAttempts++;
+  if (reconnectAttempts > RECONNECT_MAX_ATTEMPTS) {
+    setStatus(`❌ 重连 ${RECONNECT_MAX_ATTEMPTS} 次仍失败，已放弃。返回列表可重试。`);
+    console.warn("ws#" + connSeq, "reconnect gave up after", RECONNECT_MAX_ATTEMPTS, "@", diagTs());
+    reconnectAttempts = 0;
+    return;
+  }
+  const delay = nextReconnectDelay(reconnectAttempts);
+  setStatus(`🔄 连接中断${delay ? `，${delay}s 后重试` : '，正在重连'}（第 ${reconnectAttempts} 次）…`);
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (userIntentionalClose || !micOn) return;
+    try {
+      await connectSession(sid, { openMicOnHello: false, isReconnect: true });
+      // 重连成功：若之前 mic 是开的，重建 MediaRecorder 发新流（匹配后端重置的解码器）
+      if (micOn && ws && ws.readyState === WebSocket.OPEN) {
+        console.log("ws#" + connSeq, "reconnect ok → reopenMic @", diagTs());
+        try { await reopenMic(); setStatus("🎙️ 重连成功，继续录音中…"); }
+        catch (e) { setStatus("重连后重开麦克风失败：" + e.message); }
+      } else {
+        setStatus("✓ 重连成功");
+      }
+      reconnectAttempts = 0;
+    } catch {
+      // 重连失败 → onclose 又会触发 scheduleReconnect，继续退避重试
+    }
+  }, delay * 1000);
+}
+
+// 每标签/每设备唯一身份（sessionStorage：同标签刷新不变，新标签/新设备不同）。
+// 后端据此区分「同端断线重连」（静默复用）与「另一端竞争」（弹窗接管）。
+// crypto.randomUUID 需安全源；HTTP+局域网 IP 下用 getRandomValues 兜底（非安全源也可用）。
+function getClientId() {
+  let id = sessionStorage.getItem("xz_client_id");
+  if (!id) {
+    if (crypto.randomUUID) {
+      id = crypto.randomUUID();
+    } else {
+      const b = new Uint8Array(16);
+      crypto.getRandomValues(b);
+      b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+      const h = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+      id = h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+    }
+    sessionStorage.setItem("xz_client_id", id);
+  }
+  return id;
+}
+
+function connectSession(sessionId, { openMicOnHello = true, isReconnect = false } = {}) {
+  return new Promise((resolve, reject) => {
+    connSeq++;
+    framesSent = 0; msgsRecv = 0;
+    if (!_diagT0) _diagT0 = performance.now();
+    const tag = "ws#" + connSeq;
+    console.log(tag, isReconnect ? "(reconnect)" : "(fresh)", "connecting @", diagTs());
+    // token 走子协议（服务端 accept 前校验，无效 token 连握手都完不成）
+    ws = new WebSocket(`${WS_BASE}/ws/v1/interview/${sessionId}`, ["bearer." + token]);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => {
+      console.log(tag, "onopen → send hello @", diagTs());
+      ws.send(JSON.stringify({
+        type: "hello", protocol_version: 1,
+        audio_params: AUDIO_PARAMS,
+        client_id: getClientId(),
+      }));
+    };
+    let settled = false;
+    let errorShown = false;  // 已展示过 error 帧后，onclose 不再用通用文案覆盖
+    ws.onmessage = async (ev) => {
+      const msg = JSON.parse(ev.data);
+      msgsRecv++;
+      if (msg.type === "hello") {
+        console.log(tag, "← hello ok resume_from_seq=", msg.resume_from_seq, "@", diagTs());
+        // 续传：从后端给的 resume_from_seq 续编号，否则旧 seq 会被去重丢弃
+        seq = msg.resume_from_seq || 0;
+        setStatus("握手成功 resume_from_seq=" + msg.resume_from_seq + "，请求麦克风…");
+        if (openMicOnHello) {
+          try { await openMic(); }
+          catch (e) {
+            // 麦克风不可用（非安全源 / 拒绝授权）：WS 已连上，只提示不当连接失败。
+            // mic_unavailable_insecure_origin 的可操作提示已在 openMic 里 setStatus，不覆盖。
+            if (e.message !== "mic_unavailable_insecure_origin") setStatus("麦克风不可用：" + e.message);
+          }
+        }
+        if (!settled) { settled = true; resolve(); }
+      } else if (msg.type === "connection.conflict") {
+        // 已有别的连接：弹框问是否接管。promise 仍 pending，等用户决定：
+        // 接管 → 发 connection.takeover → 服务端踢旧 owner 后回 hello → 走上面 hello 分支 resolve；
+        // 取消 → 关 WS → onclose 静默 resolve。
+        console.log(tag, "← connection.conflict（已有 owner）@", diagTs());
+        showTakeoverDialog(msg.message || "该访谈已有另一个连接，是否接管？");
+      } else if (msg.type === "connection.kicked") {
+        // 被另一端接管：提示并回到「可重新接管」状态（onclose 不重连）
+        console.warn(tag, "← connection.kicked（被接管）@", diagTs());
+        onKicked(msg.reason);
+        if (!settled) { settled = true; resolve(); }
+      } else if (msg.type === "session.ended") {
+        // 访谈已结束（本端 REST end 的收尾推送，或另一端结束了访谈）：
+        // 停麦停重连，进入只读态（与 endInterview 成功后的按钮态一致，幂等）
+        console.log(tag, "← session.ended @", diagTs());
+        userIntentionalClose = true;
+        stopForceChurn();
+        if (reconnectTimer !== null) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (mr && mr.state !== "inactive") { try { mr.stop(); } catch {} }
+        mr = null; micOn = false;
+        const bs = document.getElementById("btnStart");
+        bs.disabled = true; bs.textContent = "已结束";
+        document.getElementById("btnPause").disabled = true;
+        document.getElementById("btnEnd").disabled = true;
+        document.getElementById("btnReport").disabled = false;
+        setStatus("该访谈已结束（只读）。返回列表可查看报告。");
+      } else if (msg.type === "session.suspended") {
+        // 访谈因长时间无活动被服务端挂起（可继续）：停麦停重连，回到可恢复态
+        console.log(tag, "← session.suspended @", diagTs());
+        userIntentionalClose = true;
+        stopForceChurn();
+        if (reconnectTimer !== null) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (mr && mr.state !== "inactive") { try { mr.stop(); } catch {} }
+        mr = null; micOn = false;
+        resetToResumeButton();
+        setStatus("访谈已长时间无活动，自动挂起。点「继续访谈」可恢复。");
+      } else if (msg.type === "asr") {
+        addAsr(msg.seg_id, msg.text);
+      } else if (msg.type === "audio.low_level") {
+        // 后端检测到持续极低电平（每个开麦周期至多一次）：现场可行动的提醒。
+        // 分层：getUserMedia 的 AGC 保可识别下限；此帧兜底 AGC 救不回的场景
+        //（系统输入音量近零/浏览器无 AGC/超出最大增益），AGC 生效时不会收到。
+        console.warn(tag, "← audio.low_level " + msg.dbfs + " dBFS @", diagTs());
+        setStatus("🔉 声音很小（" + msg.dbfs + " dBFS），请靠近麦克风或调高系统输入音量");
+      } else if (msg.type === "coaching.update") {
+        renderCoaching(msg);
+      } else if (msg.type === "error") {
+        errorShown = true;
+        // asr_unavailable 已带可操作原因（服务未启动/ws_url 错），直接展示
+        if (msg.code === "asr_unavailable") {
+          setStatus("🎤 " + msg.message);
+        } else if (msg.code === "illegal_transition") {
+          // 状态机拒绝（典型：end 后还点继续）。直接回列表，避免按钮坏循环。
+          setStatus("状态已变化：" + msg.message + "。返回列表刷新…");
+          setTimeout(backToList, 600);
+        } else {
+          setStatus("错误 " + msg.code + "：" + msg.message);
+        }
+        console.error("ws error msg", msg);
+        if (!settled) { settled = true; reject(new Error(msg.code)); }
+      }
+    };
+    ws.onclose = (ev) => {
+      document.getElementById("takeoverModal").style.display = "none";  // 连接断则关掉可能还显示的接管框
+      console.warn(tag, "closed code=", ev.code, "reason=", ev.reason,
+                   "reconnect?", !userIntentionalClose && micOn,
+                   "| sent", framesSent, "frames, recv", msgsRecv, "msgs @", diagTs());
+      // 被另一端接管（onKicked 已设状态/按钮）或 pending 时用户取消：不重连、不报错
+      if (kicked || pendingTakeoverCancel) {
+        if (pendingTakeoverCancel) {
+          pendingTakeoverCancel = false;
+          resetToResumeButton();
+          if (!settled) { settled = true; reject(new Error("takeover_cancelled")); }
+        } else {
+          if (!settled) { settled = true; resolve(); }
+        }
+        return;
+      }
+      // 服务器主动 error 帧之后 close：不重连 + 不覆盖原错误提示
+      if (errorShown) {
+        if (!settled) { settled = true; reject(new Error("closed:" + ev.code)); }
+        return;
+      }
+      // 重连条件：非用户主动关 + mic 开着。重连自身的 WS 再断也继续退避重试
+      // （次数上限在 scheduleReconnect 内兜底，不会无限循环）。
+      const shouldReconnect = !userIntentionalClose && micOn;
+      if (!shouldReconnect) {
+        // 终态：按原有逻辑提示（用户主动关——结束访谈/返回列表——不再报「连接已关闭」，
+        // 否则会覆盖「该访谈已结束」的提示）
+        if (ev.code === 4409) setStatus("被拒绝：活跃访谈数已达上限（见「后端配置 → session → max_concurrent」）");
+        else if (ev.code === 4403) setStatus("访谈已长时间无活动，自动挂起。点「继续访谈」可恢复。");
+        else if (ev.code === 4404) setStatus("会话不存在");
+        else if (!userIntentionalClose) setStatus(`连接已关闭（code=${ev.code}${ev.reason ? " " + ev.reason : ""}）`);
+        if (!settled) { settled = true; reject(new Error("closed:" + ev.code)); }
+        return;
+      }
+      // 自动重连路径：不让 startInterview 看到这次失败（避免 catch 改按钮态）
+      if (!settled) { settled = true; resolve(); }
+      scheduleReconnect();
+    };
+    ws.onerror = () => setStatus("WS 错误");
+  });
+}
+
+async function startInterview() {
+  if (!token || !sid) { setStatus("请先从列表选择访谈"); return; }
+  // 每次用户主动发起连接，重置「被踢/取消/主动关」标记，开启新的连接/重连循环
+  kicked = false;
+  pendingTakeoverCancel = false;
+  userIntentionalClose = false;
+  try {
+    setStatus("连接 WS…");
+    await connectSession(sid);
+    document.getElementById("btnStart").disabled = true;
+    document.getElementById("btnPause").disabled = false;
+    document.getElementById("btnEnd").disabled = false;
+  } catch (e) {
+    if (e.message === "takeover_cancelled") return;  // 取消接管：状态/按钮已由 onclose 处理
+    setStatus("连接失败：" + e.message);
+    // illegal_transition：状态机拒绝，点继续只会再撞一次。按钮保持禁用，
+    // 等 error 帧里 setTimeout(backToList, 600) 带用户回列表。
+    if (e.message !== "illegal_transition") {
+      document.getElementById("btnStart").disabled = false;
+    }
+  }
+}
+
+async function openMic() {
+  // getUserMedia 仅在安全源可用：https / localhost / 127.0.0.1。HTTP + 局域网 IP
+  // 不是安全源，navigator.mediaDevices 会是 undefined —— 这里给出可操作提示，
+  // 而不是让 .getUserMedia 抛出看不懂的 TypeError。
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setStatus("🎤 麦克风不可用：当前是 HTTP + 局域网 IP（非安全源）。请改用 https 访问；"
+      + "或在 Chrome/Edge 打开 chrome://flags/#unsafely-treat-insecure-origin-as-secure，"
+      + "填入 " + location.origin + " → 启用 → 重启浏览器。");
+    throw new Error("mic_unavailable_insecure_origin");
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  console.log("mic settings:", stream.getAudioTracks()[0].getSettings());
+  mr = new MediaRecorder(stream, { mimeType: getWebmMime() });
+  mr.ondataavailable = async (e) => {
+    if (!e.data || e.data.size === 0 || ws.readyState !== WebSocket.OPEN) return;
+    const buf = await e.data.arrayBuffer();
+    const frame = new Uint8Array(4 + buf.byteLength);
+    new DataView(frame.buffer).setUint32(0, seq, false);  // big-endian seq
+    frame.set(new Uint8Array(buf), 4);
+    ws.send(frame);
+    framesSent++;
+    if (framesSent % 300 === 0) console.log("ws#" + connSeq, "alive:", framesSent, "frames,", msgsRecv, "msgs @", diagTs());
+    seq++;
+  };
+  console.log("ws#" + connSeq, "openMic → send listen:start @", diagTs());
+  ws.send(JSON.stringify({ type: "listen", state: "start" }));
+  mr.start(200);   // 每 200ms 一个 WebM chunk
+  micOn = true;
+  document.getElementById("btnPause").textContent = "暂停麦";
+  setStatus("🎙️ 录音中…（说话，停顿约 0.8s 出一句）");
+  startForceChurn();   // 测试开关：每 60s 强制断连重连，验证 runtime 复用
+}
+
+async function reopenMic() {
+  // 重建 MediaRecorder：停掉旧 recorder 及其 stream，再走 openMic 发一条带 EBML 头的全新流。
+  // 旧 recorder 的后续分片不含 EBML 头，复用会污染后端刚重置的解码器 → 永久不出字。
+  if (mr) {
+    if (mr.stream) mr.stream.getTracks().forEach(t => t.stop());  // 释放旧 stream，避免麦克风泄漏
+    if (mr.state !== "inactive") { try { mr.stop(); } catch {} }
+    mr = null;
+  }
+  await openMic();
+}
+
+function getWebmMime() {
+  for (const m of ["audio/webm;codecs=opus", "audio/webm"]) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return "";
+}
+
+async function micToggle() {
+  if (!mr) return;
+  if (micOn) {
+    mr.pause();
+    console.log("ws#" + connSeq, "micToggle → send listen:stop @", diagTs());
+    ws.send(JSON.stringify({ type: "listen", state: "stop" }));
+    micOn = false;
+    document.getElementById("btnPause").textContent = "继续麦";
+    setStatus("⏸ 已暂停麦");
+  } else {
+    // 继续麦：重建 MediaRecorder 发新流（旧 recorder resume 会发无头续流，污染解码器）
+    console.log("ws#" + connSeq, "micToggle → reopenMic @", diagTs());
+    try { await reopenMic(); }   // openMic 内部发 listen:start + 新流 + setStatus
+    catch (e) { setStatus("重开麦克风失败：" + e.message); }
+  }
+}
+
+async function endInterview() {
+  userIntentionalClose = true;       // 标记：用户主动结束，不再自动重连
+  stopForceChurn();                  // 停掉强制断连测试定时器
+  if (reconnectTimer !== null) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  // 结束走 REST（会话状态归 HTTP 管，WS 只承载音频/转写）。失败则提示并保留
+  // 按钮可重试，不锁成「已结束」。
+  try {
+    const r = await fetch(`${ORIGIN}/api/v1/interviews/${sid}/end`, {
+      method: "POST", headers: { "Authorization": "Bearer " + token },
+    });
+    if (!r.ok) { setStatus("结束失败 " + r.status + " " + await r.text()); return; }
+  } catch (e) {
+    setStatus("结束失败：" + e.message);
+    return;
+  }
+  // 断开本端连接（服务端 runtime 由 REST end 的后台任务拆除）
+  if (mr && mr.state !== "inactive") mr.stop();
+  if (ws && ws.readyState === WebSocket.OPEN) { try { ws.close(); } catch {} }
+  ws = null; micOn = false;
+  document.getElementById("btnPause").disabled = true;
+  document.getElementById("btnEnd").disabled = true;
+  // 关键：end 后立刻禁用「继续访谈」按钮。
+  // 状态已由后端写盘成 ended；按钮不刷新会有「点继续→后端拒」的卡死态
+  // （manager.start：ended 只能转 extracting，非法转 in_progress）。
+  const btnStart = document.getElementById("btnStart");
+  btnStart.disabled = true;
+  btnStart.textContent = "已结束";
+  // 报告仅结束后可生成/下载
+  document.getElementById("btnReport").disabled = false;
+  setStatus("该访谈已结束（只读）。返回列表可继续操作。");
+}
+
+// ===== 连接竞争（同一访谈只允许一个活跃连接）=====
+function showTakeoverDialog(message) {
+  document.getElementById("takeoverMsg").textContent = message;
+  document.getElementById("takeoverModal").style.display = "flex";
+}
+
+function confirmTakeover(yes) {
+  document.getElementById("takeoverModal").style.display = "none";
+  if (yes) {
+    setStatus("正在接管连接…");
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "connection.takeover" }));
+    }
+    // 接管成功后服务端会回 hello → 走 hello 分支开麦；失败则 onclose 兜底
+  } else {
+    // 取消：关连接，回到「继续访谈」可点状态
+    pendingTakeoverCancel = true;
+    setStatus("已取消接管。可点「继续访谈」重新进入。");
+    if (ws) { try { ws.close(); } catch {} }
+  }
+}
+
+function onKicked(reason) {
+  // 被另一端接管：停麦、不重连、恢复继续访谈按钮（可再次接管，形成循环）
+  kicked = true;
+  userIntentionalClose = true;
+  if (mr) {
+    if (mr.stream) mr.stream.getTracks().forEach(t => t.stop());
+    if (mr.state !== "inactive") { try { mr.stop(); } catch {} }
+    mr = null;
+  }
+  micOn = false;
+  resetToResumeButton();
+  setStatus("⚠️ " + (reason || "连接已被另一个客户端接管") + "。可点「继续访谈」重新接管。");
+}
+
+function resetToResumeButton() {
+  // 回到「未连接、可点继续访谈」状态（按钮文案由 selectInterview 按 status 设，这里只解禁）
+  document.getElementById("btnStart").disabled = false;
+  document.getElementById("btnPause").disabled = true;
+  document.getElementById("btnPause").textContent = "暂停麦";
+  // 会话仍活跃：不重连也可直接结束（REST end）
+  document.getElementById("btnEnd").disabled = false;
+}
+
+// ===== 渲染 =====
+function setStatus(s) { document.getElementById("status").textContent = s; }
+
+function addAsr(segId, text) {
+  const box = document.getElementById("asr");
+  if (box.classList.contains("muted")) { box.classList.remove("muted"); box.textContent = ""; }
+  const p = document.createElement("p");
+  p.innerHTML = `<span class="seg-id">[${esc(segId)}]</span>${esc(text)}`;
+  box.insertBefore(p, box.firstChild); // 新一句插到最上面：转写按倒序（最新在顶）
+}
+
+// 辅导清单筛选：保留最新一次清单数据，按当前筛选状态重绘
+let currentCoachFilter = 'all';          // 'all' | 'done' | 'new' | 'todo' | 'skipped' | 'ignored'
+let currentCoachItems = [];
+
+function renderCoaching(msg) {
+  const box = document.getElementById("coaching");
+  const ver = document.getElementById("coachVer");
+  const thinking = document.getElementById("coachThinking");
+  // 大模型正在重算：保留已显示的清单不清空，只亮起「正在思考」状态
+  if (msg.phase === "recomputing") {
+    thinking.style.display = "";
+    setStatus("辅导员正在思考之中…");
+    return;
+  }
+  thinking.style.display = "none";
+  box.classList.remove("muted");
+  ver.textContent = msg.version ? ("v" + msg.version) : "";
+  currentCoachItems = (msg.items || []).slice().sort((a, b) => (a.priority - b.priority));
+  drawCoaching();
+  updateCoachFilterCounts();
+}
+
+function drawCoaching() {
+  const box = document.getElementById("coaching");
+  const items = currentCoachFilter === 'all'
+    ? currentCoachItems
+    : currentCoachItems.filter(it => it.status === currentCoachFilter);
+  if (!currentCoachItems.length) {
+    box.innerHTML = '<div class="muted">（暂无清单）</div>';
+    return;
+  }
+  if (!items.length) {
+    const label = COACH_FILTER_LABEL[currentCoachFilter] || '该项';
+    box.innerHTML = `<div class="muted">（${label}暂无）</div>`;
+    return;
+  }
+  const byStatus = { done: [], new: [], todo: [], skipped: [], ignored: [] };
+  for (const it of items) (byStatus[it.status] || (byStatus[it.status] = [])).push(it);
+  // 单条渲染：未问清的主行=问题、小字=追问方向；已问清只留摘要，无摘要兜底显示问题。
+  // id 不直接展示（访谈者不需要），挂 data-id 供调试排查。
+  const itemHtml = (it, next) => {
+    const cls = `item${it === next ? " next" : ""}`;
+    if (it.status === "done") {
+      return `<div class="${cls}" data-id="${esc(it.id)}">${esc(it.reason || it.text)}</div>`;
+    }
+    return `<div class="${cls}" data-id="${esc(it.id)}">${esc(it.text)}`
+      + (it.reason ? `<span class="hint">${esc(it.reason)}</span>` : "")
+      + `</div>`;
+  };
+  // 「下一个该问的」= 新冒出的第一条，无则待问的第一条（LLM 按发问顺序输出，稳定排序保序）
+  const next = byStatus.new[0] || byStatus.todo[0];
+  const group = (title, list, cls) => list.length
+    ? `<div class="cg"><div class="cg-title ${cls}">${title} (${list.length})</div>${list.map(it => itemHtml(it, next)).join("")}</div>` : "";
+  // 全部模式：按原逻辑分多组；具体状态模式：只画对应那一组（用空过滤掉其它组）
+  if (currentCoachFilter === 'all') {
+    box.innerHTML =
+      group("✅ 已问清", byStatus.done, "done") +
+      group("🆕 新冒出（必问清）", byStatus.new, "new") +
+      group("⭕ 待问", byStatus.todo, "todo") +
+      group("⏭ 本次跳过", byStatus.skipped, "skip") +
+      group("🚫 已忽略", byStatus.ignored, "ign");
+  } else {
+    const single = {
+      done: ["✅ 已问清", "done"],
+      new: ["🆕 新冒出（必问清）", "new"],
+      todo: ["⭕ 待问", "todo"],
+      skipped: ["⏭ 本次跳过", "skip"],
+      ignored: ["🚫 已忽略", "ign"],
+    }[currentCoachFilter];
+    box.innerHTML = group(single[0], items, single[1]);
+  }
+}
+
+const COACH_FILTER_LABEL = {
+  done: '已问清', new: '新冒出', todo: '待问', skipped: '本次跳过', ignored: '已忽略',
+};
+
+function setCoachFilter(status, btn) {
+  currentCoachFilter = status;
+  document.querySelectorAll('#coachFilter button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  drawCoaching();
+}
+
+function updateCoachFilterCounts() {
+  const map = { all: currentCoachItems.length, done: 0, new: 0, todo: 0, skipped: 0, ignored: 0 };
+  for (const it of currentCoachItems) {
+    if (map[it.status] != null) map[it.status]++;
+  }
+  const set = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n ? `(${n})` : ''; };
+  set('cfCountAll', map.all);
+  set('cfCountDone', map.done);
+  set('cfCountNew', map.new);
+  set('cfCountTodo', map.todo);
+  set('cfCountSkipped', map.skipped);
+  set('cfCountIgnored', map.ignored);
+}
+
+// ===== 报告 =====
+async function loadReport() {
+  if (!sid) return;
+  setStatus("生成报告中（LLM 照模板填，~10s）…");
+  const r = await fetch(`${ORIGIN}/api/v1/interviews/${sid}/report`, {
+    headers: { "Authorization": "Bearer " + token },
+  });
+  if (!r.ok) { setStatus("报告获取失败 " + r.status); return; }
+  const j = await r.json();
+  const box = document.getElementById("report");
+  box.classList.remove("muted");
+  box.textContent = j.content_md || "（报告为空）";
+  const hasMd = !!(j.content_md && j.status === "ready");
+  ["btnDlMd", "btnDlHtml", "btnDlWord"].forEach(id => document.getElementById(id).disabled = !hasMd);
+  setStatus(hasMd ? "报告就绪（可导出）" : "报告状态：" + j.status);
+}
+
+async function exportReport(fmt) {
+  if (!sid) return;
+  const r = await fetch(`${ORIGIN}/api/v1/interviews/${sid}/export?format=${fmt}`, {
+    method: "POST", headers: { "Authorization": "Bearer " + token },
+  });
+  if (!r.ok) { setStatus("导出失败 " + r.status + " " + await r.text()); return; }
+  const blob = await r.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `report.${fmt === "word" ? "docx" : fmt}`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ===== 登录 =====
+function applyLoggedIn(tok, username) {
+  token = tok;
+  document.getElementById("tokInfo").textContent = "token: " + tok.slice(0, 14) + "…";
+  document.getElementById("btnLogin").disabled = true;
+  document.getElementById("btnLogout").disabled = false;
+  document.getElementById("btnNew").disabled = false;
+  setStatus("已登录" + (username ? "（" + username + "）" : ""));
+  applyRoute(parseHash()); // 按 hash 决定落地页：刷新详情页时仍停在该详情
+}
+
+async function doLogin() {
+  const r = await fetch(`${ORIGIN}/api/v1/auth/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: user.value, password: pass.value }),
+  });
+  if (!r.ok) { setStatus("登录失败 " + r.status); return; }
+  const tok = (await r.json()).access_token;
+  localStorage.setItem(TOKEN_KEY, tok);
+  localStorage.setItem(USER_KEY, user.value);
+  applyLoggedIn(tok, user.value);
+}
+
+function logout() {
+  token = null;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  document.getElementById("tokInfo").textContent = "";
+  document.getElementById("btnLogin").disabled = false;
+  document.getElementById("btnLogout").disabled = true;
+  document.getElementById("btnNew").disabled = true;
+  document.getElementById("ivList").innerHTML = "";
+  document.getElementById('loginHint').style.display = "";
+  setStatus("未登录");
+}
+
+// 刷新后从 localStorage 恢复登录态，并轻量校验 token 是否仍有效
+async function restoreSession() {
+  const tok = localStorage.getItem(TOKEN_KEY);
+  if (!tok) { setStatus("未登录"); return; }
+  const username = localStorage.getItem(USER_KEY);
+  setStatus("恢复会话…");
+  try {
+    const r = await fetch(`${ORIGIN}/api/v1/templates`, {
+      headers: { "Authorization": "Bearer " + tok },
+    });
+    if (r.ok) {
+      if (username) user.value = username;
+      applyLoggedIn(tok, username);
+    } else {
+      logout();
+    }
+  } catch (e) { setStatus("未登录"); }
+}
+restoreSession();
+
+// ===== 运行自检 =====
+const DIAG_CODE_HINT = {
+  ok: '✅ 正常',
+  config_missing: '⚠️ 配置缺失',
+  unreachable: '🔌 连不上',
+  auth: '🔑 鉴权失败',
+  quota: '💰 额度/限流',
+  busy: '⏸️ 会话占用',
+  server: '❌ 服务异常',
+};
+const DIAG_CODE_CLASS = {
+  ok: 'created',
+  config_missing: 'suspended',
+  unreachable: 'ended',
+  auth: 'ended',
+  quota: 'ended',
+  busy: 'suspended',
+  server: 'ended',
+};
+
+function diagCardHTML(title, res) {
+  if (!res) return '';
+  const code = res.code || 'server';
+  const label = DIAG_CODE_HINT[code] || code;
+  const cls = DIAG_CODE_CLASS[code] || 'ended';
+  const latency = res.latency_ms != null ? `${res.latency_ms} ms` : '';
+  const detail = res.detail || {};
+  let detailHTML = '';
+  if (detail.utterances && detail.utterances.length) {
+    detailHTML += `<div class="muted" style="margin-top:4px;">转写：${esc(detail.utterances.join(' / '))}</div>`;
+  }
+  if (detail.reply) {
+    detailHTML += `<div class="muted" style="margin-top:4px;">LLM 回：${esc(detail.reply)}</div>`;
+  }
+  if (detail.model) {
+    detailHTML += `<div class="muted" style="margin-top:4px;">模型：${esc(detail.model)}</div>`;
+  }
+  if (detail.sample) {
+    detailHTML += `<div class="muted" style="margin-top:2px;">样本：${detail.sample === 'real' ? '真实音频' : '合成 tone'}</div>`;
+  }
+  return `
+    <div style="border:1px solid #e2e8f0; border-radius:6px; padding:8px 10px; margin:6px 0;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <b>${esc(title)}</b>
+        <span class="badge ${cls}">${label}</span>
+        ${latency ? `<span class="muted">${latency}</span>` : ''}
+      </div>
+      <div style="margin-top:4px; font-size:13px;">${esc(res.message || '')}</div>
+      ${detailHTML}
+    </div>`;
+}
+
+async function runDiag(kind) {
+  if (!token) { alert('请先登录'); return; }
+  const statusEl = document.getElementById('diagStatus');
+  const resultsEl = document.getElementById('diagResults');
+  const btnAll = document.getElementById('btnDiagAll');
+  btnAll.disabled = true;
+  statusEl.textContent = '测试中…';
+  resultsEl.innerHTML = '';
+  const H = { 'Authorization': 'Bearer ' + token };
+  const path = kind === 'all' ? '/api/v1/diagnostics' : `/api/v1/diagnostics/${kind}`;
+  try {
+    const r = await fetch(`${ORIGIN}${path}`, {
+      method: 'POST', headers: H,
+    });
+    const raw = await r.text();
+    if (!r.ok) {
+      // 把后端 FastAPI 错误体（detail 字段）原样吐出来；HTTPException 优先读 JSON
+      let reason = '';
+      try { reason = JSON.parse(raw).detail || ''; } catch { reason = raw.slice(0, 200); }
+      statusEl.textContent = `❌ 请求失败（HTTP ${r.status}）${reason ? '：' + reason : ''}`;
+      return;
+    }
+    const data = JSON.parse(raw);
+    let html = '';
+    if (kind === 'all') {
+      html = diagCardHTML('ASR 语音识别', data.asr) + diagCardHTML('LLM 大语言模型', data.llm);
+      statusEl.textContent = data.ok ? '✅ 全部正常' : '❌ 有失败项，看下面详情';
+    } else {
+      html = diagCardHTML(kind === 'asr' ? 'ASR 语音识别' : 'LLM 大语言模型', data);
+      statusEl.textContent = data.ok ? '✅ 正常' : '❌ 失败，看下面详情';
+    }
+    resultsEl.innerHTML = html;
+  } catch (e) {
+    statusEl.textContent = '网络错误：' + e.message;
+  } finally {
+    btnAll.disabled = false;
+  }
+}
+
+// ===== 后端配置 Tab =====
+const CONFIG_GROUPS = ['llm', 'asr', 'coach', 'auth', 'session'];
+// 字段名（去掉分组前缀）→ 敏感
+const CONFIG_SENSITIVE = new Set(['api_key', 'demo_password']);
+// 字段类型提示（按字段名）
+const CONFIG_NUMERIC = new Set(['sample_rate', 'jwt_expire_minutes', 'max_concurrent', 'max_pending_segments']);
+const CONFIG_FLOAT = new Set(['pause_s', 'min_interval_s', 'llm_timeout_s', 'grace_period_s']);
+const CONFIG_BOOL = new Set(['ws_verify_ssl']);
+
+function configInputType(key) {
+  if (CONFIG_BOOL.has(key)) return 'checkbox';
+  if (CONFIG_NUMERIC.has(key)) return 'number';
+  if (CONFIG_FLOAT.has(key)) return 'number';
+  return 'text';
+}
+
+async function loadConfigPage() {
+  if (!token) { alert('请先登录'); showTab('interviews'); return; }
+  const r = await fetch(`${ORIGIN}/api/v1/admin/config`, {
+    headers: { 'Authorization': 'Bearer ' + token },
+  });
+  if (!r.ok) {
+    document.getElementById('configForms').innerHTML = `<div class="muted">加载失败 ${r.status}：${esc(await r.text())}</div>`;
+    return;
+  }
+  const data = await r.json();
+  const container = document.getElementById('configForms');
+  container.innerHTML = CONFIG_GROUPS.map(g => renderConfigGroup(g, data[g] || {})).join('');
+  CONFIG_GROUPS.forEach(g => {
+    const btn = document.getElementById('btnSave_' + g);
+    if (btn) btn.onclick = () => saveConfigGroup(g);
+  });
+}
+
+function renderConfigGroup(group, fields) {
+  const fieldHtml = Object.entries(fields).map(([k, v]) => {
+    const isSens = CONFIG_SENSITIVE.has(k);
+    const inputType = configInputType(k);
+    if (isSens) {
+      return `<div class="cfg-row">
+        <label>${k}</label>
+        <input id="cfg_${group}_${k}" type="password" class="sensitive" placeholder="**********" value="">
+      </div>`;
+    }
+    if (inputType === 'checkbox') {
+      const checked = (v === true || v === 'true') ? 'checked' : '';
+      return `<div class="cfg-row">
+        <label>${k}</label>
+        <input id="cfg_${group}_${k}" type="checkbox" ${checked}>
+      </div>`;
+    }
+    if (inputType === 'number') {
+      const step = CONFIG_FLOAT.has(k) ? '0.1' : '1';
+      return `<div class="cfg-row">
+        <label>${k}</label>
+        <input id="cfg_${group}_${k}" type="number" step="${step}" value="${v ?? ''}">
+      </div>`;
+    }
+    return `<div class="cfg-row">
+      <label>${k}</label>
+      <input id="cfg_${group}_${k}" type="text" value="${(v ?? '').toString().replace(/"/g, '&quot;')}">
+    </div>`;
+  }).join('');
+  return `
+    <fieldset class="cfg-card">
+      <legend>${group}</legend>
+      ${fieldHtml || '<div class="muted">（无字段）</div>'}
+      <div class="row" style="margin-top:10px;">
+        <button id="btnSave_${group}">保存 ${group}</button>
+        <button class="gray" id="btnReload_${group}" onclick="loadConfigPage()">重载</button>
+        <span class="cfg-status" id="status_${group}"></span>
+      </div>
+    </fieldset>`;
+}
+
+async function saveConfigGroup(group) {
+  const fields = {};
+  document.querySelectorAll(`input[id^="cfg_${group}_"]`).forEach(input => {
+    const key = input.id.replace(`cfg_${group}_`, '');
+    if (input.type === 'checkbox') {
+      fields[key] = input.checked ? 'true' : 'false';
+    } else {
+      fields[key] = input.value;
+    }
+  });
+  const status = document.getElementById(`status_${group}`);
+  status.textContent = '保存中…';
+  const r = await fetch(`${ORIGIN}/api/v1/admin/config/${group}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify(fields),
+  });
+  if (r.ok) {
+    status.textContent = '✅ 已保存，下一次请求生效';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+    setTimeout(loadConfigPage, 500);
+  } else {
+    status.textContent = '❌ ' + (await r.text());
+  }
+}
+</script>
+</body>
+</html>

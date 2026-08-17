@@ -1,0 +1,322 @@
+"""DB 配置 KV 存储 + 内存缓存 + 失效广播单例。
+
+设计要点：
+- 19 个 B 类 key（前后端共用清单 ALL_B_KEYS）
+- 启动期 warm() 一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入
+- 单条 set() / 批量 set_many() 都走 DB + 内存 + 订阅者广播
+- 敏感字段（SENSITIVE_KEYS）GET 返 None、空值 PUT 跳过——避免误清密钥
+- 失败订阅者不影响主流程（异常吞掉 + log）
+"""
+from __future__ import annotations
+
+import logging
+import weakref
+from datetime import datetime, timezone
+from typing import Callable, Iterable, Optional
+
+from sqlalchemy import select
+
+from app.persistence.db import SessionLocal
+from app.persistence.models import SystemConfig
+
+logger = logging.getLogger(__name__)
+
+# B 类 19 个 key 的合法清单（前后端共用）
+ALL_B_KEYS: list[str] = [
+    "llm.type", "llm.base_url", "llm.api_key", "llm.model",
+    "asr.type", "asr.sample_rate", "asr.ws_url", "asr.ws_verify_ssl",
+    "coach.pause_s", "coach.max_pending_segments", "coach.min_interval_s", "coach.llm_timeout_s",
+    "auth.jwt_expire_minutes", "auth.demo_username",
+    "session.grace_period_s",
+    "session.idle_timeout_s",
+    "session.idle_check_interval_s",
+    "session.liveness_window_s",
+    "session.max_concurrent",
+]
+
+# 敏感字段（GET 返 null，PUT 空 = 不动）。只列 ALL_B_KEYS 内的键：
+# 白名单外的键本来就不可写，列进去只会让 GET 组输出凭空多一个 null 字段。
+SENSITIVE_KEYS: frozenset[str] = frozenset({
+    "llm.api_key",
+    "system.jwt_secret",
+})
+
+# 数值 key 的类型表：写入前校验。坏值若落库，要到运行路径（登录的
+# int(jwt_expire_minutes)、断连的 float(grace_period_s)）才抛 500，全站遭殃。
+NUMERIC_KEYS: dict[str, type] = {
+    "asr.sample_rate": int,
+    "coach.max_pending_segments": int,
+    "auth.jwt_expire_minutes": int,
+    "session.max_concurrent": int,
+    "coach.pause_s": float,
+    "coach.min_interval_s": float,
+    "coach.llm_timeout_s": float,
+    "session.grace_period_s": float,
+    "session.idle_timeout_s": float,
+    "session.idle_check_interval_s": float,
+    "session.liveness_window_s": float,
+}
+
+
+def validate_value(key: str, value: str) -> None:
+    """数值 key 的写入校验：可解析且为正数，否则 ValueError（HTTP 层转 422）。"""
+    typ = NUMERIC_KEYS.get(key)
+    if typ is None:
+        return
+    try:
+        v = typ(value)
+    except ValueError:
+        raise ValueError(
+            f"{key} 须为{'正整数' if typ is int else '正数值'}：{value!r}"
+        ) from None
+    if v <= 0:
+        raise ValueError(
+            f"{key} 须为{'正整数' if typ is int else '正数值'}：{value!r}"
+        )
+
+
+# 默认值（首次 warm 时若 DB 缺则种入）
+DEFAULTS: dict[str, str] = {
+    "llm.type": "openai",
+    "llm.base_url": "",
+    "llm.api_key": "",
+    "llm.model": "qwen-plus",
+    "asr.type": "funasr_server",
+    "asr.sample_rate": "16000",
+    "asr.ws_url": "wss://localhost:10096",
+    "asr.ws_verify_ssl": "false",
+    "coach.pause_s": "5.0",
+    "coach.max_pending_segments": "8",
+    "coach.min_interval_s": "10.0",
+    "coach.llm_timeout_s": "45.0",
+    "auth.jwt_expire_minutes": "1440",
+    "auth.demo_username": "admin",
+    "session.grace_period_s": "60.0",
+    "session.idle_timeout_s": "120.0",
+    "session.idle_check_interval_s": "30.0",
+    "session.liveness_window_s": "60.0",
+    # 全局同时活跃访谈上限（= FunASR 房间容量）。suspended 不占名额。
+    "session.max_concurrent": "10",
+}
+
+
+class ConfigStore:
+    """DB 配置 KV 存储 + 内存缓存 + 失效广播单例。"""
+
+    _instance: Optional["ConfigStore"] = None
+
+    def __init__(self) -> None:
+        self._cache: dict[str, str] = {}
+        self._subscribers: weakref.WeakSet[Callable[[set[str]], None]] = weakref.WeakSet()
+
+    @classmethod
+    def instance(cls) -> "ConfigStore":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    async def warm(self) -> None:
+        """启动期一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入。"""
+        async with SessionLocal() as session:
+            existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
+            have = {row.key: row.value for row in existing.scalars().all()}
+            missing = [k for k in ALL_B_KEYS if k not in have]
+            for k in missing:
+                v = DEFAULTS[k]
+                session.add(SystemConfig(key=k, value=v))
+            if missing:
+                await session.commit()
+                logger.info("ConfigStore 种入 %d 个默认 key", len(missing))
+        # 重读完整缓存
+        await self._refresh_cache()
+
+    async def _refresh_cache(self) -> None:
+        async with SessionLocal() as session:
+            existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
+            self._cache = {row.key: row.value for row in existing.scalars().all()}
+
+    async def get(self, key: str) -> Optional[str]:
+        if key not in self._cache:
+            # cache miss → 打 DB；DB 读失败 fail-fast
+            async with SessionLocal() as session:
+                row = await session.get(SystemConfig, key)
+                if row is None:
+                    return None
+                self._cache[key] = row.value
+        return self._cache.get(key)
+
+    def get_sync(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """同步读缓存中的配置值（不查 DB）。
+
+        P3-10: 替代外部直接访问 _cache 私有属性。仅用于 warm 后、值已缓存的场景；
+        key 不在缓存返回 default（不回退 DB——保持同步契约）。
+        """
+        return self._cache.get(key, default)
+
+    async def get_group(self, prefix: str) -> dict[str, str]:
+        """返 {key: value}（敏感字段返 None 表示"别显示原值"）。"""
+        keys = [k for k in ALL_B_KEYS if k.startswith(prefix + ".")]
+        result: dict[str, str] = {}
+        for k in keys:
+            if k in SENSITIVE_KEYS:
+                result[k.split(".", 1)[1]] = None  # type: ignore[assignment]
+            else:
+                v = await self.get(k)
+                if v is not None:
+                    result[k.split(".", 1)[1]] = v
+        return result  # type: ignore[return-value]
+
+    async def get_many(self, keys: Iterable[str]) -> dict[str, Optional[str]]:
+        return {k: await self.get(k) for k in keys}
+
+    async def set(self, key: str, value: str) -> None:
+        """单条写入；更新 DB + 内存 + 广播。"""
+        if key not in ALL_B_KEYS:
+            raise ValueError(f"unknown config key: {key}")
+        validate_value(key, value)
+        async with SessionLocal() as session:
+            row = await session.get(SystemConfig, key)
+            if row is None:
+                row = SystemConfig(key=key, value=value)
+                session.add(row)
+            else:
+                row.value = value
+            await session.commit()
+        self._cache[key] = value
+        self._notify({key})
+
+    async def set_many(self, items: dict[str, str]) -> None:
+        """批量写入（事务）；敏感字段跳过空值。
+
+        用方言级 upsert（INSERT ... ON CONFLICT DO UPDATE）取代 get-then-add：
+        后者并发写同一缺失 key 会双读 None 双 add，commit 撞 PK 冲突。
+        """
+        from sqlalchemy.dialects.mysql import insert as mysql_insert
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        async with SessionLocal() as session:
+            dialect = session.bind.dialect.name if session.bind else "sqlite"
+            for key, value in items.items():
+                if key not in ALL_B_KEYS:
+                    raise ValueError(f"unknown config key: {key}")
+                validate_value(key, value)
+                # 敏感字段空值跳过
+                if key in SENSITIVE_KEYS and value == "":
+                    continue
+                now = datetime.now(timezone.utc)
+                if dialect == "mysql":
+                    stmt = mysql_insert(SystemConfig).values(
+                        key=key, value=value, updated_at=now
+                    ).on_duplicate_key_update(value=value, updated_at=now)
+                elif dialect == "postgresql":
+                    stmt = pg_insert(SystemConfig).values(
+                        key=key, value=value, updated_at=now
+                    ).on_conflict_do_update(
+                        index_elements=[SystemConfig.key],
+                        set_={"value": value, "updated_at": now})
+                else:  # sqlite
+                    stmt = sqlite_insert(SystemConfig).values(
+                        key=key, value=value, updated_at=now
+                    ).on_conflict_do_update(
+                        index_elements=[SystemConfig.key],
+                        set_={"value": value, "updated_at": now})
+                await session.execute(stmt)
+            await session.commit()
+        # 更新内存 + 广播
+        changed: set[str] = set()
+        for key, value in items.items():
+            if key in SENSITIVE_KEYS and value == "":
+                continue
+            self._cache[key] = value
+            changed.add(key)
+        self._notify(changed)
+
+    def subscribe(self, fn: Callable[[set[str]], None]) -> None:
+        """注册配置变更回调（弱引用持有）。
+
+        订阅者必须被强引用持有（模块级函数，或存活到所需生命周期的具名局部），
+        否则会被 GC 静默移除。不支持 bound method（WeakSet 无法弱引用方法对象，
+        add() 会抛 TypeError）。
+        """
+        self._subscribers.add(fn)
+
+    def invalidate(self, keys: Optional[Iterable[str]] = None) -> None:
+        """清缓存（None=全清）。手动失效（罕见）。"""
+        if keys is None:
+            self._cache.clear()
+            return
+        for k in keys:
+            self._cache.pop(k, None)
+
+    def _notify(self, changed_keys: set[str]) -> None:
+        for sub in list(self._subscribers):
+            try:
+                sub(changed_keys)
+            except Exception:  # noqa: BLE001
+                logger.exception("ConfigStore 订阅回调执行失败：%s", sub)
+
+
+# 模块级便捷函数
+def get_config_store() -> ConfigStore:
+    return ConfigStore.instance()
+
+
+async def get_llm_config() -> dict[str, str]:
+    s = get_config_store()
+    return {
+        "type": await s.get("llm.type") or "",
+        "base_url": await s.get("llm.base_url") or "",
+        "api_key": await s.get("llm.api_key") or "",
+        "model": await s.get("llm.model") or "",
+    }
+
+
+async def get_asr_config() -> dict[str, str]:
+    s = get_config_store()
+    return {
+        "type": await s.get("asr.type") or "funasr_server",
+        "sample_rate": int(await s.get("asr.sample_rate") or "16000"),
+        "ws_url": await s.get("asr.ws_url") or "",
+    }
+
+
+async def get_coach_config() -> dict[str, float | int]:
+    s = get_config_store()
+    return {
+        "pause_s": float(await s.get("coach.pause_s") or "5.0"),
+        "max_pending_segments": int(await s.get("coach.max_pending_segments") or "8"),
+        "min_interval_s": float(await s.get("coach.min_interval_s") or "10.0"),
+        "llm_timeout_s": float(await s.get("coach.llm_timeout_s") or "45.0"),
+    }
+
+
+async def get_auth_runtime_config() -> dict[str, object]:
+    s = get_config_store()
+    return {
+        "jwt_expire_minutes": int(await s.get("auth.jwt_expire_minutes") or "1440"),
+        "demo_username": await s.get("auth.demo_username") or "",
+    }
+
+
+async def get_session_runtime_config() -> dict[str, float]:
+    s = get_config_store()
+    return {
+        "grace_period_s": float(await s.get("session.grace_period_s") or "60.0"),
+        "idle_timeout_s": float(await s.get("session.idle_timeout_s") or "120.0"),
+        "idle_check_interval_s": float(await s.get("session.idle_check_interval_s") or "30.0"),
+        "liveness_window_s": float(await s.get("session.liveness_window_s") or "60.0"),
+    }
+
+
+async def get_max_concurrent() -> int:
+    """全局同时活跃访谈上限（= FunASR 房间容量）。
+
+    读 session.max_concurrent；解析失败或 <1 一律钳到 1（否则谁也开不了访谈）。
+    """
+    s = get_config_store()
+    try:
+        return max(1, int(await s.get("session.max_concurrent") or "10"))
+    except (TypeError, ValueError):
+        return 10
+

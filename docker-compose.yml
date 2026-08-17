@@ -1,0 +1,52 @@
+services:
+  # ================================================================
+  # FunASR 语音识别服务（CPU 推理）
+  # 首次启动会自动下载模型，下载完成后监听 10095 端口提供 WebSocket ASR 服务
+  # ================================================================
+  funasr:
+    image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-runtime-sdk-online-cpu-0.1.12
+    container_name: funasr_server
+    privileged: true
+    ports:
+      - "10096:10095"
+    volumes:
+      - ./funasr-runtime-resources/models:/workspace/models
+    # 使用分号隔离命令，确保 cd 和 touch 在主 shell 中按顺序生效
+    command: >
+      bash -c "cd FunASR/runtime; 
+      touch log.txt; 
+      bash run_server_2pass.sh 
+      --download-model-dir /workspace/models 
+      --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx 
+      --model-dir iic/SenseVoiceSmall-onnx  
+      --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx  
+      --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx 
+      --lm-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst 
+      --itn-dir thuduj12/fst_itn_zh 
+      --hotword /workspace/models/hotwords.txt > log.txt 2>&1 & 
+      sleep 1; 
+      tail -f log.txt"
+
+  # ================================================================
+  # 小智方糖主应用
+  # ================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xiaozhi-fde-talk:latest
+    container_name: xiaozhi-fde-talk
+    ports:
+      - "8000:8000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      SERVE_FRONTEND: "true"
+      LOG_LEVEL: INFO
+    env_file:
+      - .env
+    # app 容器以 uid 1001 运行；首次部署宿主侧需 chown -R 1001:1001 backend/data backend/logs
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+    restart: unless-stopped

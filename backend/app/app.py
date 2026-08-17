@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
 import uuid
 
 from fastapi import FastAPI
@@ -47,6 +49,8 @@ async def _lifespan_startup(app: FastAPI) -> None:
     """lifespan 启动：DB init + ConfigStore warm + JWT 密钥解析 + 清扫僵尸 + 模板加载 + idle watchdog。
 
     流式 ASR 在 listen:start 时创建连接，不再全局预加载。
+    配置类错误（如缺 APP_ADMIN_PASSWORD）由 init_db 抛 RuntimeError，
+    这里捕获后打印一行用户友好提示并 os._exit，避开 uvicorn 的 [error] Traceback 噪音。
     """
     from app.core.secret import JWTSecretResolver
     from app.persistence.bootstrap import init_db, sweep_stale_sessions
@@ -55,7 +59,13 @@ async def _lifespan_startup(app: FastAPI) -> None:
     from app.services.template.loader import load_templates
 
     settings = get_settings()
-    await init_db()
+    try:
+        await init_db()
+    except RuntimeError as e:
+        # 配置错误：stderr 单行提示 + 立即退出（不走 uvicorn [error] 链路打印 traceback）
+        # 用 os._exit 而不是 sys.exit：后者会被 asyncio 转成异常被 starlette traceback 出来
+        print(f"\n[配置错误] {e}\n", file=sys.stderr, flush=True)
+        os._exit(2)
 
     # 配置 KV 预热（含默认值种入 + 内存缓存）
     await get_config_store().warm()

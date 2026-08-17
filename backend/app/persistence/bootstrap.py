@@ -89,27 +89,22 @@ async def seed_dev_users() -> None:
     """开发演示账号种入（仅 admin；其他用户由集成测试动态创建）。
 
     注：直接读 DEFAULTS 而非 ConfigStore，因为 init_db 在 ConfigStore.warm() 之前调用。
-    P2-7: 密码不再走 ConfigStore.demo_password——admin 默认密码在无 password env 时
-    生成一次性随机口令并打到日志；prod 环境首启同样随机。改密走 /admin/auth/password。
+    P2-7: 必须显式设置 APP_ADMIN_PASSWORD env——不再生成随机密码打到日志，避免被
+    日志聚合系统收集泄露。无 env 直接抛 RuntimeError 拒启，docker/systemd 可见失败。
+    改密走 /admin/auth/password。
     """
     from app.core.settings import get_settings
 
     settings = get_settings()
     username = DEFAULTS["auth.demo_username"]
-    # password env 覆盖：dev/prod 都允许 APP_ADMIN_PASSWORD env 注入固定口令
+    # password env 覆盖：dev/prod 都必须通过 APP_ADMIN_PASSWORD env 注入固定口令
     # 走 Settings（pydantic-settings 自动读 .env + 环境变量），而不是裸 os.environ.get
     password = settings.app_admin_password or ""
     if not username:
         return
     if not password:
-        import secrets as _s
-
-        password = _s.token_urlsafe(18)
-        # 不打日志密码字面量（避免被收集到日志聚合系统泄露）；
-        # 通过另一个 endpoint /admin/auth/password 改密时用户已登录能看到当前用户名。
-        logger.warning(
-            "首启：未设 APP_ADMIN_PASSWORD env，已为 admin 随机生成一次性密码。"
-            "请通过 POST /admin/auth/password 修改。"
+        raise RuntimeError(
+            "未设置 APP_ADMIN_PASSWORD，请在 .env 或环境变量中显式配置后重启。"
         )
     async with SessionLocal() as session:
         existing = await session.execute(select(User).where(User.username == username))

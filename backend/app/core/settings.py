@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     # --- admin 启动密码 ---
     # 仅在首次启动（DB 无 admin 用户）时生效；之后改密走 /admin/auth/password。
-    # 空 = 自动生成一次性随机口令（不落日志，安全考虑）。
+    # 空 = bootstrap 拒启；非空 = 必须 ≥ 8 位、UTF-8 字节数 ≤ 72、不在弱密码表中。
     app_admin_password: str = ""
 
     # --- 部署 ---
@@ -73,6 +73,20 @@ class Settings(BaseSettings):
         """生产环境强校验（DB_URL 必须为 MySQL/PostgreSQL）。"""
         if self.env == "prod" and not self.db_url.startswith(("mysql+", "postgresql+")):
             raise ValueError("生产环境禁止使用 SQLite，必须用 MySQL/PostgreSQL")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_admin_password(self) -> "Settings":
+        """admin 启动密码强度校验：空 = 让 seed_dev_users 拒启；非空 = 强度校验。
+
+        空密码不在此处拒，让 bootstrap 抛更友好的 RuntimeError；
+        非空时必须满足 ≥ 8 位、UTF-8 字节数 ≤ 72（bcrypt 上限）、不在弱密码表中。
+        """
+        if not self.app_admin_password:
+            return self
+        # 延迟导入：避免 settings 导入期拉起 password_policy（settings 被广泛 import）
+        from app.core.password_policy import validate_password_strength
+        validate_password_strength(self.app_admin_password)
         return self
 
 

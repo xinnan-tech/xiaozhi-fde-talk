@@ -19,6 +19,7 @@ import bleach
 
 from app.adapters.llm.base import LLMError
 from app.adapters.llm.factory import get_llm
+from app.core.config_store import get_config_store
 from app.domain.session import TranscriptSegment
 from app.persistence.repositories.interview import interview_repo
 from app.persistence.repositories.report import report_repo
@@ -79,6 +80,23 @@ _REPORT_SYSTEM = """你是访谈报告撰写助手。照给定的 Markdown 骨�
 ## 其它
 - 保持标题层级与章节顺序，不要增删章节。
 - 只输出填好的 Markdown，不要加解释或代码块包裹。"""
+
+# 报告输出语种指令：默认 zh_cn 不追加（与现有报告形态一致），其他语种显式切换。
+# Bug 修：原 zh_tw 一直为空，繁體中文用戶看到的是簡體報告。
+_REPORT_LANG_INSTRUCTION: dict[str, str] = {
+    "zh_cn": "",
+    "zh_tw": "\n\n## 輸出語言\n報告正文請用繁體中文撰寫（標點用全形繁體標點）。"
+          "Markdown 結構（`#` / `-` / 列表）保持不變。",
+    "en": "\n\n## Output language\nWrite the entire report body in English. "
+          "Keep the Markdown structure (`#`/`-`/lists) as in the skeleton.",
+}
+
+
+def _report_system(output_language: str) -> str:
+    """根据 llm.output_language 拼出报告 system prompt。"""
+    return _REPORT_SYSTEM + _REPORT_LANG_INSTRUCTION.get(
+        (output_language or "zh_cn").lower(), ""
+    )
 
 # P3-9: 报告渲染为 HTML 前的白名单。strip=True 移除非白名单标签（含属性）。
 _ALLOWED_TAGS = [
@@ -165,9 +183,16 @@ def _build_user(state: SessionState, template) -> str:
 
 
 async def generate_report(state: SessionState, template) -> str:
-    """LLM 照骨架填报告 → Markdown（已消毒）。"""
+    """LLM 照骨架填报告 → Markdown（已消毒）。
+
+    llm.output_language 现读 ConfigStore：每次报告生成时读，不依赖调用方传入——
+    避免依赖陈旧缓存（管理员在 admin 页改语种后，旧 session 立即生效）。
+    """
     llm = get_llm()
-    md = await llm.chat_text(_REPORT_SYSTEM, _build_user(state, template))
+    language = (
+        get_config_store().get_sync("llm.output_language") or "zh_cn"
+    ).strip().lower() or "zh_cn"
+    md = await llm.chat_text(_report_system(language), _build_user(state, template))
     md = _fill_dangling_labels(_strip_orphan_placeholders(md.strip()))
     return sanitize_report_markdown(md)
 

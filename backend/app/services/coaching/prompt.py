@@ -45,19 +45,27 @@ def _escape_xml(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def build_system(template: Template, goal: str | None) -> str:
+def build_system(template: Template, goal: str | None, output_language: str = "zh_cn") -> str:
     playbook = (template.coaching.playbook or "").strip()
     # 用户 goal 用专属标签隔离 + 转义，防 prompt 注入
     goal_block = (
         f"\n<user_goal>\n{_escape_xml(goal.strip())}\n</user_goal>"
         if goal and goal.strip() else ""
     )
-    return (
+    base = (
         f"你是一位资深访谈教练。{playbook}{goal_block}\n\n"
         "我会给你：整段对话原文、当前问题清单、本次被跳过的 id（均以 <user_*> 标签提供）。\n"
         "请输出【更新后的完整清单】。\n\n"
         f"{_OUTPUT_RULE}"
     )
+    return base + _LANG_DIRECTIVE.get((output_language or "zh_cn").lower(), "")
+
+
+_LANG_DIRECTIVE: dict[str, str] = {
+    # zh_cn 是默认 → 无需追加指令；其他语种显式切换。
+    "zh_tw": "\n\n## 輸出語言\n請用繁體中文撰寫所有 text、reason 與新條目。標點用全形繁體標點。",
+    "en": "\n\n## Output language\nWrite all `text` and `reason` fields in English. Keep the JSON shape exactly as specified.",
+}
 
 
 def build_user(state: SessionState) -> str:
@@ -96,7 +104,7 @@ _FIRST_OUTPUT_RULE = """只输出 JSON 对象，形如：
 """ + _STYLE_RULE_BASE
 
 
-def build_first_batch(template: Template, session: Session) -> tuple[str, str]:
+def build_first_batch(template: Template, session: Session, output_language: str = "zh_cn") -> tuple[str, str]:
     """首评 prompt：访谈尚未开始，据 base_info/goal + 模板基线生成第一批问题。
 
     输出契约与重算同形（validate_llm_output 直接可用），区别仅在：无对话依据、
@@ -119,6 +127,7 @@ def build_first_batch(template: Template, session: Session) -> tuple[str, str]:
         "请输出【开场该问的第一批问题清单】。\n\n"
         f"{_FIRST_OUTPUT_RULE}"
     )
+    system += _LANG_DIRECTIVE.get((output_language or "zh_cn").lower(), "")
     user = (
         f"<user_base_info>\n{_escape_xml(base)}\n</user_base_info>\n\n"
         f"<user_baseline>\n{_escape_xml(baseline)}\n</user_baseline>\n\n"

@@ -1328,9 +1328,25 @@ const CONFIG_SENSITIVE = new Set(['api_key', 'demo_password']);
 const CONFIG_NUMERIC = new Set(['sample_rate', 'jwt_expire_minutes', 'max_concurrent', 'max_pending_segments']);
 const CONFIG_FLOAT = new Set(['pause_s', 'min_interval_s', 'llm_timeout_s', 'grace_period_s']);
 const CONFIG_BOOL = new Set(['ws_verify_ssl']);
+// 字段名（去掉分组前缀）→ 渲染为下拉框
+const CONFIG_SELECT = new Set(['language']);
+// 完整 key（group.field）→ 选项列表（值）。显示标签在 renderConfigGroup 里查表。
+const CONFIG_SELECT_OPTIONS = {
+  'asr.language': [
+    { value: 'zh', label: '普通话' },
+    { value: 'yue', label: '粤语' },
+    { value: 'en', label: '英语' },
+  ],
+  'llm.output_language': [
+    { value: 'zh_cn', label: '简体中文' },
+    { value: 'zh_tw', label: '繁体中文' },
+    { value: 'en', label: '英语' },
+  ],
+};
 
 function configInputType(key) {
   if (CONFIG_BOOL.has(key)) return 'checkbox';
+  if (CONFIG_SELECT.has(key)) return 'select';
   if (CONFIG_NUMERIC.has(key)) return 'number';
   if (CONFIG_FLOAT.has(key)) return 'number';
   return 'text';
@@ -1378,6 +1394,17 @@ function renderConfigGroup(group, fields) {
         <input id="cfg_${group}_${k}" type="number" step="${step}" value="${v ?? ''}">
       </div>`;
     }
+    if (inputType === 'select') {
+      const fullKey = group + '.' + k;
+      const options = CONFIG_SELECT_OPTIONS[fullKey] || [];
+      const optsHtml = options.map(o =>
+        `<option value="${esc(o.value)}"${(v === o.value) ? ' selected' : ''}>${esc(o.label)}</option>`
+      ).join('');
+      return `<div class="cfg-row">
+        <label>${k}</label>
+        <select id="cfg_${group}_${k}" style="flex:1; min-width:200px;">${optsHtml}</select>
+      </div>`;
+    }
     return `<div class="cfg-row">
       <label>${k}</label>
       <input id="cfg_${group}_${k}" type="text" value="${(v ?? '').toString().replace(/"/g, '&quot;')}">
@@ -1397,12 +1424,12 @@ function renderConfigGroup(group, fields) {
 
 async function saveConfigGroup(group) {
   const fields = {};
-  document.querySelectorAll(`input[id^="cfg_${group}_"]`).forEach(input => {
-    const key = input.id.replace(`cfg_${group}_`, '');
-    if (input.type === 'checkbox') {
-      fields[key] = input.checked ? 'true' : 'false';
+  document.querySelectorAll(`input[id^="cfg_${group}_"], select[id^="cfg_${group}_"]`).forEach(el => {
+    const key = el.id.replace(`cfg_${group}_`, '');
+    if (el.type === 'checkbox') {
+      fields[key] = el.checked ? 'true' : 'false';
     } else {
-      fields[key] = input.value;
+      fields[key] = el.value;
     }
   });
   const status = document.getElementById(`status_${group}`);

@@ -1,4 +1,4 @@
-"""asr.language（zh_cn/zh_tw/en）→ FunASR init_msg 合法值映射。"""
+"""asr.language（zh/yue/en）→ FunASR init_msg 合法值映射。"""
 from unittest.mock import MagicMock, patch
 
 
@@ -17,17 +17,17 @@ def _make_provider(config_value: str):
         return FunASRServerProvider()
 
 
-def test_zh_cn_maps_to_zh():
-    p = _make_provider("zh_cn")
+def test_zh_passes_through():
+    p = _make_provider("zh")
     assert p._funasr_language == "zh"
 
 
-def test_zh_tw_maps_to_zh():
-    p = _make_provider("zh_tw")
-    assert p._funasr_language == "zh"
+def test_yue_passes_through():
+    p = _make_provider("yue")
+    assert p._funasr_language == "yue"
 
 
-def test_en_passthrough():
+def test_en_passes_through():
     p = _make_provider("en")
     assert p._funasr_language == "en"
 
@@ -37,9 +37,8 @@ def test_empty_string_omits_language():
     assert p._funasr_language == ""
 
 
-def test_unsupported_value_omits_language():
-    """Defensive: 不在映射表的字符串（不一定是 FunASR 不合法）→ 回退到「不传」
-    而非抛——init_msg 整段崩掉会让 ASR 整场不出字。FunASR 自身合法的 ja/ko 等
-    不在我们的 enum，运行时遇到也应静默走自动检测。"""
-    p = _make_provider("xx")  # 完全乱字符——既不在我们 enum，也不在 FunASR 合法集
+def test_fun_asr_legal_but_not_in_our_enum_falls_back_to_auto():
+    """Defensive: FunASR-legal 但不在我们 enum 的值（如 ja, ko）→ 回退到「不传」
+    而非抛——init_msg 整段崩掉会让 ASR 整场不出字。"""
+    p = _make_provider("ja")
     assert p._funasr_language == ""

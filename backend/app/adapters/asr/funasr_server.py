@@ -37,18 +37,19 @@ _STRIP_RE = re.compile(r"<\|[^|]*\|>")
 # 1000ms 给 VAD 留足识别窗口（部分服务 VAD 最短静音阈值 ≥600ms）。
 _TAIL_SILENCE_MS = 1000
 
-# Config-store `asr.language` (zh_cn/zh_tw/en) → FunASR init_msg 合法值。
-# FunASR language 字段不接受 locale 粒度；中文两种统一映射 zh（SenseVoice 简体模型对繁体识别足够）。
-# 未识别值 / 空串 → 不传（FunASR 自动检测）。
+# FunASR `language` 字段合法值：zh | en | ja | ko | yue | auto。
+# Admin UI 的 asr.language 下拉是 {zh, yue, en}（与 FunASR 合法集对齐）。
+# 我们的 ENUM_KEYS 已经把选项限定到这三个 —— 映射层在 adapter 这里是 identity +
+# 防御性 normalize（万一 DB 里漏进 ja/ko 等也能静默回退自动检测）。
 _FUNASR_LANG_MAP: dict[str, str] = {
-    "zh_cn": "zh",
-    "zh_tw": "zh",
+    "zh": "zh",
+    "yue": "yue",
     "en": "en",
 }
 
 
 def _to_funasr_language(config_value: str | None) -> str:
-    """asr.language 配置值 → FunASR init_msg.language；未识别回退空串。"""
+    """asr.language 配置值 → FunASR init_msg.language；未识别回退空串（FunASR 自动检测）。"""
     return _FUNASR_LANG_MAP.get((config_value or "").strip().lower(), "")
 
 

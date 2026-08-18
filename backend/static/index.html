@@ -1083,7 +1083,9 @@ function drawCoaching() {
   const itemHtml = (it, next) => {
     const cls = `item${it === next ? " next" : ""}`;
     if (it.status === "done") {
-      return `<div class="${cls}" data-id="${esc(it.id)}">${esc(it.reason || it.text)}</div>`;
+      return `<div class="${cls}" data-id="${esc(it.id)}">${esc(it.text)}`
+        + (it.reason ? `<span class="hint">${esc(it.reason)}</span>` : "")
+        + `</div>`;
     }
     return `<div class="${cls}" data-id="${esc(it.id)}">${esc(it.text)}`
       + (it.reason ? `<span class="hint">${esc(it.reason)}</span>` : "")

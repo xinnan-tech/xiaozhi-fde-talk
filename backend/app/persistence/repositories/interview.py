@@ -260,39 +260,41 @@ class InterviewRepository:
             return int(res.scalar() or 0)
 
     async def count_assist_discovery_for_user_auto(self, user_id: str) -> int:
-        """降级口径：所有 ended 会话 coaching_items 中 status == 'new' 的累计条数。
-        TODO(product): 待产品确认口径（是否等于「AI 实时新增问题数」）。
+        """AI 共发现问题数 = 用户名下所有会话的 coaching_items 总条数。
+
+        含所有 session 状态（created/setting_up/in_progress/suspended/ended/extracting/done），
+        含所有 item status（todo/new/done）。coaching_items 由「模板必问占位（must_ask seed）」
+        +「AI 引擎实时新增」两部分组成；按用户口径「AI 一共发现了多少个问题」接受当前实现把
+        两者都计入，不区分来源。
         """
         from app.persistence.db import SessionLocal
         async with SessionLocal() as db:
             res = await db.execute(
-                select(InterviewRecord).where(
-                    InterviewRecord.user_id == user_id,
-                    InterviewRecord.status == SessionStatus.ENDED.value,
-                )
+                select(InterviewRecord).where(InterviewRecord.user_id == user_id)
+            )
+            recs = list(res.scalars())
+        total = 0
+        for rec in recs:
+            total += len(rec.coaching_items or [])
+        return total
+
+    async def count_interview_coverage_for_user_auto(self, user_id: str) -> int:
+        """访谈命中问题数 = 用户名下所有会话的 coaching_items 中 status == 'done' 的条数。
+
+        含所有 session 状态；仅统计 status == 'done' 的 item（已命中/已覆盖）。
+        """
+        from app.persistence.db import SessionLocal
+        async with SessionLocal() as db:
+            res = await db.execute(
+                select(InterviewRecord).where(InterviewRecord.user_id == user_id)
             )
             recs = list(res.scalars())
         total = 0
         for rec in recs:
             for item in (rec.coaching_items or []):
-                if item.get("status") == "new":
+                if item.get("status") == "done":
                     total += 1
         return total
-
-    async def count_interview_coverage_for_user_auto(self, user_id: str) -> int:
-        """降级口径：status == 'ended' 且 transcript 非空的会话数。
-        TODO(product): 待产品确认口径（是否等于「存在覆盖索引的访谈数」）。
-        """
-        from app.persistence.db import SessionLocal
-        async with SessionLocal() as db:
-            res = await db.execute(
-                select(InterviewRecord).where(
-                    InterviewRecord.user_id == user_id,
-                    InterviewRecord.status == SessionStatus.ENDED.value,
-                )
-            )
-            recs = list(res.scalars())
-        return sum(1 for rec in recs if rec.transcript)
 
 
 # 单例（无状态，安全共享）

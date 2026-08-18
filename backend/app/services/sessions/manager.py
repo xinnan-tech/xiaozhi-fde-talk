@@ -90,8 +90,9 @@ class SessionManager:
 
         - in_progress: setting_up + in_progress 的会话数
         - week_finish: 当前 ISO 周（UTC 周一起算）ended 的会话数
-        - assist_discovery: 降级口径（见 repo docstring；TODO(product) 待产品确认）
-        - interview_coverage: 降级口径（见 repo docstring；TODO(product) 待产品确认）
+        - assist_discovery: 用户名下所有 coaching_items 总条数（AI 共发现问题数）
+        - interview_coverage: 用户名下所有 coaching_items 中 status == 'done' 的条数（访谈命中问题数）
+        关系：interview_coverage ⊆ assist_discovery（已命中是已发现的子集；二者非互斥）。
         """
         now_utc = datetime.now(timezone.utc)
         week_start = now_utc - timedelta(days=now_utc.weekday())
@@ -99,9 +100,7 @@ class SessionManager:
 
         in_progress = await interview_repo.count_in_progress_for_user_auto(user_id)
         week_finish = await interview_repo.count_ended_in_week_for_user_auto(user_id, week_start)
-        # TODO(product): 待产品确认口径（assist_discovery 降级口径，见 repo）
         assist_discovery = await interview_repo.count_assist_discovery_for_user_auto(user_id)
-        # TODO(product): 待产品确认口径（interview_coverage 降级口径，见 repo）
         interview_coverage = await interview_repo.count_interview_coverage_for_user_auto(user_id)
 
         return {

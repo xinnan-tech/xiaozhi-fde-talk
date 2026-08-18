@@ -3,11 +3,10 @@
 口径：
   - in_progress = status ∈ {setting_up, in_progress} 的会话数（用户的）
   - week_finish = 当前 ISO 周（UTC）ended 的会话数（用户的）
-  - assist_discovery = 所有 ended 会话 coaching_items 中 status == "new" 的累计条数（降级）
-  - interview_coverage = status == "ended" 且 transcript 非空的会话数（降级）
+  - assist_discovery = 用户名下所有 coaching_items 总条数（AI 共发现问题数）
+  - interview_coverage = 用户名下所有 coaching_items 中 status == "done" 的条数（访谈命中问题数）
 
-asssist_discovery / interview_coverage 标注 `# TODO(product): 待产品确认口径`，
-均处于降级口径；in_progress 不含 suspended（suspended 归入「进行中」tab 而非统计卡）。
+in_progress 不含 suspended（suspended 归入「进行中」tab 而非统计卡）。
 """
 from __future__ import annotations
 
@@ -45,7 +44,7 @@ async def test_statistics_for_user_aggregates_four_numbers(mem_db):
 
         # in_progress (count=1)
         s1 = Session(id="s-in", template_id="pm-research", user_id="u", status=SessionStatus.IN_PROGRESS)
-        # ended this week, transcript non-empty, with new items (count in week_finish + interview_coverage + assist_discovery)
+        # ended this week, transcript non-empty, with done + new items (count in week_finish + interview_coverage + assist_discovery)
         s2 = Session(id="s-end-1", template_id="pm-research", user_id="u", status=SessionStatus.ENDED)
         # ended this week, transcript empty (count only in week_finish)
         s3 = Session(id="s-end-2", template_id="pm-research", user_id="u", status=SessionStatus.ENDED)
@@ -55,14 +54,20 @@ async def test_statistics_for_user_aggregates_four_numbers(mem_db):
         now = datetime.now(timezone.utc)
 
         st1 = SessionState.initial(s1, tpl)
+        st1.items = []  # 清空模板 must_ask seed（统计卡测试不依赖模板）
         st2 = SessionState.initial(s2, tpl)
         st2.session.ended_at = now
         st2.transcript = [TranscriptSegment(seg_id="sg1", start_ms=0, text="hi", final=True)]
-        st2.items = [CoachingItem(id="i1", text="t", status="new")]
+        st2.items = [
+            CoachingItem(id="i1", text="已命中", status="done"),
+            CoachingItem(id="i2", text="新发现", status="new"),
+        ]
         st3 = SessionState.initial(s3, tpl)
+        st3.items = []  # 清空模板 must_ask seed
         st3.session.ended_at = now
         st3.transcript = []
         st4 = SessionState.initial(s4, tpl)
+        st4.items = []  # 清空模板 must_ask seed
 
         for st in (st1, st2, st3, st4):
             await interview_repo.save_state_auto(st)
@@ -71,7 +76,8 @@ async def test_statistics_for_user_aggregates_four_numbers(mem_db):
 
         assert stats["in_progress"] == 1
         assert stats["week_finish"] >= 2  # depends on timezone; use >= to be robust
-        assert stats["interview_coverage"] >= 1
-        assert stats["assist_discovery"] >= 1
+        # 真口径：st1/st3/st4 已清空模板 must_ask seed；仅 st2 有 2 个 items（1 done + 1 new）
+        assert stats["assist_discovery"] == 2  # 仅 st2 贡献
+        assert stats["interview_coverage"] == 1  # s2 1 个 done
     finally:
         await engine.dispose()

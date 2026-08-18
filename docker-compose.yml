@@ -28,25 +28,5 @@ services:
       tail -f log.txt"
 
   # ================================================================
-  # 小智方糖主应用
+  # TODO: 小智方糖主应用
   # ================================================================
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: xiaozhi-fde-talk:latest
-    container_name: xiaozhi-fde-talk
-    ports:
-      - "8000:8000"
-    environment:
-      HOST: 0.0.0.0
-      PORT: 8000
-      SERVE_FRONTEND: "true"
-      LOG_LEVEL: INFO
-    env_file:
-      - .env
-    # app 容器以 uid 1001 运行；首次部署宿主侧需 chown -R 1001:1001 backend/data backend/logs
-    volumes:
-      - ./backend/data:/app/data
-      - ./backend/logs:/app/logs
-    restart: unless-stopped

@@ -23,30 +23,7 @@
 
 ## 🚀 快速开始
 
-### 方式一：Docker Compose（推荐，一键启动全部服务）
-
-`docker-compose.yml` 包含两个服务：**FunASR 语音识别** + **小智方糖主应用**，一键启动：
-
-```bash
-git clone https://gitee.com/xin-nan/xiaozhi-fde-talk.git
-cd xiaozhi-fde-talk
-
-# 复制环境变量配置（必须配置APP_ADMIN_PASSWORD，否则服务拒启）
-cp backend/.env.example .env
-
-# 启动全部服务（首次启动会下载 ASR 模型，约需 5-10 分钟）
-docker compose up -d
-
-# 查看 FunASR 模型下载进度
-docker compose logs -f funasr
-```
-
-模型下载完成后访问 http://localhost:8000 ：
-
-- 登录账号 `admin`，密码为 `.env` 中的 `APP_ADMIN_PASSWORD`（**必须显式设置**，否则服务拒启；密码要求 ≥ 8 位、UTF-8 字节数 ≤ 72、不能命中 `backend/app/core/password_policy.py` 内置的弱密码黑名单）
-- app 容器经 compose 内网访问 FunASR：登录后到「后端配置」把 ASR 地址改为 `wss://funasr:10095`
-
-### 方式二：本地开发
+### 方式一：本地开发
 
 **1. 启动 ASR 服务（FunASR Docker）**
 
@@ -72,8 +49,4 @@ python main.py
 ```
 
 访谈工作台页面由后端直接托管，浏览器打开 http://localhost:8000 即用，无需单独启动前端。
-
-> 💡 **运行时配置**：LLM/ASR/辅导/会话等运行期可调项，启动后访问 http://localhost:8000/ → 登录 → 切到「后端配置」tab 即可修改，保存即生效。敏感字段（API_KEY 等）显示为掩码，留空 = 保留原值。
-
-***
 

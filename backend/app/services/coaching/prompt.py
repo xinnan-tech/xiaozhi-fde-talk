@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from app.domain.session import Session
+from app.domain.session import Session, TranscriptSegment
 from app.domain.template import Template
 from app.services.sessions.state import SessionState
 
@@ -23,7 +23,7 @@ _STYLE_RULE = _STYLE_RULE_BASE + """
 
 _OUTPUT_RULE = """只输出 JSON 对象，形如：
 {"items": [
-  {"id": "pain", "text": "...", "status": "todo|done|new", "reason": "...", "covered_segments": ["s3"]}
+  {"id": "pain", "text": "...", "status": "todo|done|new", "reason": "...", "covered_segments": ["s3"], "corrected_segments": {"s3": "..."}}
 ]}
 规则：
 - status 三态：done=已在对话里被回答/覆盖；todo=还没覆盖；new=对话里新冒出、此刻必须问清的点。
@@ -33,6 +33,10 @@ _OUTPUT_RULE = """只输出 JSON 对象，形如：
 - 主动从对话里发现新的必问点（status=new），别只打勾覆盖；但每次重算 new 最多 2 条，挑最要紧的。
 - items 按建议的发问顺序排列，最该先问的排最前。
 - done 必须给 reason（≤15 字结论）。
+- 已覆盖的对话原文里若有 ASR 错字/漏字，给出你的纠正版本。
+  字段 corrected_segments 形态：{"seg_id": "纠正后文本"}。**仅当与原 text 实质不同时填**，
+  没纠正就省略。理由写在 reason 里（≤15 字）。**禁止**改写原文意思，只修字词。
+- done 才允许填 corrected_segments；非 done 留空对象 {}。
 """ + _STYLE_RULE
 
 
@@ -57,8 +61,13 @@ def build_system(template: Template, goal: str | None) -> str:
 
 
 def build_user(state: SessionState) -> str:
+    # 优先用 corrected_text：上次重算 LLM 给的纠错必须透传到下一次 LLM，
+    # 否则下次重算 LLM 又把同一段当未答/继续追问，纠错就白做了。
+    def _seg_text(s: TranscriptSegment) -> str:
+        return s.corrected_text.strip() or s.text
+
     transcript = (
-        "\n".join(f"[{s.seg_id}] {s.text}" for s in state.transcript)
+        "\n".join(f"[{s.seg_id}] {_seg_text(s)}" for s in state.transcript)
         or "（暂无对话）"
     )
     current = json.dumps(
@@ -77,7 +86,7 @@ def build_user(state: SessionState) -> str:
 
 _FIRST_OUTPUT_RULE = """只输出 JSON 对象，形如：
 {"items": [
-  {"id": "objective", "text": "...", "status": "todo", "reason": "", "covered_segments": []}
+  {"id": "objective", "text": "...", "status": "todo", "reason": "", "covered_segments": [], "corrected_segments": {}}
 ]}
 规则：
 - 结合项目背景、受访者与目标定制每条问题的措辞，贴合这次访谈的具体对象，不要照抄基线原文；

@@ -31,6 +31,7 @@ class CoachingItem(BaseModel):
     reason: str = ""
     priority: int = 99
     desc: str = ""
+    corrected_segments: dict[str, str] = Field(default_factory=dict)
 
 
 class CoachingUpdate(BaseModel):
@@ -50,6 +51,7 @@ class LLMItem(BaseModel):
     status: ItemStatus                           # LLM 只应输出 todo/done/new
     reason: str = ""
     covered_segments: list[str] = Field(default_factory=list)
+    corrected_segments: dict[str, str] = Field(default_factory=dict)
 
 
 class FactItem(BaseModel):

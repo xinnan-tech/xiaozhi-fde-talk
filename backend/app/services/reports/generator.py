@@ -39,7 +39,7 @@ def _transcript_signature(transcript: list[TranscriptSegment]) -> str:
     transcript 任何段变化（新增/修改/删除）→ 签名变 → 报告缓存失效 → 重生。
     """
     payload = json.dumps(
-        [{"seg_id": s.seg_id, "text": s.text} for s in transcript],
+        [{"seg_id": s.seg_id, "text": s.text, "corrected_text": s.corrected_text} for s in transcript],
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -149,9 +149,10 @@ def sanitize_report_markdown(md: str) -> str:
 
 
 def _build_user(state: SessionState, template) -> str:
-    transcript = (
-        "\n".join(f"[{s.seg_id}] {s.text}" for s in state.transcript) or "（无对话）"
-    )
+    def _seg_text(s: TranscriptSegment) -> str:
+        return s.corrected_text.strip() or s.text
+
+    transcript = "\n".join(f"[{s.seg_id}] {_seg_text(s)}" for s in state.transcript) or "（无对话）"
     bi = state.session.base_info or {}
     doc = _prefill_session_placeholders(template.report.doc, state)
     return (

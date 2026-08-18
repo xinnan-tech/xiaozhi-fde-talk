@@ -1083,8 +1083,10 @@ function drawCoaching() {
   const itemHtml = (it, next) => {
     const cls = `item${it === next ? " next" : ""}`;
     if (it.status === "done") {
+      const corrected = it.corrected_segments && Object.keys(it.corrected_segments).length;
       return `<div class="${cls}" data-id="${esc(it.id)}">${esc(it.text)}`
         + (it.reason ? `<span class="hint">${esc(it.reason)}</span>` : "")
+        + (corrected ? `<span class="hint" style="color:#0ea5e9;">已纠正 ${Object.keys(it.corrected_segments).length} 处 ASR 错字</span>` : "")
         + `</div>`;
     }
     return `<div class="${cls}" data-id="${esc(it.id)}">${esc(it.text)}`

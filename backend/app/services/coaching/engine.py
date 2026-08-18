@@ -381,6 +381,21 @@ class CoachingEngine:
             text = item.text.strip() if item.text else ""
             if not text:
                 continue
+
+            # 1) 先算 corrections —— 在 CoachingItem(...) 构造之前
+            corrections = getattr(item, "corrected_segments", None) or {}
+            corrections = corrections if (corrections and status == ItemStatus.DONE) else {}
+
+            # 2) 写回 transcript 段的 corrected_text。
+            # 一个段可能支撑多条 done；后写覆盖前写——LLM 不该对同一段给出冲突纠正。
+            if corrections:
+                seg_by_id = {s.seg_id: s for s in self.state.transcript}
+                for seg_id, corrected in corrections.items():
+                    seg = seg_by_id.get(seg_id)
+                    if seg is not None and corrected and corrected.strip():
+                        seg.corrected_text = corrected.strip()
+
+            # 3) 构造 CoachingItem 时把 corrected_segments 传出去 —— 前端 done 卡片用它显「已纠错 N 处」徽标
             result.append(CoachingItem(
                 id=item_id,
                 text=text,
@@ -388,6 +403,7 @@ class CoachingEngine:
                 reason=item.reason.strip() if item.reason else "",
                 priority=priority,
                 desc=desc,
+                corrected_segments=corrections,
             ))
             if status == ItemStatus.DONE and item.covered_segments:
                 self.state.coverage[item_id] = list(item.covered_segments)

@@ -33,6 +33,19 @@ def validate_llm_item(raw: Any) -> LLMItem | None:
     if status != ItemStatus.DONE:
         covered = []
 
+    # corrected_segments：仅 done 保留；非 done 一律清空（与 covered_segments 对齐）。
+    # 不是 dict 或 key 不是 str / value 不是 str 的项一律丢掉，避免脏数据进 engine。
+    raw_corr = raw.get("corrected_segments") or {}
+    corrections: dict[str, str] = {}
+    if isinstance(raw_corr, dict) and status == ItemStatus.DONE:
+        for seg_id, text in raw_corr.items():
+            if not isinstance(seg_id, str) or not isinstance(text, str):
+                continue
+            t = text.strip()
+            if not t:
+                continue
+            corrections[seg_id] = t
+
     text = str(raw.get("text", "")).strip()
     if not text:
         return None
@@ -43,6 +56,7 @@ def validate_llm_item(raw: Any) -> LLMItem | None:
         status=status,
         reason=str(raw.get("reason", "")).strip(),
         covered_segments=covered,
+        corrected_segments=corrections,
     )
 
 

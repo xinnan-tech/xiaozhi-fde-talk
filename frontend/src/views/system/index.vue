@@ -602,7 +602,7 @@ watch(
     justify-content: space-between;
     gap: 16px;
     flex-shrink: 0;
-    padding: 0 16px 20px;
+    padding: 8px 16px 20px;
   }
 
   &-body {

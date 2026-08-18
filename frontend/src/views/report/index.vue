@@ -246,7 +246,7 @@ const questions = ref<Question[]>([
   gap: 14px;
   width: 100%;
   height: calc(100vh - 18px);
-  padding: 30px 16px 6px;
+  padding: 38px 16px 6px;
   margin: 0 !important;
   color: #15213a;
   overflow: hidden;

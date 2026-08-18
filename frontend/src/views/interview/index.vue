@@ -715,7 +715,7 @@ onMounted(() => {
 <style lang="scss" scoped>
 .interview-page {
   min-height: 100vh;
-  padding: 30px 16px 0;
+  padding: 38px 16px 0;
   background: url("@/assets/images/bg.png") no-repeat;
   background-size: cover;
   overflow: hidden;
@@ -726,8 +726,8 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     width: 100%;
-    height: calc(100vh - 48px);
-    min-height: calc(100vh - 48px);
+    height: calc(100vh - 56px);
+    min-height: calc(100vh - 56px);
   }
 
   .page-header {

@@ -502,7 +502,7 @@ watch(
     gap: 16px;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16px 20px;
+    padding: 8px 16px 20px;
     background: transparent;
   }
 

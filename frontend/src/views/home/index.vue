@@ -10,7 +10,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import {
   type InterviewItem,
   type InterviewListType,
-  getInterviewStatistics,
+  getStatisticsApi,
   getInterviewsApi
 } from "@/api/interview";
 
@@ -55,7 +55,7 @@ const interviewStatusLabels: Record<string, string> = {
 };
 const statusList = ref([
   {
-    key: "inProgress",
+    key: "in_progress",
     title: "进行中",
     count: 0,
     unit: "个访谈",
@@ -64,7 +64,7 @@ const statusList = ref([
     icon: chatbotIcon
   },
   {
-    key: "weekFinish",
+    key: "week_finish",
     title: "本周完成",
     count: 0,
     unit: "个访谈",
@@ -73,7 +73,7 @@ const statusList = ref([
     icon: checkIcon
   },
   {
-    key: "assistDiscovery",
+    key: "assist_discovery",
     title: "辅助发现",
     count: 0,
     unit: "个问题",
@@ -82,7 +82,7 @@ const statusList = ref([
     icon: bellIcon
   },
   {
-    key: "interviewCoverage",
+    key: "interview_coverage",
     title: "访谈覆盖",
     count: 0,
     unit: "个访谈",
@@ -137,8 +137,32 @@ const openCreateDialog = () => {
 const openInterviewPage = (item: (typeof interviewList.value)[number]) => {
   router.push({
     path: item.status !== "ended" ? "/interview" : "/report",
-    query: { title: item.base_info.title }
+    query: { title: item.title }
   });
+};
+
+/** 格式化最近时间 */
+const formatRecentTime = (value: string | null) => {
+  if (!value) return "--";
+
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return "--";
+
+  const diff = Math.max(0, Date.now() - timestamp);
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diff < minute) return "刚刚";
+  if (diff < hour) return `${Math.floor(diff / minute)}分钟前`;
+  if (diff < day) return `${Math.floor(diff / hour)}小时前`;
+  if (diff < 30 * day) return `${Math.floor(diff / day)}天前`;
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric"
+  }).format(timestamp);
 };
 
 const clickUserAvatar = async () => {
@@ -165,14 +189,14 @@ const logOut = () => {
   interviewList.value = [];
 };
 
+/** 获取访谈统计 */
 const getStatistics = async () => {
   statisticsLoading.value = true;
   try {
-    const res = await getInterviewStatistics();
-    const statistics = (res?.data ?? res) as Partial<Record<string, number>>;
+    const statistics = await getStatisticsApi();
     if (!statistics) return;
     statusList.value.forEach(item => {
-      if (statistics[item.key] !== undefined) {
+      if (statistics[item.key]) {
         item.count = statistics[item.key];
       }
     });
@@ -185,6 +209,7 @@ const getStatistics = async () => {
   }
 };
 
+/** 获取访谈列表 */
 const getInterviewList = async () => {
   listLoading.value = true;
   try {
@@ -207,7 +232,7 @@ watch(
       logOut();
       return;
     }
-    await Promise.all([getInterviewList()]);
+    await Promise.all([getStatistics(), getInterviewList()]);
   },
   { immediate: true }
 );
@@ -402,7 +427,7 @@ watch(
                   </div>
                   <div class="column-row">
                     <span class="row-value">{{
-                      item.base_info.interviewee
+                      item.interviewee || "--"
                     }}</span>
                   </div>
                 </div>
@@ -411,7 +436,7 @@ watch(
                     <span class="row-label">类型</span>
                   </div>
                   <div class="column-row">
-                    <span class="row-value">--</span>
+                    <span class="row-value">{{ item.type || "--" }}</span>
                   </div>
                 </div>
                 <div class="card-column">
@@ -419,7 +444,9 @@ watch(
                     <span class="row-label">最近访谈</span>
                   </div>
                   <div class="column-row">
-                    <span class="row-value">--</span>
+                    <span class="row-value">{{
+                      formatRecentTime(item.recent_time)
+                    }}</span>
                   </div>
                 </div>
               </div>
@@ -431,7 +458,7 @@ watch(
                       class="pill-icon text-[#409eff]"
                     />
                     <span class="pill-text">待访谈</span>
-                    <span class="pill-count">0</span>
+                    <span class="pill-count">{{ item.pending_count }}</span>
                   </div>
                   <div class="pill-column">
                     <component
@@ -439,7 +466,7 @@ watch(
                       class="pill-icon text-[#52c41a]"
                     />
                     <span class="pill-text">已覆盖</span>
-                    <span class="pill-count">0</span>
+                    <span class="pill-count">{{ item.covered_count }}</span>
                   </div>
                   <div class="pill-column">
                     <component
@@ -447,7 +474,7 @@ watch(
                       class="pill-icon text-[#409eff]"
                     />
                     <span class="pill-text">已提问</span>
-                    <span class="pill-count">0</span>
+                    <span class="pill-count">{{ item.asked_count }}</span>
                   </div>
                 </div>
               </div>

@@ -20,6 +20,7 @@ from structlog.contextvars import bind_contextvars
 from app.core.exceptions import ASRProviderError, AuthError, IllegalTransitionError
 from app.domain.auth import CurrentUser
 from app.core.config_store import get_session_runtime_config
+from app.core.constants import WsMsgType
 from app.core.policies import get_policy
 from app.domain.session import SessionStatus
 from app.services.sessions.manager import ConcurrentLimitError, manager
@@ -246,6 +247,11 @@ class WSHandler:
             await self.runtime.skip(msg.get("id"))
         elif t == "coaching.ignore":
             await self.runtime.ignore(msg.get("id"))
+        elif t == WsMsgType.SESSION_TOUCH:
+            # 纯 keepalive：只重置 manager._last_activity_at，不碰 ASR/引擎/管线。
+            # 用户主动暂停过麦时发 listen:start 会重启录制管线——专门一个无副作用帧
+            # 让 keepAlive 按钮安全。
+            manager.touch(self.session_id)
         elif t == "hello":
             pass
         else:

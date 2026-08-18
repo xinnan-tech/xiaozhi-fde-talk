@@ -12,6 +12,7 @@ class WsMsgType:
     LISTEN = "listen"
     COACHING_SKIP = "coaching.skip"
     COACHING_IGNORE = "coaching.ignore"
+    SESSION_TOUCH = "session.touch"
 
 
 class WsEventType:

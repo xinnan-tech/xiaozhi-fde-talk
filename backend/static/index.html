@@ -148,6 +148,11 @@
       </div>
 
       <div id="status">未连接</div>
+      <div id="idleWarning" style="display:none; margin-top:8px; padding:10px 12px; border:1px solid #f59e0b; border-radius:6px; background:#fffbeb; color:#92400e; font-size:14px;">
+        <span id="idleWarningMsg"></span>
+        <button class="outline" style="margin-left:10px;" onclick="keepAlive()">继续访谈</button>
+        <button class="gray" style="margin-left:6px;" onclick="dismissIdleWarning()">稍后</button>
+      </div>
 
       <div class="cols">
         <div>
@@ -783,6 +788,7 @@ function connectSession(sessionId, { openMicOnHello = true, isReconnect = false 
         document.getElementById("btnEnd").disabled = true;
         document.getElementById("btnReport").disabled = false;
         setStatus("该访谈已结束（只读）。返回列表可查看报告。");
+        dismissIdleWarning();
       } else if (msg.type === "session.suspended") {
         // 访谈因长时间无活动被服务端挂起（可继续）：停麦停重连，回到可恢复态
         console.log(tag, "← session.suspended @", diagTs());
@@ -793,6 +799,7 @@ function connectSession(sessionId, { openMicOnHello = true, isReconnect = false 
         mr = null; micOn = false;
         resetToResumeButton();
         setStatus("访谈已长时间无活动，自动挂起。点「继续访谈」可恢复。");
+        dismissIdleWarning();
       } else if (msg.type === "asr") {
         addAsr(msg.seg_id, msg.text);
       } else if (msg.type === "audio.low_level") {
@@ -803,6 +810,10 @@ function connectSession(sessionId, { openMicOnHello = true, isReconnect = false 
         setStatus("🔉 声音很小（" + msg.dbfs + " dBFS），请靠近麦克风或调高系统输入音量");
       } else if (msg.type === "coaching.update") {
         renderCoaching(msg);
+      } else if (msg.type === "session.idle_warning") {
+        // 服务端在 idle 达 80% 时推一次：弹横幅提示用户。touch 走「继续」按钮。
+        console.warn("ws#" + connSeq, "← session.idle_warning suspend_in_s=", msg.suspend_in_s, "@", diagTs());
+        showIdleWarning(msg);
       } else if (msg.type === "error") {
         errorShown = true;
         // asr_unavailable 已带可操作原因（服务未启动/ws_url 错），直接展示
@@ -1038,6 +1049,41 @@ function addAsr(segId, text) {
   const p = document.createElement("p");
   p.innerHTML = `<span class="seg-id">[${esc(segId)}]</span>${esc(text)}`;
   box.insertBefore(p, box.firstChild); // 新一句插到最上面：转写按倒序（最新在顶）
+}
+
+let _idleWarningTimer = null;
+
+function showIdleWarning(msg) {
+  const box = document.getElementById("idleWarning");
+  const text = document.getElementById("idleWarningMsg");
+  const suspendIn = Math.max(0, Math.round(msg.suspend_in_s || 0));
+  text.textContent = "⏰ 访谈长时间无活动，" + suspendIn + " 秒后将自动挂起。";
+  box.style.display = "";
+  // 60s 后若仍在线，自动隐藏——避免与 session.suspended 横幅冲突
+  if (_idleWarningTimer) clearTimeout(_idleWarningTimer);
+  _idleWarningTimer = setTimeout(() => {
+    const still = document.getElementById("idleWarning");
+    if (still) still.style.display = "none";
+  }, 60000);
+}
+
+function dismissIdleWarning() {
+  const box = document.getElementById("idleWarning");
+  if (box) box.style.display = "none";
+  if (_idleWarningTimer) { clearTimeout(_idleWarningTimer); _idleWarningTimer = null; }
+}
+
+function keepAlive() {
+  // 触发服务端 touch()：发 session.touch 帧。无副作用，不动 ASR / 引擎 / 管线。
+  // 用 listen:start 替代会有副作用——已 stop 麦的用户会被重启录制管线。
+  // 字符串字面量必须与后端 WsMsgType.SESSION_TOUCH = "session.touch" 一致：
+  // 改其中一边时另一边也要同步（暂无自动校验——下次加 WS 协议 schema 校验时一并加）。
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.send(JSON.stringify({ type: "session.touch" })); }
+    catch (e) { setStatus("续聊失败：" + e.message); return; }
+  }
+  dismissIdleWarning();
+  setStatus("已续聊");
 }
 
 // 辅导清单筛选：保留最新一次清单数据，按当前筛选状态重绘

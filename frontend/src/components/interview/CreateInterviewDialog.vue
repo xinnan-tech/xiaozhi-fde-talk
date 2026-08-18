@@ -2,20 +2,19 @@
 import { nextTick, reactive, ref, watch, markRaw } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
+import {
+  getInterviewsTemplatesApi,
+  type CreateInterviewForm,
+  type TemplateItem
+} from "@/api/interview";
 
 defineOptions({
   name: "CreateInterviewDialog"
 });
 
-type CreateInterviewForm = {
-  interviewee: string;
-  interviewTime: string;
-  duration: string;
-  goal: string;
-};
-
 const props = defineProps<{
   modelValue: boolean;
+  submitting?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -23,7 +22,6 @@ const emit = defineEmits<{
   (event: "submit", value: CreateInterviewForm): void;
 }>();
 
-const noteIcon = markRaw(useRenderIcon("majesticons:note-text"));
 const userIcon = markRaw(useRenderIcon("tabler:user"));
 const calendarIcon = markRaw(useRenderIcon("tabler:calendar"));
 const microphoneIcon = markRaw(useRenderIcon("tabler:microphone"));
@@ -33,21 +31,41 @@ const clipboardIcon = markRaw(useRenderIcon("tabler:clipboard-text"));
 const formRef = ref<FormInstance>();
 const selectedInputMethod = ref("");
 const goalError = ref("");
-const form = reactive<CreateInterviewForm>({
-  interviewee: "",
-  interviewTime: "",
-  duration: "30 分钟",
-  goal: ""
+const interviewTemplates = ref<TemplateItem[]>([]);
+const interviewTemplatesLoading = ref(false);
+const createDefaultForm = (): CreateInterviewForm => ({
+  base_info: {
+    title: "欣南科技公司售前业务洽谈助手",
+    project: "欣南科技售前",
+    interviewee: "彭经理",
+    start_time: "2026-08-18 16:00",
+    duration: "45",
+    end_time: ""
+  },
+  goal: "了解欣南售前工作流程，业务洽谈工具的需求，使用场景，部署方式之类",
+  template_id: ""
 });
+const form = reactive<CreateInterviewForm>(createDefaultForm());
 
-const rules: FormRules<CreateInterviewForm> = {
-  interviewee: [
+const rules: FormRules = {
+  "base_info.title": [
+    { required: true, message: "请输入访谈名称", trigger: "blur" }
+  ],
+  "base_info.interviewee": [
     { required: true, message: "请输入访谈人姓名", trigger: "blur" }
   ],
-  interviewTime: [
+  "base_info.start_time": [
     { required: true, message: "请选择访谈时间", trigger: "change" }
   ],
-  duration: [{ required: true, message: "请选择访谈时长", trigger: "change" }],
+  "base_info.duration": [
+    { required: true, message: "请选择访谈时长", trigger: "change" }
+  ],
+  template_id: [
+    { required: true, message: "请选择访谈模板", trigger: "change" }
+  ],
+  "base_info.project": [
+    { required: true, message: "请输入项目或对象", trigger: "blur" }
+  ],
   goal: [
     {
       trigger: "blur",
@@ -93,14 +111,59 @@ const inputMethods = [
 
 const resetForm = async () => {
   formRef.value?.resetFields();
-  form.interviewee = "";
-  form.interviewTime = "";
-  form.duration = "30 分钟";
-  form.goal = "";
+  Object.assign(form, createDefaultForm());
+  form.template_id = interviewTemplates.value[0]?.id ?? "";
   selectedInputMethod.value = "";
   goalError.value = "";
   await nextTick();
   formRef.value?.clearValidate();
+};
+
+const loadInterviewTemplates = async () => {
+  interviewTemplatesLoading.value = true;
+  try {
+    const response = await getInterviewsTemplatesApi();
+    interviewTemplates.value = response.items;
+    form.template_id = response.items[0]?.id ?? "";
+  } catch {
+    interviewTemplates.value = [];
+    form.template_id = "";
+  } finally {
+    interviewTemplatesLoading.value = false;
+  }
+};
+
+const formatDateTime = (date: Date) => {
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate()
+  )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
+    date.getSeconds()
+  )}`;
+};
+
+const calculateEndTime = () => {
+  const match = form.base_info.start_time.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/
+  );
+  if (!match) return "";
+
+  const [, year, month, day, hours, minutes, seconds] = match;
+  const startTime = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hours),
+    Number(minutes),
+    Number(seconds)
+  );
+  if (Number.isNaN(startTime.getTime())) return "";
+
+  startTime.setMinutes(
+    startTime.getMinutes() + Number(form.base_info.duration)
+  );
+  return formatDateTime(startTime);
 };
 
 const handleClose = () => {
@@ -108,18 +171,26 @@ const handleClose = () => {
 };
 
 const handleSubmit = async () => {
+  if (props.submitting) return;
   if (!formRef.value) return;
   const valid = await formRef.value.validate().catch(() => false);
   if (!valid) return;
 
-  emit("submit", { ...form });
-  emit("update:modelValue", false);
+  form.base_info.end_time = calculateEndTime();
+
+  emit("submit", {
+    ...form,
+    base_info: { ...form.base_info }
+  });
 };
 
 watch(
   () => props.modelValue,
-  value => {
-    if (value) resetForm();
+  async value => {
+    if (value) {
+      resetForm();
+      await loadInterviewTemplates();
+    }
   }
 );
 </script>
@@ -151,10 +222,26 @@ watch(
           <h3>基本信息</h3>
         </div>
         <div class="form-grid">
-          <div class="basic-fields-row">
-            <el-form-item label="访谈人" prop="interviewee">
+          <div class="secondary-fields-row">
+            <el-form-item label="访谈名称" prop="base_info.title">
               <el-input
-                v-model="form.interviewee"
+                v-model="form.base_info.title"
+                placeholder="请输入访谈名称"
+              />
+            </el-form-item>
+
+            <el-form-item label="项目/对象" prop="base_info.project">
+              <el-input
+                v-model="form.base_info.project"
+                placeholder="请输入项目或对象"
+              />
+            </el-form-item>
+          </div>
+
+          <div class="basic-fields-row">
+            <el-form-item label="访谈人" prop="base_info.interviewee">
+              <el-input
+                v-model="form.base_info.interviewee"
                 placeholder="请输入受访者姓名"
               >
                 <template #suffix>
@@ -163,9 +250,9 @@ watch(
               </el-input>
             </el-form-item>
 
-            <el-form-item label="访谈时间" prop="interviewTime">
+            <el-form-item label="访谈时间" prop="base_info.start_time">
               <el-date-picker
-                v-model="form.interviewTime"
+                v-model="form.base_info.start_time"
                 type="datetime"
                 value-format="YYYY-MM-DD HH:mm:ss"
                 format="YYYY-MM-DD HH:mm"
@@ -178,15 +265,38 @@ watch(
               </el-date-picker>
             </el-form-item>
 
-            <el-form-item label="访谈时长" prop="duration">
-              <el-select v-model="form.duration" placeholder="请选择访谈时长">
-                <el-option label="15 分钟" value="15 分钟" />
-                <el-option label="30 分钟" value="30 分钟" />
-                <el-option label="45 分钟" value="45 分钟" />
-                <el-option label="60 分钟" value="60 分钟" />
+            <el-form-item label="访谈时长" prop="base_info.duration">
+              <el-select
+                v-model="form.base_info.duration"
+                placeholder="请选择访谈时长"
+              >
+                <el-option label="30 分钟" value="30" />
+                <el-option label="45 分钟" value="45" />
+                <el-option label="1 小时" value="60" />
+                <el-option label="2 小时" value="120" />
               </el-select>
             </el-form-item>
           </div>
+
+          <el-form-item
+            label="访谈模板"
+            prop="template_id"
+            class="template-field"
+          >
+            <el-select
+              v-model="form.template_id"
+              placeholder="请选择访谈模板"
+              :loading="interviewTemplatesLoading"
+              :disabled="interviewTemplatesLoading"
+            >
+              <el-option
+                v-for="template in interviewTemplates"
+                :key="template.id"
+                :label="template.name"
+                :value="template.id"
+              />
+            </el-select>
+          </el-form-item>
 
           <el-form-item
             label="访谈目标"
@@ -242,10 +352,18 @@ watch(
     </el-form>
 
     <template #footer>
-      <el-button style="border-radius: 8px" plain @click="handleClose"
+      <el-button
+        style="border-radius: 8px"
+        plain
+        :disabled="submitting"
+        @click="handleClose"
         >取消</el-button
       >
-      <el-button style="border-radius: 8px" type="primary" @click="handleSubmit"
+      <el-button
+        style="border-radius: 8px"
+        type="primary"
+        :loading="submitting"
+        @click="handleSubmit"
         >创建访谈</el-button
       >
     </template>
@@ -316,6 +434,16 @@ watch(
       display: flex;
       gap: 14px;
       align-items: flex-start;
+    }
+
+    .secondary-fields-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .template-field {
+      width: 100%;
     }
 
     .basic-fields-row {
@@ -643,6 +771,10 @@ watch(
           flex-basis: auto;
           width: 100%;
         }
+      }
+
+      .secondary-fields-row {
+        grid-template-columns: 1fr;
       }
 
       .input-method-list {

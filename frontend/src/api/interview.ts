@@ -42,6 +42,24 @@ type BaseInfoType = {
   end_time: string;
 };
 
+export type TemplateItem = {
+  id: string;
+  name: string;
+  icon_url: string;
+  icon_alt: string;
+  version: string;
+};
+
+export type TemplateListType = {
+  items: TemplateItem[];
+};
+
+export type CreateInterviewForm = {
+  base_info: BaseInfoType;
+  goal: string;
+  template_id: string;
+};
+
 /** 获取访谈统计 */
 export const getStatisticsApi = () => {
   return http.request<InterviewStatisticsType>(
@@ -56,4 +74,16 @@ export const getInterviewsApi = () => {
     "get",
     baseUrlApi("/api/v1/interviews")
   );
+};
+
+/** 获取访谈模板列表 */
+export const getInterviewsTemplatesApi = () => {
+  return http.request<TemplateListType>("get", baseUrlApi("/api/v1/templates"));
+};
+
+/** 创建访谈 */
+export const saveInterviewApi = (data: CreateInterviewForm) => {
+  return http.request<unknown>("post", baseUrlApi("/api/v1/interviews"), {
+    data
+  });
 };

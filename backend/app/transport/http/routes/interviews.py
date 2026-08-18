@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -37,6 +38,15 @@ _STATUS_TYPE = {
 }
 
 
+def _utc_isoformat(value: datetime | None) -> str | None:
+    """将数据库时间按 UTC 明确输出，供客户端安全本地化显示。"""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
 def _session_summary(rec, tpl) -> dict:
     """ORM InterviewRecord + Template → summary dict（含派生计数与展示字段）。
 
@@ -65,18 +75,18 @@ def _session_summary(rec, tpl) -> dict:
         "title": base_info.get("project") or "未命名访谈",
         "interviewee": base_info.get("interviewee", ""),
         "type": tpl.name if tpl else "",
-        "recent_time": max(
+        "recent_time": _utc_isoformat(max(
             filter(None, [rec.created_at, rec.started_at, rec.ended_at])
-        ).isoformat() if any([rec.created_at, rec.started_at, rec.ended_at]) else None,
+        )) if any([rec.created_at, rec.started_at, rec.ended_at]) else None,
         "goal": rec.goal,
         "pending_count": pending_count,
         "covered_count": covered_count,
         "asked_count": asked_count,
         "ignored_count": len(ignored_ids),
         "total_count": len(items),
-        "created_at": rec.created_at.isoformat() if rec.created_at else None,
-        "started_at": rec.started_at.isoformat() if rec.started_at else None,
-        "ended_at": rec.ended_at.isoformat() if rec.ended_at else None,
+        "created_at": _utc_isoformat(rec.created_at),
+        "started_at": _utc_isoformat(rec.started_at),
+        "ended_at": _utc_isoformat(rec.ended_at),
     }
 
 
@@ -107,9 +117,9 @@ def _state_detail(state) -> dict:
         "goal": s.goal,
         "first_batch_generated": s.first_batch_generated,
         "consumed_seq": s.consumed_seq,
-        "created_at": s.created_at,
-        "started_at": s.started_at,
-        "ended_at": s.ended_at,
+        "created_at": _utc_isoformat(s.created_at),
+        "started_at": _utc_isoformat(s.started_at),
+        "ended_at": _utc_isoformat(s.ended_at),
         "items": [it.model_dump(mode="json") for it in state.items],
         "skipped_ids": sorted(state.skipped_ids),
         "ignored_ids": sorted(state.ignored_ids),

@@ -1,0 +1,9 @@
+{
+  "Version": "0.1.0",
+  "Title": "小智访谈",
+  "HideFooter": false,
+  "ShowLogo": true,
+  "MenuArrowIconNoTransition": false,
+  "TooltipEffect": "light",
+  "ResponsiveStorageNameSpace": "responsive-"
+}

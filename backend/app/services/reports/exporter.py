@@ -11,6 +11,14 @@ import markdown
 
 FORMATS = ("md", "html", "word")
 
+
+class FormatNotImplementedError(NotImplementedError):
+    """指定 format 暂未实现（如 pdf）。路由层捕获后返回结构化 501 JSON。"""
+    def __init__(self, fmt: str):
+        super().__init__(f"format {fmt!r} 未实现")
+        self.fmt = fmt
+
+
 _ALLOWED_TAGS = [
     "p", "br", "strong", "em", "ul", "ol", "li",
     "table", "thead", "tbody", "tr", "th", "td",
@@ -43,7 +51,7 @@ def export(md: str, fmt: str) -> tuple[bytes, str]:
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
     if fmt == "pdf":
-        raise NotImplementedError("pdf 导出后加（需 weasyprint/pandoc）")
+        raise FormatNotImplementedError(fmt)
     raise ValueError(f"不支持的导出格式：{fmt}（可选 {FORMATS}）")
 
 

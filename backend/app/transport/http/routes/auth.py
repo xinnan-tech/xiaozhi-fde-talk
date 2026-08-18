@@ -9,7 +9,7 @@ from app.persistence.db import get_db
 from app.services.auth.service import authenticate_user
 from app.services.auth.token import create_access_token
 from app.transport.http.dependencies import get_current_user
-from app.transport.http.schemas import LoginRequest, LoginResponse
+from app.transport.http.schemas import LoginRequest, LoginResponse, UserInfo
 from app.domain.auth import CurrentUser
 
 router = APIRouter()
@@ -40,4 +40,7 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
         subject=user.user_id,
         extra={"username": user.username, "role": user.role},
     )
-    return LoginResponse(access_token=token)
+    return LoginResponse(
+        access_token=token,
+        user=UserInfo(id=user.user_id, username=user.username, role=user.role),
+    )

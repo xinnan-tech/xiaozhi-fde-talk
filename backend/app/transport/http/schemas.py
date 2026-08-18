@@ -11,9 +11,16 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class UserInfo(BaseModel):
+    id: str
+    username: str
+    role: str = "user"
+
+
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user: UserInfo
 
 
 class AdminPasswordChangeRequest(BaseModel):
@@ -48,3 +55,10 @@ class CreateInterviewRequest(BaseModel):
 class UpdateInterviewRequest(BaseModel):
     base_info: Optional[dict] = None
     goal: Optional[str] = None
+
+
+class InterviewStatisticsResponse(BaseModel):
+    in_progress: int
+    week_finish: int
+    assist_discovery: int
+    interview_coverage: int

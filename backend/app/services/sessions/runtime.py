@@ -284,6 +284,25 @@ class SessionRuntime:
             except Exception:  # noqa: BLE001
                 pass
 
+    async def push_report_ready(self, status: str) -> None:
+        """推 report.ready 帧给当前在线 owner（若有）。
+
+        由报告路由 get_or_generate 完成后回调触发：status ∈ {"ready", "failed"}。
+        无存活连接（_send_fn is None，runtime 已 unbind/drop）时静默 no-op——前端
+        拿不到推送但 GET 同步返回中已带 status，本身就能知道结果。
+        走 self._send：进 critical 缓冲，重连时 replay（前端断线期间请求过报告也能收到）。
+        """
+        if self._send_fn is None:
+            return
+        try:
+            await self._send({
+                "type": "report.ready",
+                "session_id": self.state.session.id,
+                "status": status,
+            })
+        except Exception:  # noqa: BLE001
+            logger.warning("report.ready 推送失败：session=%s", self.state.session.id)
+
     async def _teardown(self, *, final_recompute: bool) -> None:
         """end / suspend 共用的资源拆除：TERMINATED + flush + 落盘 + 关管线。"""
         if not self._fsm.is_terminated:

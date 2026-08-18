@@ -13,7 +13,7 @@ import html
 import json
 import logging
 import re
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 import bleach
 
@@ -187,11 +187,18 @@ def _cache_hit(rec, sig: str) -> bool:
     )
 
 
-async def get_or_generate(session_id: str) -> tuple[str, str]:
+async def get_or_generate(
+    session_id: str,
+    on_ready: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> tuple[str, str]:
     """返回 (status, content_md)。
 
     缓存命中：report ready 且 transcript 指纹未变 → 直接返回旧内容。
     缓存失效：未生成 / 上次失败 / transcript 变了 → 调 LLM 重生 + 落库。
+
+    on_ready：每次报告状态落定（成功 ready / 失败 failed）后调用一次；缓存命中
+    也算「状态落定」。回调异常被吞掉、不传播——推送失败不应影响 GET 返回。
+    预检失败（session/template 缺失）不触发回调：此时根本无报告可言。
     """
     # 1. 先加载 state（transcript 指纹计算需要它）+ 缓存查询
     state = await interview_repo.get_state_auto(session_id)
@@ -201,6 +208,7 @@ async def get_or_generate(session_id: str) -> tuple[str, str]:
 
     rec = await report_repo.get_by_interview_auto(session_id)
     if _cache_hit(rec, current_sig):
+        await _fire_on_ready(on_ready, session_id, "ready")
         return ("ready", rec.content_md)
 
     # 2. single-flight：拿锁后双重检查，等锁期间别人可能已生成完并落库
@@ -208,6 +216,7 @@ async def get_or_generate(session_id: str) -> tuple[str, str]:
     async with lock:
         rec = await report_repo.get_by_interview_auto(session_id)
         if _cache_hit(rec, current_sig):
+            await _fire_on_ready(on_ready, session_id, "ready")
             return ("ready", rec.content_md)
 
         # 3. 加载模板
@@ -227,4 +236,19 @@ async def get_or_generate(session_id: str) -> tuple[str, str]:
         # 5. 落库（upsert + 更新指纹）
         await report_repo.upsert_auto(session_id, md, status, transcript_signature=current_sig)
 
+        await _fire_on_ready(on_ready, session_id, status)
         return (status, md)
+
+
+async def _fire_on_ready(
+    on_ready: Optional[Callable[[str], Awaitable[None]]],
+    session_id: str,
+    status: str,
+) -> None:
+    """on_ready 包装：吞掉回调异常，避免推送失败影响 GET 返回。"""
+    if on_ready is None:
+        return
+    try:
+        await on_ready(status)
+    except Exception:  # noqa: BLE001
+        logger.exception("report.ready 推送失败：session=%s", session_id)

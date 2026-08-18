@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select, func
@@ -152,19 +153,47 @@ class InterviewRepository:
         async with SessionLocal() as db:
             await self.save_state(db, state, fields=fields)
 
-    async def list_by_user(self, db: AsyncSession, user_id: str) -> list[Session]:
-        res = await db.execute(
+    async def list_by_user(
+        self, db: AsyncSession, user_id: str, statuses: Optional[list[str]] = None
+    ) -> list[Session]:
+        """列出某用户的访谈会话。可选按 status 过滤（字符串值，与 count_active 口径一致）。
+
+        statuses=None → 不过滤；非空 → 加 `status IN (...)`。
+        """
+        stmt = (
             select(InterviewRecord)
             .where(InterviewRecord.user_id == user_id)
-            .order_by(InterviewRecord.created_at.desc())
         )
+        if statuses:
+            stmt = stmt.where(InterviewRecord.status.in_(statuses))
+        stmt = stmt.order_by(InterviewRecord.created_at.desc())
+        res = await db.execute(stmt)
         return [_record_to_session(r) for r in res.scalars()]
 
-    async def list_by_user_auto(self, user_id: str) -> list[Session]:
+    async def list_by_user_auto(
+        self, user_id: str, statuses: Optional[list[str]] = None
+    ) -> list[Session]:
         from app.persistence.db import SessionLocal
 
         async with SessionLocal() as db:
-            return await self.list_by_user(db, user_id)
+            return await self.list_by_user(db, user_id, statuses=statuses)
+
+    async def list_records_by_user_auto(
+        self, user_id: str, statuses: Optional[list[str]] = None
+    ) -> list[InterviewRecord]:
+        """与 list_by_user_auto 类似但返回 ORM 行（summary 派生用，要 JSON 列）。"""
+        from app.persistence.db import SessionLocal
+
+        async with SessionLocal() as db:
+            stmt = (
+                select(InterviewRecord)
+                .where(InterviewRecord.user_id == user_id)
+            )
+            if statuses:
+                stmt = stmt.where(InterviewRecord.status.in_(statuses))
+            stmt = stmt.order_by(InterviewRecord.created_at.desc())
+            res = await db.execute(stmt)
+            return list(res.scalars())
 
     async def count_active(self, db: AsyncSession) -> int:
         """全局活跃会话数（并发上限用）。
@@ -200,6 +229,70 @@ class InterviewRepository:
             await db.delete(rec)
             await db.commit()
             return True
+
+    # ---- 统计卡聚合（A4）----
+    # 注意：inProgress 统计口径 = setting_up + in_progress（不含 suspended；suspended 是「挂起可继续」，
+    # 归入前端「进行中」tab 而非统计卡）。所有方法走 *_auto，services 层不裸 SessionLocal。
+
+    async def count_in_progress_for_user_auto(self, user_id: str) -> int:
+        from app.persistence.db import SessionLocal
+        async with SessionLocal() as db:
+            res = await db.execute(
+                select(func.count()).select_from(InterviewRecord).where(
+                    InterviewRecord.user_id == user_id,
+                    InterviewRecord.status.in_([
+                        SessionStatus.SETTING_UP.value, SessionStatus.IN_PROGRESS.value,
+                    ]),
+                )
+            )
+            return int(res.scalar() or 0)
+
+    async def count_ended_in_week_for_user_auto(self, user_id: str, week_start_utc: datetime) -> int:
+        from app.persistence.db import SessionLocal
+        async with SessionLocal() as db:
+            res = await db.execute(
+                select(func.count()).select_from(InterviewRecord).where(
+                    InterviewRecord.user_id == user_id,
+                    InterviewRecord.status == SessionStatus.ENDED.value,
+                    InterviewRecord.ended_at >= week_start_utc,
+                )
+            )
+            return int(res.scalar() or 0)
+
+    async def count_assist_discovery_for_user_auto(self, user_id: str) -> int:
+        """降级口径：所有 ended 会话 coaching_items 中 status == 'new' 的累计条数。
+        TODO(product): 待产品确认口径（是否等于「AI 实时新增问题数」）。
+        """
+        from app.persistence.db import SessionLocal
+        async with SessionLocal() as db:
+            res = await db.execute(
+                select(InterviewRecord).where(
+                    InterviewRecord.user_id == user_id,
+                    InterviewRecord.status == SessionStatus.ENDED.value,
+                )
+            )
+            recs = list(res.scalars())
+        total = 0
+        for rec in recs:
+            for item in (rec.coaching_items or []):
+                if item.get("status") == "new":
+                    total += 1
+        return total
+
+    async def count_interview_coverage_for_user_auto(self, user_id: str) -> int:
+        """降级口径：status == 'ended' 且 transcript 非空的会话数。
+        TODO(product): 待产品确认口径（是否等于「存在覆盖索引的访谈数」）。
+        """
+        from app.persistence.db import SessionLocal
+        async with SessionLocal() as db:
+            res = await db.execute(
+                select(InterviewRecord).where(
+                    InterviewRecord.user_id == user_id,
+                    InterviewRecord.status == SessionStatus.ENDED.value,
+                )
+            )
+            recs = list(res.scalars())
+        return sum(1 for rec in recs if rec.transcript)
 
 
 # 单例（无状态，安全共享）

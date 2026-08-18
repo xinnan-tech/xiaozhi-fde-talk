@@ -15,13 +15,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import uuid4
 
 from app.core.config_store import get_max_concurrent, get_session_runtime_config
 from app.core.exceptions import ConcurrentLimitError, IllegalTransitionError
 from app.domain.session import Session, SessionStatus
+from app.domain.template import Template
+from app.persistence.models import InterviewRecord
 from app.persistence.repositories.interview import interview_repo
 from app.services.sessions.log_events import log_event
 from app.services.sessions.runtime import registry
@@ -62,8 +64,52 @@ class SessionManager:
             return self._active[session_id]
         return await interview_repo.get_state_auto(session_id)
 
-    async def list_for_user(self, user_id: str) -> list[Session]:
-        return await interview_repo.list_by_user_auto(user_id)
+    async def list_for_user(
+        self, user_id: str, statuses: Optional[list[SessionStatus]] = None
+    ) -> list[Session]:
+        raw = [s.value for s in statuses] if statuses else None
+        return await interview_repo.list_by_user_auto(user_id, statuses=raw)
+
+    async def list_summaries_for_user(
+        self, user_id: str, statuses: Optional[list[SessionStatus]] = None
+    ) -> list[tuple[InterviewRecord, Template]]:
+        """返回 (InterviewRecord, Template) 列表给 summary 路由使用。"""
+        from app.services.template.loader import get_template
+
+        raw = [s.value for s in statuses] if statuses else None
+        recs = await interview_repo.list_records_by_user_auto(user_id, statuses=raw)
+        out: list[tuple[InterviewRecord, Template]] = []
+        for rec in recs:
+            tpl = get_template(rec.template_id)
+            out.append((rec, tpl))
+        return out
+
+    # ---- 统计卡（A4）----
+    async def statistics_for_user(self, user_id: str) -> dict[str, int]:
+        """返回四张统计卡数字（snake_case keys）。
+
+        - in_progress: setting_up + in_progress 的会话数
+        - week_finish: 当前 ISO 周（UTC 周一起算）ended 的会话数
+        - assist_discovery: 降级口径（见 repo docstring；TODO(product) 待产品确认）
+        - interview_coverage: 降级口径（见 repo docstring；TODO(product) 待产品确认）
+        """
+        now_utc = datetime.now(timezone.utc)
+        week_start = now_utc - timedelta(days=now_utc.weekday())
+        week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        in_progress = await interview_repo.count_in_progress_for_user_auto(user_id)
+        week_finish = await interview_repo.count_ended_in_week_for_user_auto(user_id, week_start)
+        # TODO(product): 待产品确认口径（assist_discovery 降级口径，见 repo）
+        assist_discovery = await interview_repo.count_assist_discovery_for_user_auto(user_id)
+        # TODO(product): 待产品确认口径（interview_coverage 降级口径，见 repo）
+        interview_coverage = await interview_repo.count_interview_coverage_for_user_auto(user_id)
+
+        return {
+            "in_progress": in_progress,
+            "week_finish": week_finish,
+            "assist_discovery": assist_discovery,
+            "interview_coverage": interview_coverage,
+        }
 
     # ---- 创建 ----
     async def create(
@@ -166,6 +212,29 @@ class SessionManager:
             state.session.base_info = {**state.session.base_info, **base_info}
         if goal is not None:
             state.session.goal = goal
+        await interview_repo.save_state_auto(state)
+        return state
+
+    async def set_item_status(
+        self, session_id: str, item_id: str, action: str
+    ) -> SessionState:
+        """REST 端的 ignore/skip/unignore/unskip。不要求 runtime 存活。
+        action ∈ {"ignore", "unignore", "skip", "unskip"}.
+        """
+        if action not in ("ignore", "unignore", "skip", "unskip"):
+            raise ValueError(f"unknown action: {action}")
+        state = await self.get(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        # 与 runtime.ignore/skip 一致：不做 item 存在性校验（不存在的 id 塞入集合无害，前端不渲染）
+        if action == "ignore":
+            state.ignored_ids.add(item_id)
+        elif action == "unignore":
+            state.ignored_ids.discard(item_id)
+        elif action == "skip":
+            state.skipped_ids.add(item_id)
+        elif action == "unskip":
+            state.skipped_ids.discard(item_id)
         await interview_repo.save_state_auto(state)
         return state
 

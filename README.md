@@ -35,10 +35,10 @@ cd xiaozhi-fde-talk
 cp backend/.env.example .env
 
 # 启动全部服务（首次启动会下载 ASR 模型，约需 5-10 分钟）
-docker-compose up -d
+docker compose up -d
 
 # 查看 FunASR 模型下载进度
-docker-compose logs -f funasr
+docker compose logs -f funasr
 ```
 
 模型下载完成后访问 http://localhost:8000 ：
@@ -52,10 +52,10 @@ docker-compose logs -f funasr
 
 ```bash
 # 首次启动会自动下载模型，完成后监听宿主机 10096 端口
-docker-compose up -d funasr
+docker compose up -d funasr
 
 # 查看模型下载进度
-docker-compose logs -f funasr
+docker compose logs -f funasr
 ```
 
 后端默认 ASR 地址为 `wss://localhost:10096`，本地开发开箱即连。

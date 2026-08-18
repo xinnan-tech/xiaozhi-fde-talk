@@ -37,6 +37,20 @@ _STRIP_RE = re.compile(r"<\|[^|]*\|>")
 # 1000ms 给 VAD 留足识别窗口（部分服务 VAD 最短静音阈值 ≥600ms）。
 _TAIL_SILENCE_MS = 1000
 
+# Config-store `asr.language` (zh_cn/zh_tw/en) → FunASR init_msg 合法值。
+# FunASR language 字段不接受 locale 粒度；中文两种统一映射 zh（SenseVoice 简体模型对繁体识别足够）。
+# 未识别值 / 空串 → 不传（FunASR 自动检测）。
+_FUNASR_LANG_MAP: dict[str, str] = {
+    "zh_cn": "zh",
+    "zh_tw": "zh",
+    "en": "en",
+}
+
+
+def _to_funasr_language(config_value: str | None) -> str:
+    """asr.language 配置值 → FunASR init_msg.language；未识别回退空串。"""
+    return _FUNASR_LANG_MAP.get((config_value or "").strip().lower(), "")
+
 
 def _is_local(url: str) -> bool:
     return (urlparse(url).hostname or "").lower() in _LOCAL_HOSTS
@@ -92,6 +106,7 @@ class FunASRServerProvider(ASRProvider):
         store = get_config_store()
         self._ws_url = store.get_sync("asr.ws_url") or "wss://localhost:10096"
         self._sample_rate = int(store.get_sync("asr.sample_rate") or 16000)
+        self._funasr_language: str = _to_funasr_language(store.get_sync("asr.language"))
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         # 连接已不可用（recv_loop 结束）。只立标志不清 self._ws：句柄必须保留
         # 到 close() 真正关闭底层 TCP——先单独跑过 stop_stream 的调用方
@@ -142,6 +157,8 @@ class FunASRServerProvider(ASRProvider):
                 "use_itn": True,
                 "audio_fs": self._sample_rate,
             }
+            if self._funasr_language:
+                init_msg["language"] = self._funasr_language
             await self._ws.send(json.dumps(init_msg))
         except (OSError, asyncio.TimeoutError, ssl.SSLError, websockets.WebSocketException) as e:
             # connect 成功但 send(init_msg) 失败时，self._ws 已是建立好的连接——

@@ -26,6 +26,7 @@ class _FakeRec:
     status: str = "ready"
     content_md: str = ""
     transcript_signature: str = ""
+    output_language: str = ""
 
 
 class _FakeReportRepo:
@@ -38,10 +39,11 @@ class _FakeReportRepo:
     async def get_by_interview_auto(self, session_id: str):
         return self.rec
 
-    async def upsert_auto(self, session_id, md, status, transcript_signature=""):
+    async def upsert_auto(self, session_id, md, status, transcript_signature="", output_language=""):
         self.upserts += 1
         self.rec = _FakeRec(
             status=status, content_md=md, transcript_signature=transcript_signature,
+            output_language=output_language,
         )
 
 

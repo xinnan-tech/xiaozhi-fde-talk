@@ -87,6 +87,9 @@ class ReportRecord(Base):
     # 生成时的 transcript 指纹（sha256[:16]）。transcript 变 → 缓存失效、重生。
     # 旧行此字段为空：视为无匹配 → 重生一次后填上。
     transcript_signature: Mapped[str] = mapped_column(String(64), default="")
+    # 生成时的 llm.output_language（zh_cn/zh_tw/en）。语种变 → 缓存失效、重生。
+    # 旧行此字段为空：视为未标，定失效 → 强制重生一次后填上当前语种。
+    output_language: Mapped[str] = mapped_column(String(16), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

@@ -34,11 +34,15 @@ class ReportRepository:
         content_md: str,
         status: str,
         transcript_signature: str = "",
+        output_language: str = "",
     ) -> ReportRecord:
         """按 interview_id 写入或更新（interview_id 上有唯一索引）。
 
         用方言级 upsert 取代 get-then-insert：两次并发的首次生成会双读
         None、双 insert，后者 commit 撞唯一索引直接 500。
+
+        output_language: 生成时的 llm.output_language。空串视为「未标/历史」，
+        缓存侧 _cache_hit 会判失配。
         """
         from sqlalchemy.dialects.mysql import insert as mysql_insert
         from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -51,6 +55,7 @@ class ReportRepository:
             content_md=content_md,
             status=status,
             transcript_signature=transcript_signature,
+            output_language=output_language,
             created_at=now,
             updated_at=now,
         )
@@ -58,13 +63,15 @@ class ReportRepository:
         if dialect == "mysql":
             stmt = mysql_insert(ReportRecord).values(**values).on_duplicate_key_update(
                 content_md=content_md, status=status,
-                transcript_signature=transcript_signature, updated_at=now,
+                transcript_signature=transcript_signature,
+                output_language=output_language, updated_at=now,
             )
         elif dialect == "postgresql":
             stmt = pg_insert(ReportRecord).values(**values).on_conflict_do_update(
                 index_elements=[ReportRecord.interview_id],
                 set_={"content_md": content_md, "status": status,
                       "transcript_signature": transcript_signature,
+                      "output_language": output_language,
                       "updated_at": now},
             )
         else:  # sqlite
@@ -72,6 +79,7 @@ class ReportRepository:
                 index_elements=[ReportRecord.interview_id],
                 set_={"content_md": content_md, "status": status,
                       "transcript_signature": transcript_signature,
+                      "output_language": output_language,
                       "updated_at": now},
             )
         await db.execute(stmt)
@@ -79,12 +87,16 @@ class ReportRepository:
         return await self.get_by_interview(db, interview_id)
 
     async def upsert_auto(
-        self, interview_id: str, content_md: str, status: str, transcript_signature: str = ""
+        self, interview_id: str, content_md: str, status: str,
+        transcript_signature: str = "", output_language: str = "",
     ) -> ReportRecord:
         from app.persistence.db import SessionLocal
 
         async with SessionLocal() as db:
-            return await self.upsert(db, interview_id, content_md, status, transcript_signature)
+            return await self.upsert(
+                db, interview_id, content_md, status,
+                transcript_signature, output_language,
+            )
 
 
 report_repo = ReportRepository()

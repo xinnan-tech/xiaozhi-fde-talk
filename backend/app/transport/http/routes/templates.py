@@ -1,8 +1,10 @@
 """模板路由。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
 from app.services.template.loader import get_template, list_templates
 from app.transport.http.dependencies import get_current_user
@@ -31,5 +33,5 @@ async def template_detail(
 ):
     tpl = get_template(template_id)
     if tpl is None or (version is not None and tpl.version != version):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "模板不存在")
+        raise I18nError(Keys.HTTP_TEMPLATE_NOT_FOUND, http_status=404)
     return tpl

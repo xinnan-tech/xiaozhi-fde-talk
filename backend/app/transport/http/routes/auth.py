@@ -1,9 +1,11 @@
 """鉴权路由。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
 from app.core.retry import RateLimiter
 from app.persistence.db import get_db
 from app.services.auth.service import authenticate_user
@@ -32,10 +34,10 @@ def _client_ip(request: Request) -> str:
 async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     key = f"{_client_ip(request)}:{req.username}"
     if not _login_limiter.try_acquire(key):
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "尝试过于频繁，请稍后再试")
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
     user = await authenticate_user(db, req.username, req.password)
     if user is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码错误")
+        raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
     token = await create_access_token(
         subject=user.user_id,
         extra={"username": user.username, "role": user.role},

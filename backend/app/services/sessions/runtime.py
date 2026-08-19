@@ -15,6 +15,7 @@ import logging
 from typing import Awaitable, Callable, Optional
 
 from app.adapters.asr.level_monitor import LevelReading
+from app.core.i18n import Keys, t as i18n_t
 from app.core.outbound_send import safe_send
 from app.core.policies import SessionPolicy, get_policy
 from app.core.security import redact_text
@@ -160,7 +161,13 @@ class SessionRuntime:
         should_kick = self._send_fn is not None and old_client_id != client_id
         if should_kick:
             try:
-                await self._raw_send({"type": "connection.kicked", "reason": reason})
+                await self._raw_send({
+                    "type": "connection.kicked",
+                    "reason": i18n_t(Keys.WS_CONNECTION_KICKED,
+                                     locale=self.state.locale),
+                    "i18n_key": Keys.WS_CONNECTION_KICKED.value,
+                    "i18n_params": {},
+                })
             except Exception:  # noqa: BLE001
                 pass
         await self._bind_core(send, client_id, evict_fn)
@@ -260,7 +267,8 @@ class SessionRuntime:
                 pass
         if self._evict_fn is not None:
             try:
-                await self._evict_fn(4406, "访谈已结束")
+                await self._evict_fn(4406, i18n_t(Keys.WS_CLOSE_SESSION_ENDED,
+                                                 locale=self.state.locale))
             except Exception:  # noqa: BLE001
                 pass
 
@@ -280,7 +288,8 @@ class SessionRuntime:
                 pass
         if self._evict_fn is not None:
             try:
-                await self._evict_fn(4403, "访谈已挂起")
+                await self._evict_fn(4403, i18n_t(Keys.WS_CLOSE_SUSPENDED,
+                                                 locale=self.state.locale))
             except Exception:  # noqa: BLE001
                 pass
 
@@ -353,7 +362,13 @@ class SessionRuntime:
         if self._asr_dead:
             return
         self._asr_dead = True
-        await self._send({"type": "error", "code": "asr_unavailable", "message": "语音识别连接已断开"})
+        await self._send({
+            "type": "error",
+            "code": "asr_unavailable",
+            "i18n_key": Keys.WS_ASR_DISCONNECTED.value,
+            "i18n_params": {},
+            "message": i18n_t(Keys.WS_ASR_DISCONNECTED, locale=self.state.locale),
+        })
         logger.warning("ASR 连接已标记失效：session=%s", self.state.session.id)
 
     async def _on_audio_overflow(self) -> None:
@@ -376,7 +391,9 @@ class SessionRuntime:
         await self._send({
             "type": "audio.low_level",
             "dbfs": round(reading.p95, 1),
-            "message": "声音很小，请靠近麦克风或调高系统输入音量",
+            "i18n_key": Keys.WS_AUDIO_LOW_LEVEL.value,
+            "i18n_params": {},
+            "message": i18n_t(Keys.WS_AUDIO_LOW_LEVEL, locale=self.state.locale),
         })
 
     async def _on_utterance(self, text: str, is_final: bool, start_sample: int) -> None:

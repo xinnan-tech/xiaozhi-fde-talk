@@ -14,7 +14,7 @@ import os
 import sys
 import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app.adapters.asr.factory import invalidate as asr_invalidate
@@ -52,6 +52,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
     配置类错误（如缺 APP_ADMIN_PASSWORD）由 init_db 抛 RuntimeError，
     这里捕获后打印一行用户友好提示并 os._exit，避开 uvicorn 的 [error] Traceback 噪音。
     """
+    from app.core.i18n.errors import I18nError
     from app.core.secret import JWTSecretResolver
     from app.persistence.bootstrap import init_db, sweep_stale_sessions
     from app.persistence.db import SessionLocal
@@ -67,15 +68,21 @@ async def _lifespan_startup(app: FastAPI) -> None:
         print(f"\n[配置错误] {e}\n", file=sys.stderr, flush=True)
         os._exit(2)
 
+    # 解析 JWT 密钥：DB → 缺失则自动生成并持久化到 system_config 表
+    # prod 无密钥时 secret.resolve() 抛 I18nError(http_status=503)；同样按
+    # 配置错误路径走（单行 stderr 提示 + os._exit），避开 uvicorn traceback。
+    resolver = JWTSecretResolver(settings, SessionLocal)
+    try:
+        settings.jwt_secret = await resolver.resolve()
+    except I18nError as e:
+        print(f"\n[配置错误] {e.localized()}\n", file=sys.stderr, flush=True)
+        os._exit(2)
+
     # 配置 KV 预热（含默认值种入 + 内存缓存）
     await get_config_store().warm()
     # provider 缓存订阅 invalidate
     get_config_store().subscribe(llm_invalidate)
     get_config_store().subscribe(asr_invalidate)
-
-    # 解析 JWT 密钥：DB → 缺失则自动生成并持久化到 system_config 表
-    resolver = JWTSecretResolver(settings, SessionLocal)
-    settings.jwt_secret = await resolver.resolve()
 
     swept = await sweep_stale_sessions()
     load_templates()
@@ -92,6 +99,10 @@ async def _lifespan_startup(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     """app factory：装配所有层。"""
     from contextlib import asynccontextmanager
+
+    # i18n: fail-fast on incomplete en-US catalog before constructing the app.
+    from app.core.i18n import startup_check
+    startup_check.assert_catalog_complete()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -137,6 +148,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # i18n: per-request locale resolution (X-Lang → Accept-Language → DEFAULT).
+    from app.core.i18n.middleware import I18nHTTPMiddleware
+    app.add_middleware(I18nHTTPMiddleware)
+
     @app.middleware("http")
     async def request_id_middleware(request, call_next):
         rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
@@ -168,5 +183,20 @@ def create_app() -> FastAPI:
 
         from app.transport.spa_fallback import mount as mount_spa
         mount_spa(app)
+
+    # i18n: exception handler — for now a no-op (no I18nError raised anywhere).
+    # Becomes active in T07-T12 once adapters and routes start adopting.
+    from fastapi.responses import JSONResponse
+    from app.core.i18n.context import current_locale
+    from app.core.i18n.errors import I18nError
+
+    @app.exception_handler(I18nError)
+    async def _i18n_handler(request: Request, exc: I18nError):
+        locale = current_locale()
+        return JSONResponse(
+            status_code=exc.http_status,
+            content={"detail": exc.localized(locale=locale), "code": exc.code},
+            headers={"Content-Language": locale},
+        )
 
     return app

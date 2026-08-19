@@ -4,6 +4,18 @@ transport 层可统一异常处理（exception_handlers.py）而不依赖具体�
 """
 from __future__ import annotations
 
+# Aliases preserved for backward import. The named I18nError subclasses live in
+# app.core.i18n.errors. Code under adoption raises SessionConcurrentLimitError / etc.;
+# legacy `except ConcurrentLimitError` and `except IllegalTransitionError` blocks
+# in transports/services continue to match because these names are the SAME class.
+# ASRProviderError is also an I18nError alias so `except ASRProviderError` in
+# services/diagnostics.py catches exceptions raised by funasr_server.py.
+from app.core.i18n.errors import (  # noqa: E402,F401
+    I18nError as ASRProviderError,
+    SessionConcurrentLimitError as ConcurrentLimitError,
+    SessionIllegalTransitionError as IllegalTransitionError,
+)
+
 
 class DomainError(Exception):
     """领域异常基类。"""
@@ -11,17 +23,6 @@ class DomainError(Exception):
 
 class AuthError(DomainError):
     """token 无效/缺失（WS 层捕获后回 error + 关闭；HTTP 层转 401）。"""
-
-
-class ConcurrentLimitError(DomainError):
-    """全局活跃访谈数已达上限（session.max_concurrent，= FunASR 房间容量）。
-
-    活跃指 setting_up / in_progress（持有 live 运行时）；suspended 不占名额。
-    """
-
-
-class IllegalTransitionError(DomainError):
-    """非法状态转换。"""
 
 
 class SessionNotFound(DomainError):
@@ -34,7 +35,3 @@ class TemplateNotFound(DomainError):
 
 class LLMProviderError(DomainError):
     """LLM provider 调用失败（超时/重试耗尽/未配置）。"""
-
-
-class ASRProviderError(DomainError):
-    """ASR provider 连接/初始化失败（服务未启动 / ws_url 错误 / TLS 失败等）。"""

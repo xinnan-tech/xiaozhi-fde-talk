@@ -71,8 +71,11 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _validate_prod(self) -> "Settings":
         """生产环境强校验（DB_URL 必须为 MySQL/PostgreSQL）。"""
+        # 延迟导入：避免 settings 导入期拉起 i18n 子包（settings 被广泛 import）
+        from app.core.i18n.errors import I18nError
+        from app.core.i18n.messages import Keys
         if self.env == "prod" and not self.db_url.startswith(("mysql+", "postgresql+")):
-            raise ValueError("生产环境禁止使用 SQLite，必须用 MySQL/PostgreSQL")
+            raise I18nError(Keys.SETTINGS_PROD_NO_SQLITE, http_status=400)
         return self
 
     @model_validator(mode="after")

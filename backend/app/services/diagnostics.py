@@ -26,13 +26,46 @@ import httpx
 from app.adapters.asr.funasr_server import FunASRServerProvider
 from app.adapters.llm.factory import get_llm
 from app.core.config_store import get_config_store
-from app.core.exceptions import ASRProviderError, LLMProviderError
+from app.core.i18n import Keys, t
+from app.core.i18n.context import current_locale
+from app.core.i18n.errors import I18nError
 
 logger = logging.getLogger(__name__)
 
 # 内嵌真实样本路径（部署包内）
 _FIXTURE_DIR = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
 _REAL_SAMPLE = _FIXTURE_DIR / "longcheng.wav"
+
+
+def _localized(key: Keys, **params: Any) -> str:
+    """Resolve an i18n key for the current request's locale."""
+    return t(key.value, locale=current_locale(), **params)
+
+
+def _result(code: str, **kw: Any) -> dict:
+    """Build a diagnostic result dict; add `i18n_key` when `key` is passed.
+
+    Usage::
+
+        _result("config_missing", key=Keys.DIAG_LLM_CONFIG_MISSING,
+                key_params={"missing": "x, y"})
+
+    For result dicts that need extra fields (e.g. ``latency_ms``, ``detail``),
+    pipe-merge with the returned dict.
+    """
+    i18n_key_value = kw.pop("key", None)
+    key_params = kw.pop("key_params", {})
+    message_override = kw.pop("message", None)
+    if message_override is not None:
+        message = message_override
+    elif i18n_key_value is not None:
+        message = _localized(i18n_key_value, **key_params)
+    else:
+        raise ValueError("_result requires either `key` or `message`")
+    out: dict[str, Any] = {"ok": code == "ok", "code": code, "message": message}
+    if i18n_key_value is not None:
+        out["i18n_key"] = i18n_key_value.value
+    return out
 
 
 # ---------- 错误归因 ----------
@@ -46,67 +79,127 @@ def _extract_llm_error(exc: Exception) -> dict[str, Any]:
     - 网络/超时/连接拒绝 → unreachable
     - 其它 → server
 
-    LLMProviderError 在 adapter 层已经聚合并丢了 cause；对它只看字符串信号。
+    adapter 已切到 I18nError：用 `exc.code` 派发归因（不再依赖 str 关键字），
+    兜底分支捕获 adapter 未包装的原始网络/状态异常。
     """
-    # LLMProviderError：adapter 已合并重试错误，需用字符串关键字识别
-    if isinstance(exc, LLMProviderError):
-        msg = str(exc).lower()
-        if "未配置" in str(exc) or "api_key" in msg or "base_url" in msg or "model" in msg:
-            return {"ok": False, "code": "config_missing",
-                    "message": f"LLM 配置缺失：{exc}"}
-        if "连接被拒绝" in str(exc) or "connect call failed" in msg or "timeout" in msg \
-                or "timed out" in msg or "name or service" in msg \
-                or "nodename nor servname" in msg:
-            return {"ok": False, "code": "unreachable",
-                    "message": f"无法连接 LLM 服务：{exc}"}
-        # 原始异常在 str 里（如 "ConnectionError: ...", "HTTPStatusError: ..."）
-        return {"ok": False, "code": "server",
-                "message": f"LLM 调用异常：{exc}"}
+    if isinstance(exc, I18nError):
+        code = exc.code
+        params = exc.params or {}
+        if code == Keys.LLM_NOT_CONFIGURED.value:
+            return _result("config_missing",
+                           key=Keys.DIAG_LLM_CONFIG_MISSING_RAW,
+                           key_params={"detail": str(exc)})
+        if code == Keys.LLM_TIMEOUT.value:
+            return _result("unreachable",
+                           key=Keys.DIAG_LLM_UNREACHABLE_TYPED,
+                           key_params={"type": "TimeoutError",
+                                       "detail": str(exc)})
+        if code == Keys.LLM_NON_RETRYABLE.value:
+            status = int(params.get("status", 0) or 0)
+            snippet = (params.get("body") or "")[:200]
+            if status in (401, 403):
+                return _result("auth",
+                               key=Keys.DIAG_LLM_AUTH_FAIL,
+                               key_params={"status": status})
+            if status == 429:
+                return _result("quota",
+                               key=Keys.DIAG_LLM_RATE_LIMIT,
+                               key_params={"status": status, "snippet": snippet})
+            if status in (400, 404):
+                return _result("config_missing",
+                               key=Keys.DIAG_LLM_BAD_CONFIG,
+                               key_params={"status": status, "snippet": snippet})
+            return _result("server",
+                           key=Keys.DIAG_LLM_SERVICE_FAIL,
+                           key_params={"status": status, "snippet": snippet})
+        if code == Keys.LLM_RETRY_EXHAUSTED.value:
+            return _result("server",
+                           key=Keys.DIAG_LLM_INVOKE_FAIL,
+                           key_params={"detail": str(exc)})
+        # JSON 解析 / 字段缺失 / schema 不匹配：归 server（provider 行为异常）
+        if code in (Keys.LLM_NO_JSON_BLOCK.value,
+                    Keys.LLM_INVALID_JSON.value,
+                    Keys.LLM_SCHEMA_MISMATCH.value):
+            return _result("server",
+                           key=Keys.DIAG_LLM_INVOKE_FAIL,
+                           key_params={"detail": str(exc)})
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
         body = exc.response.text or ""
         low = body.lower()
+        snippet = (body or "")[:200]
         if status in (401, 403):
-            return {"ok": False, "code": "auth",
-                    "message": f"鉴权失败（HTTP {status}）：密钥/权限不对，请检查后端配置的 api_key"}
+            return _result("auth",
+                           key=Keys.DIAG_LLM_AUTH_FAIL,
+                           key_params={"status": status})
         if status == 429 or "quota" in low or "balance" in low \
                 or "余额" in body or "欠费" in body or "额度" in body:
-            return {"ok": False, "code": "quota",
-                    "message": f"额度/限流（HTTP {status}）：{(body or '')[:200]}"}
+            return _result("quota",
+                           key=Keys.DIAG_LLM_RATE_LIMIT,
+                           key_params={"status": status, "snippet": snippet})
         if status in (400, 404):
-            return {"ok": False, "code": "config_missing",
-                    "message": f"配置错误（HTTP {status}）：{(body or '')[:200]}"}
-        return {"ok": False, "code": "server",
-                "message": f"LLM 服务异常（HTTP {status}）：{(body or '')[:200]}"}
+            return _result("config_missing",
+                           key=Keys.DIAG_LLM_BAD_CONFIG,
+                           key_params={"status": status, "snippet": snippet})
+        return _result("server",
+                       key=Keys.DIAG_LLM_SERVICE_FAIL,
+                       key_params={"status": status, "snippet": snippet})
     if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException, ConnectionError, OSError)):
-        return {"ok": False, "code": "unreachable",
-                "message": f"无法连接 LLM 服务：{type(exc).__name__}: {exc}"}
-    return {"ok": False, "code": "server",
-            "message": f"LLM 调用异常：{type(exc).__name__}: {exc}"}
+        return _result("unreachable",
+                       key=Keys.DIAG_LLM_UNREACHABLE_TYPED,
+                       key_params={"type": type(exc).__name__, "detail": str(exc)})
+    return _result("server",
+                   key=Keys.DIAG_LLM_INVOKE_FAIL_TYPED,
+                   key_params={"type": type(exc).__name__, "detail": str(exc)})
 
 
 def _extract_asr_error(exc: Exception) -> dict[str, Any]:
-    """ASR 连接/初始化异常 → 结构化结果。"""
-    # ASRProviderError（funasr_server 已包装为带 URL + 中文原因）：直接用其 message
-    if isinstance(exc, ASRProviderError):
-        code = "unreachable" if "连接被拒绝" in str(exc) or "超时" in str(exc) \
-            else "config_missing" if "TLS" in str(exc) or "ws_url" in str(exc) \
-            else "server"
-        return {"ok": False, "code": code, "message": str(exc)}
+    """ASR 连接/初始化异常 → 结构化结果。
+
+    与 _extract_llm_error 对齐：ASRProviderError = I18nError，用 exc.code 派发归因，
+    不再依赖 str() 关键字（之前依赖「连接被拒绝 / 超时 / TLS / ws_url」中文短语，
+    一旦 _connect_reason() 文本微调就会漂移到错误的分类）。
+    """
+    if isinstance(exc, I18nError):
+        code = exc.code
+        if code == Keys.ASR_CONNECT_FAIL.value:
+            # 连接失败：可能是服务未启动（unreachable）也可能是 ws_url/TLS 配错
+            # （config_missing）。凭 code 无法区分，回退到字符串线索——但只针对这一处
+            # 不可避免的小段，且限定在 reason 字段而不是整条 str。
+            reason = str((exc.params or {}).get("reason", ""))
+            low = reason.lower()
+            if "TLS" in reason or "ssl" in low or "certificate" in low \
+                    or "ws_url" in reason:
+                return _result("config_missing",
+                               key=Keys.DIAG_ASR_BAD_URL,
+                               key_params={"type": type(exc).__name__,
+                                           "detail": reason[:200]})
+            return _result("unreachable",
+                           key=Keys.DIAG_ASR_UNREACHABLE,
+                           key_params={"type": type(exc).__name__,
+                                       "detail": reason[:200]})
+        if code == Keys.ASR_DEAD.value:
+            return _result("server",
+                           key=Keys.DIAG_ASR_DEAD,
+                           key_params={"type": type(exc).__name__,
+                                       "detail": str(exc)[:200]})
+        if code == Keys.ASR_FEED_FAIL.value:
+            return _result("server",
+                           key=Keys.DIAG_ASR_INVOKE_FAIL_TYPED,
+                           key_params={"type": type(exc).__name__,
+                                       "detail": str(exc)[:200]})
     msg = str(exc)
     if isinstance(exc, asyncio.TimeoutError):
-        return {"ok": False, "code": "unreachable", "message": "ASR 连接超时"}
+        return _result("unreachable", key=Keys.DIAG_ASR_TIMEOUT)
     if isinstance(exc, ConnectionError) or "refused" in msg.lower() or "connect call failed" in msg.lower():
-        return {"ok": False, "code": "unreachable",
-                "message": "ASR 服务连不上（端口未通 / 服务未启动），请确认 FunASR 已启动"}
+        return _result("unreachable", key=Keys.DIAG_ASR_UNREACHABLE)
     if "ssl" in msg.lower() or "certificate" in msg.lower():
-        return {"ok": False, "code": "config_missing",
-                "message": "ASR TLS 握手失败：检查 ws_url 协议（ws/wss）与证书"}
+        return _result("config_missing", key=Keys.DIAG_ASR_TLS_FAIL)
     if "invaliduri" in msg.lower() or "invaliduri" in type(exc).__name__.lower():
-        return {"ok": False, "code": "config_missing",
-                "message": "ASR ws_url 格式不正确"}
-    return {"ok": False, "code": "server",
-            "message": f"ASR 调用异常：{type(exc).__name__}: {(msg or '')[:200]}"}
+        return _result("config_missing", key=Keys.DIAG_ASR_BAD_URL)
+    return _result("server",
+                   key=Keys.DIAG_ASR_INVOKE_FAIL_TYPED,
+                   key_params={"type": type(exc).__name__, "detail": (msg or "")[:200]})
 
 
 # ---------- 测试音频 ----------
@@ -240,8 +333,7 @@ async def diagnose_asr(timeout_s: float = 10.0) -> dict[str, Any]:
     ws_url = cfg.get_sync("asr.ws_url") or ""
     sample_rate = int(cfg.get_sync("asr.sample_rate") or "16000")
     if not ws_url:
-        return {"ok": False, "code": "config_missing",
-                "message": "未配置 asr.ws_url，请到「⚙️ 后端配置」填写"}
+        return _result("config_missing", key=Keys.DIAG_ASR_NOT_CONFIGURED)
 
     wav_bytes = await asyncio.to_thread(_build_test_audio, sample_rate)
     used_real = wav_bytes is not None and _REAL_SAMPLE.exists()
@@ -273,21 +365,21 @@ async def diagnose_asr(timeout_s: float = 10.0) -> dict[str, Any]:
         try:
             await asyncio.wait_for(final_event.wait(), timeout=timeout_s - (time.monotonic() - t0))
         except asyncio.TimeoutError:
-            return {"ok": False, "code": "server",
-                    "message": "ASR 已连接但未返回任何结果（服务僵死？）",
-                    "latency_ms": int((time.monotonic() - t0) * 1000),
-                    "detail": {"utterances": utterances, "sample": "real" if used_real else "synth"}}
+            return _result("server", key=Keys.DIAG_ASR_DEAD) | {
+                "latency_ms": int((time.monotonic() - t0) * 1000),
+                "detail": {"utterances": utterances, "sample": "real" if used_real else "synth"},
+            }
         latency = int((time.monotonic() - t0) * 1000)
         if not utterances:
             # 服务连得上且没崩，但没识别出文字（合成 tone 或静音下的常见情况）
-            return {"ok": False, "code": "server",
-                    "message": "ASR 连通但未识别出文字（可能 ws_url 指向了空模型 / 测试样本太短）",
-                    "latency_ms": latency,
-                    "detail": {"utterances": utterances, "sample": "real" if used_real else "synth"}}
-        return {"ok": True, "code": "ok",
-                "message": "ASR 连通 + 转写成功",
+            return _result("server", key=Keys.DIAG_ASR_NO_RESULT) | {
                 "latency_ms": latency,
-                "detail": {"utterances": utterances, "sample": "real" if used_real else "synth"}}
+                "detail": {"utterances": utterances, "sample": "real" if used_real else "synth"},
+            }
+        return _result("ok", key=Keys.DIAG_ASR_OK) | {
+            "latency_ms": latency,
+            "detail": {"utterances": utterances, "sample": "real" if used_real else "synth"},
+        }
     except Exception as e:  # noqa: BLE001
         return _extract_asr_error(e) | {"latency_ms": int((time.monotonic() - t0) * 1000),
                                         "detail": {"utterances": utterances,
@@ -311,8 +403,9 @@ async def diagnose_llm(timeout_s: float = 15.0) -> dict[str, Any]:
                               ("llm.api_key", api_key),
                               ("llm.model", model)] if not v]
     if missing:
-        return {"ok": False, "code": "config_missing",
-                "message": f"LLM 未配置（缺失：{', '.join(missing)}），请到「⚙️ 后端配置」补齐"}
+        return _result("config_missing",
+                       key=Keys.DIAG_LLM_CONFIG_MISSING,
+                       key_params={"missing": ", ".join(missing)})
 
     provider = get_llm()
     t0 = time.monotonic()
@@ -324,13 +417,13 @@ async def diagnose_llm(timeout_s: float = 15.0) -> dict[str, Any]:
         latency = int((time.monotonic() - t0) * 1000)
         text = (reply or "").strip()
         if not text:
-            return {"ok": False, "code": "server",
-                    "message": "LLM 已连通但返回为空（可能被限流/封禁/请求被拒）",
-                    "latency_ms": latency}
-        return {"ok": True, "code": "ok",
-                "message": "LLM 连通 + 正常返回",
+            return _result("server", key=Keys.DIAG_LLM_OK_BUT_EMPTY) | {
                 "latency_ms": latency,
-                "detail": {"model": model, "reply": text[:160]}}
+            }
+        return _result("ok", key=Keys.DIAG_LLM_OK) | {
+            "latency_ms": latency,
+            "detail": {"model": model, "reply": text[:160]},
+        }
     except Exception as e:  # noqa: BLE001
         return _extract_llm_error(e) | {"latency_ms": int((time.monotonic() - t0) * 1000)}
 

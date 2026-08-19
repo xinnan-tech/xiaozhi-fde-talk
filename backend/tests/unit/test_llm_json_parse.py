@@ -17,6 +17,8 @@ from pydantic import BaseModel
 
 from app.adapters.llm.base import LLMError
 from app.adapters.llm.openai_compatible import OpenAILLMProvider
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
 
 
 def _make_provider() -> OpenAILLMProvider:
@@ -32,16 +34,21 @@ def _make_provider() -> OpenAILLMProvider:
 async def test_chat_json_handles_text_without_braces():
     provider = _make_provider()
     provider._request = AsyncMock(return_value="plain text no braces")
-    with pytest.raises(LLMError, match="JSON"):
+    with pytest.raises(I18nError) as ei:
         await provider.chat_json("sys", "user")
+    assert ei.value.code == Keys.LLM_NO_JSON_BLOCK.value
+    # LLMError alias still importable & is the SAME class.
+    assert isinstance(ei.value, LLMError)
 
 
 @pytest.mark.asyncio
 async def test_chat_json_handles_malformed_json():
     provider = _make_provider()
     provider._request = AsyncMock(return_value="prefix {bad: not json} suffix")
-    with pytest.raises(LLMError, match="JSON"):
+    with pytest.raises(I18nError) as ei:
         await provider.chat_json("sys", "user")
+    assert ei.value.code == Keys.LLM_INVALID_JSON.value
+    assert isinstance(ei.value, LLMError)
 
 
 @pytest.mark.asyncio
@@ -51,8 +58,10 @@ async def test_chat_json_validates_output_schema():
 
     provider = _make_provider()
     provider._request = AsyncMock(return_value='{"unexpected": "field"}')
-    with pytest.raises(LLMError, match="schema"):
+    with pytest.raises(I18nError) as ei:
         await provider.chat_json("sys", "user", output_schema=_Out)
+    assert ei.value.code == Keys.LLM_SCHEMA_MISMATCH.value
+    assert isinstance(ei.value, LLMError)
 
 
 @pytest.mark.asyncio

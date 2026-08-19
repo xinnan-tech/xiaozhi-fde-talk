@@ -20,7 +20,13 @@ import websockets
 
 from app.adapters.asr.base import ASRProvider
 from app.core.config_store import get_config_store
-from app.core.exceptions import ASRProviderError
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
+
+# Aliased: ASRProviderError = I18nError. Existing `raise ASRProviderError(...)` and
+# `except ASRProviderError` (in services/diagnostics.py) keep working; the
+# localized message comes from Keys.*.
+ASRProviderError = I18nError
 
 logger = logging.getLogger(__name__)
 
@@ -173,20 +179,22 @@ class FunASRServerProvider(ASRProvider):
             # 连接失败属于运营/配置问题，翻成领域异常：handler 走"干净告警"分支，
             # 不打 traceback，并把真实原因（服务未启动 / ws_url 错 / TLS）告诉用户
             raise ASRProviderError(
-                f"语音识别（ASR）连接失败：{ws_url}（{_connect_reason(e)}）。"
-                f"请到「⚙️ 后端配置」检查 asr.ws_url，或启动 ASR 服务后重试。"
+                Keys.ASR_CONNECT_FAIL, http_status=502,
+                ws_url=ws_url, reason=_connect_reason(e),
             ) from e
         logger.info("ASR 流已启动：%s", ws_url)
         self._recv_task = asyncio.create_task(self._recv_loop())
 
     async def feed_stream(self, pcm_bytes: bytes) -> None:
         if self._ws is None or self._ws_dead or self._is_stopping:
-            raise ASRProviderError("ASR 连接已断开（funasr 假活）")
+            raise ASRProviderError(Keys.ASR_DEAD, http_status=502)
         async with self._send_lock:
             try:
                 await self._ws.send(pcm_bytes)
             except Exception as e:  # noqa: BLE001
-                raise ASRProviderError(f"ASR feed 失败：{e}") from e
+                raise ASRProviderError(
+                    Keys.ASR_FEED_FAIL, http_status=502, err=str(e),
+                ) from e
 
     async def stop_stream(self) -> None:
         """通知 ASR 服务端音频发送完毕，触发最终结果返回。

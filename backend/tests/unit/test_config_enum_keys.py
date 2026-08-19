@@ -1,5 +1,9 @@
 """ENUM_KEYS 校验 + 新默认值。"""
+import pytest
+
 from app.core.config_store import DEFAULTS, ENUM_KEYS, validate_value
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
 
 
 def test_enum_keys_dict_has_two_keys():
@@ -24,9 +28,12 @@ def test_validate_value_accepts_asr_en():
 
 
 def test_validate_value_rejects_asr_fr():
-    import pytest
-    with pytest.raises(ValueError, match="须为"):
+    with pytest.raises(I18nError) as ei:
         validate_value("asr.language", "fr")
+    assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+    assert ei.value.params["field"] == "asr.language"
+    assert ei.value.params["value"] == "fr"
+    assert ei.value.http_status == 400
 
 
 def test_validate_value_accepts_llm_zh_cn():
@@ -43,16 +50,19 @@ def test_validate_value_accepts_llm_en():
 
 def test_validate_value_rejects_llm_zh_bare():
     """旧 zh（不带地区）应被拒——避免误选输出到错误语种。"""
-    import pytest
-    with pytest.raises(ValueError, match="须为"):
+    with pytest.raises(I18nError) as ei:
         validate_value("llm.output_language", "zh")
+    assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+    assert ei.value.params["field"] == "llm.output_language"
+    assert ei.value.params["value"] == "zh"
+    assert ei.value.http_status == 400
 
 
 def test_validate_value_keys_independent():
     """asr.language 非法不应该影响 llm.output_language，反之亦然。"""
-    import pytest
-    with pytest.raises(ValueError):
+    with pytest.raises(I18nError) as ei:
         validate_value("asr.language", "fr")
+    assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
     # 反向不抛
     validate_value("llm.output_language", "zh_cn")
 

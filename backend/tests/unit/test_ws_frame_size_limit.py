@@ -10,11 +10,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import app.transport.websocket.handler as h_mod
 from app.transport.websocket.handler import WSHandler
 
 
 @pytest.mark.asyncio
-async def test_oversized_bytes_frame_rejected():
+async def test_oversized_bytes_frame_rejected(monkeypatch):
     fake_ws = AsyncMock()
     big = b"x" * 100
     fake_ws.receive = AsyncMock(
@@ -28,16 +29,16 @@ async def test_oversized_bytes_frame_rejected():
 
     fail_calls: list = []
 
-    async def fake_fail(code: str, message: str, close_code: int = 4000) -> None:
+    async def fake_fail(ws, state=None, *, code, i18n_key=None, close_code=None, **params):
         fail_calls.append((code, close_code))
 
-    handler._fail = fake_fail
+    monkeypatch.setattr(h_mod, "_fail", fake_fail)
     await handler._loop()
     assert fail_calls == [("frame_too_large", 4410)]
 
 
 @pytest.mark.asyncio
-async def test_oversized_text_frame_rejected():
+async def test_oversized_text_frame_rejected(monkeypatch):
     fake_ws = AsyncMock()
     big_text = "x" * 100
     fake_ws.receive = AsyncMock(
@@ -51,16 +52,16 @@ async def test_oversized_text_frame_rejected():
 
     fail_calls: list = []
 
-    async def fake_fail(code: str, message: str, close_code: int = 4000) -> None:
+    async def fake_fail(ws, state=None, *, code, i18n_key=None, close_code=None, **params):
         fail_calls.append((code, close_code))
 
-    handler._fail = fake_fail
+    monkeypatch.setattr(h_mod, "_fail", fake_fail)
     await handler._loop()
     assert fail_calls == [("frame_too_large", 4410)]
 
 
 @pytest.mark.asyncio
-async def test_normal_size_frame_not_rejected():
+async def test_normal_size_frame_not_rejected(monkeypatch):
     fake_ws = AsyncMock()
     fake_ws.receive = AsyncMock(
         side_effect=[
@@ -73,9 +74,9 @@ async def test_normal_size_frame_not_rejected():
 
     fail_calls: list = []
 
-    async def fake_fail(code: str, message: str, close_code: int = 4000) -> None:
+    async def fake_fail(ws, state=None, *, code, i18n_key=None, close_code=None, **params):
         fail_calls.append((code, close_code))
 
-    handler._fail = fake_fail
+    monkeypatch.setattr(h_mod, "_fail", fake_fail)
     await handler._loop()
     assert fail_calls == []

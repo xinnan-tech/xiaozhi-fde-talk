@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Optional
 
 from app.domain.coaching import CoachingItem, ItemStatus
 from app.domain.session import Session, SessionStatus, TranscriptSegment
@@ -27,6 +28,10 @@ class SessionState:
     ignored_ids: set[str] = field(default_factory=set)
     coverage: dict[str, list[str]] = field(default_factory=dict)  # item_id -> [seg_id]
     transcript: list[TranscriptSegment] = field(default_factory=list)
+    # WebSocket locale captured at hello time. Runtime.push_* frames consult this
+    # to resolve user-facing text (connection.kicked, session.ended close reason,
+    # audio.low_level, asr_unavailable push). HTTP routes do not write this.
+    locale: Optional[str] = None
     _next_seg_id: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:

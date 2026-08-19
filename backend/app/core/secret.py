@@ -25,6 +25,8 @@ import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
 from app.core.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -64,9 +66,9 @@ class JWTSecretResolver:
 
         # 自动生成并持久化（dev 默认；prod 在 _save_to_db 之前 fail-fast）
         if self.settings.env == "prod":
-            raise RuntimeError(
-                "prod 环境必须先在 system_config 表种入 system.jwt_secret，"
-                "或显式注入；启动拒绝自动生成密钥。"
+            raise I18nError(
+                Keys.SECRET_RESOLVE_FAILED,
+                http_status=503,
             )
 
         new_secret = self._generate_strong_secret()

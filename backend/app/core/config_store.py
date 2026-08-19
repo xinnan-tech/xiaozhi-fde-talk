@@ -16,6 +16,8 @@ from typing import Callable, Iterable, Optional
 
 from sqlalchemy import select
 
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
 from app.persistence.db import SessionLocal
 from app.persistence.models import SystemConfig
 
@@ -69,12 +71,21 @@ ENUM_KEYS: dict[str, set[str]] = {
 
 
 def validate_value(key: str, value: str) -> None:
-    """key 写入校验：NUMERIC_KEYS 校验数值；ENUM_KEYS 校验枚举。其他 key 放行。"""
+    """key 写入校验：NUMERIC_KEYS 校验数值；ENUM_KEYS 校验枚举。其他 key 放行。
+
+    枚举分支走 I18nError(Keys.CONFIG_INVALID_ENUM_VALUE, http_status=400) 让
+    admin 配置页 / API 客户端拿到结构化的 code + params；
+    数值分支保留 ValueError（仅 admin 后台 CLI 路径，暂无对应 Keys）。
+    """
     if key in ENUM_KEYS:
         allowed = ENUM_KEYS[key]
         if value not in allowed:
-            raise ValueError(
-                f"{key} 须为 {' / '.join(sorted(allowed))} 之一：{value!r}"
+            raise I18nError(
+                Keys.CONFIG_INVALID_ENUM_VALUE,
+                http_status=400,
+                field=key,
+                value=value,
+                allowed=" / ".join(sorted(allowed)),
             )
         return
     typ = NUMERIC_KEYS.get(key)

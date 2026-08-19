@@ -1,10 +1,13 @@
 """admin 启动密码强度策略。
 
-校验失败抛 ValueError，由调用方（Settings model_validator / seed_dev_users）转译。
-最小长度 ≥ 8，且不能命中弱密码表（不区分大小写）。
+校验失败抛 I18nError（http_status=400），由调用方（Settings model_validator /
+seed_dev_users）转译。最小长度 ≥ 8，且不能命中弱密码表（不区分大小写）。
 
 """
 from __future__ import annotations
+
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
 
 # frozenset 不可变 + O(1) 查找；预 lower 后存，避免每次 lower
 _WEAK_PASSWORDS: frozenset[str] = frozenset(p.lower() for p in (
@@ -114,20 +117,15 @@ MIN_LENGTH = 8
 _BCRYPT_MAX_BYTES = 72
 
 
-class WeakPasswordError(ValueError):
-    """密码命中弱密码黑名单。"""
-
-
-class PasswordTooShortError(ValueError):
-    """密码长度不足。"""
-
-
-class PasswordTooLongError(ValueError):
-    """密码超过 bcrypt 上限（UTF-8 字节 > 72）。"""
+# Aliased: legacy classes keep working under `except PasswordTooShortError` /
+# `except WeakPasswordError` etc. (e.g. tests/unit/test_password_policy.py).
+WeakPasswordError = I18nError
+PasswordTooShortError = I18nError
+PasswordTooLongError = I18nError
 
 
 def validate_password_strength(password: str) -> None:
-    """校验密码强度。失败抛 ValueError 子类。
+    """校验密码强度。失败抛 I18nError（http_status=400）。
 
     规则：
     1. 长度 ≥ MIN_LENGTH（8）
@@ -135,18 +133,21 @@ def validate_password_strength(password: str) -> None:
     3. 不在弱密码表中（不区分大小写）
     """
     if not password:
-        raise PasswordTooShortError("密码不能为空")
+        raise I18nError(Keys.PASSWORD_TOO_SHORT, http_status=400)
     if len(password) < MIN_LENGTH:
-        raise PasswordTooShortError(
-            f"密码长度不足：要求 ≥ {MIN_LENGTH} 位，当前 {len(password)} 位"
+        raise I18nError(
+            Keys.PASSWORD_TOO_SHORT_MIN, http_status=400,
+            min=MIN_LENGTH, actual=len(password),
         )
     # bcrypt 上限按字节算，避免多字节字符静默截断 / 抛裸异常
     byte_len = len(password.encode("utf-8"))
     if byte_len > _BCRYPT_MAX_BYTES:
-        raise PasswordTooLongError(
-            f"密码超过 bcrypt 上限：UTF-8 字节数 {byte_len} > {_BCRYPT_MAX_BYTES}"
+        raise I18nError(
+            Keys.PASSWORD_TOO_LONG, http_status=400,
+            byte_len=byte_len, max=_BCRYPT_MAX_BYTES,
         )
     if password.lower() in _WEAK_PASSWORDS:
-        raise WeakPasswordError(
-            f"密码命中弱密码黑名单（{len(_WEAK_PASSWORDS)} 条），请换一个"
+        raise I18nError(
+            Keys.PASSWORD_TOO_WEAK, http_status=400,
+            count=len(_WEAK_PASSWORDS),
         )

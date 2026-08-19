@@ -11,11 +11,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import app.transport.websocket.handler as h_mod
 from app.transport.websocket.handler import WSHandler
 
 
 @pytest.mark.asyncio
-async def test_handshake_timeout_closes_ws():
+async def test_handshake_timeout_closes_ws(monkeypatch):
     fake_ws = AsyncMock()
 
     async def _never_returns() -> str:
@@ -27,10 +28,10 @@ async def test_handshake_timeout_closes_ws():
     handler._handshake_timeout_s = 0.05  # 收窄，不等 10s
     fail_calls: list = []
 
-    async def fake_fail(code: str, message: str, close_code: int = 4000) -> None:
+    async def fake_fail(ws, state=None, *, code, i18n_key=None, close_code=None, **params):
         fail_calls.append((code, close_code))
 
-    handler._fail = fake_fail
+    monkeypatch.setattr(h_mod, "_fail", fake_fail)
 
     # 外层兜底：若 handshake 未实现超时（bug），1s 后在此抓住，避免用例挂死
     try:

@@ -9,14 +9,25 @@ import io
 import bleach
 import markdown
 
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
+
 FORMATS = ("md", "html", "word")
 
 
-class FormatNotImplementedError(NotImplementedError):
-    """指定 format 暂未实现（如 pdf）。路由层捕获后返回结构化 501 JSON。"""
-    def __init__(self, fmt: str):
-        super().__init__(f"format {fmt!r} 未实现")
+class ReportFormatNotImplementedError(I18nError):
+    """指定 format 暂未实现（如 pdf）。由 FastAPI I18nError handler 转结构化 501。"""
+    def __init__(self, *, fmt: str):
+        super().__init__(Keys.REPORT_FORMAT_NOT_IMPLEMENTED, http_status=501, fmt=fmt)
+        # Backward compat: existing consumers (routes/reports.py + tests) read
+        # `.fmt` directly; preserve it as a top-level attribute alongside `params['fmt']`.
         self.fmt = fmt
+
+
+# Backward-compatible alias: `app/transport/http/routes/reports.py` and
+# `tests/unit/test_report_export_pdf_501.py` still import this name. It is the
+# SAME class as ReportFormatNotImplementedError so any `except` continues to work.
+FormatNotImplementedError = ReportFormatNotImplementedError
 
 
 _ALLOWED_TAGS = [
@@ -51,8 +62,11 @@ def export(md: str, fmt: str) -> tuple[bytes, str]:
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
     if fmt == "pdf":
-        raise FormatNotImplementedError(fmt)
-    raise ValueError(f"不支持的导出格式：{fmt}（可选 {FORMATS}）")
+        raise ReportFormatNotImplementedError(fmt=fmt)
+    raise I18nError(
+        Keys.HTTP_REPORT_FORMAT_UNSUPPORTED, http_status=400,
+        fmt=fmt, supported=FORMATS,
+    )
 
 
 def _to_docx(md: str) -> bytes:

@@ -147,3 +147,41 @@ def _restore_real_db():
         asyncio.run(_restore())
     except Exception as e:  # noqa: BLE001
         print(f"[conftest] 测试后恢复真实库失败，请手动检查 system_config/users：{e}")
+
+
+# ---- i18n locale fixtures (T06) ----
+# 给测试一个明确的 locale 上下文；fixture 内自带 teardown，避免污染后续用例。
+from app.core.i18n.context import force_locale, reset_locale  # noqa: E402
+
+
+@pytest.fixture
+def force_locale_ctx():
+    """Returns a function; yields a getter for current locale."""
+    return force_locale
+
+
+@pytest.fixture
+def en_locale(force_locale_ctx):
+    tok = force_locale_ctx("en-US")
+    try:
+        yield "en-US"
+    finally:
+        reset_locale(tok)
+
+
+@pytest.fixture
+def zh_cn_locale(force_locale_ctx):
+    tok = force_locale_ctx("zh-CN")
+    try:
+        yield "zh-CN"
+    finally:
+        reset_locale(tok)
+
+
+@pytest.fixture
+def zh_tw_locale(force_locale_ctx):
+    tok = force_locale_ctx("zh-TW")
+    try:
+        yield "zh-TW"
+    finally:
+        reset_locale(tok)

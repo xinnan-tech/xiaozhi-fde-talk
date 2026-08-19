@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from fastapi.responses import JSONResponse
 
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
 from app.services.reports.exporter import FormatNotImplementedError, export as export_report
 from app.services.reports.generator import get_or_generate
@@ -20,7 +22,7 @@ async def _own_session_or_404(session_id: str, user: CurrentUser):
     """校验访谈归属，返回 SessionState 或抛 404。"""
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     return state
 
 
@@ -56,7 +58,7 @@ async def export_interview_report(
     await _own_session_or_404(session_id, user)
     status_str, md = await get_or_generate(session_id)
     if status_str != "ready" or not md:
-        raise HTTPException(status.HTTP_409_CONFLICT, "报告尚未就绪")
+        raise I18nError(Keys.HTTP_REPORT_NOT_READY, http_status=409)
     try:
         data, media_type = await asyncio.to_thread(export_report, md, format)
     except FormatNotImplementedError as e:
@@ -64,8 +66,13 @@ async def export_interview_report(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             content={"ok": False, "code": "not_implemented", "format": e.fmt},
         )
+    except I18nError:
+        raise
     except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+        raise I18nError(
+            Keys.HTTP_REPORT_FORMAT_UNSUPPORTED, http_status=400,
+            fmt=str(e), supported="md/html/word",
+        )
     ext = "docx" if format == "word" else format
     return Response(
         content=data,

@@ -84,8 +84,10 @@ _REPORT_SYSTEM = """你是访谈报告撰写助手。照给定的 Markdown 骨�
 # 报告输出语种指令：默认 zh_cn 不追加（与现有报告形态一致），其他语种显式切换。
 # 设计要点（en directive）：
 # 1. 强约束全文英文（含 heading / bullet label / 占位符填充）。
-# 2. 显式告知 LLM「忽略 base prompt 的中文结构约束」——这是 qwen-plus 在中文 base
-#    + 中文转写场景下默认输出中文的根因；不加这一句 directive 会被镜像行为压过。
+# 2. 正面说法——把 base prompt 的"中文骨架"重新声明为"语言中立脚手架"，让 LLM
+#    继承 heading 层级、占位符替换等结构性规则，但**改写** section 标签、example
+#    措辞为英文。负面"ignore"句式易让 LLM 走偏丢掉 {{ }} 删除这类**结构性但语言中立**
+#    的规则。
 # 3. 提供 fallback 短语，与 _fill_dangling_labels 的兜底严丝合缝。
 # 4. 保留通用规则（{{session.X}} 预填、{{skill: ...}} 标记、章节层级、Markdown 输出形态）。
 _REPORT_LANG_INSTRUCTION: dict[str, str] = {
@@ -99,6 +101,14 @@ _REPORT_LANG_INSTRUCTION: dict[str, str] = {
           "interviewee / goal metadata are in Chinese, do NOT copy Chinese text. "
           "Synthesize the user's points into English prose, and translate metadata "
           "into English when you restate them.\n"
+          "- The base system prompt's headings and example phrasings are written in "
+          "Chinese as scaffolding for zh_cn reports. For English output, **use them as "
+          "structural guidance only**: adopt the heading hierarchy, the section order, "
+          "and the placeholder substitution rules; but rewrite all section labels and "
+          "example phrasings in English.\n"
+          "- When filling a `{{ ... }}` placeholder, delete the `{{` and `}}` wrappers "
+          "around your fill content. Leave no raw placeholder label visible in the "
+          "output.\n"
           "- `{{session.X}}` placeholders are pre-filled by the system — keep them "
           "verbatim. `{{skill: ...}}` tags are invocation points — keep them verbatim "
           "(do not touch the inner `{{ }}`).\n"
@@ -107,11 +117,7 @@ _REPORT_LANG_INSTRUCTION: dict[str, str] = {
           "placeholder, do not leave the section empty.\n"
           "- Keep the heading hierarchy and section order from the skeleton; do NOT add "
           "or remove sections. Output only the filled Markdown — no explanations or "
-          "code-block wrapping.\n"
-          "- **Ignore the Chinese structural guidance in the base system prompt; the "
-          "English rules above are the only structural rules to follow for English "
-          "output.** Treat the base prompt's labels and example phrasings as "
-          "language-neutral scaffolding only.",
+          "code-block wrapping.",
 }
 
 
@@ -160,6 +166,15 @@ _FALLBACK_BY_LANG: dict[str, str] = {
     "zh_tw": "本次訪談未提及",
     "en": "Not mentioned in this interview.",
 }
+
+
+# 跨 dict 不变量：directive 语种集合 = 兜底语种集合。任一有缺失就在 import 期
+# fail-fast——比单元测试 delayed-feedback 更早暴露 drift。两侧键必须完全相等。
+assert set(_REPORT_LANG_INSTRUCTION) == set(_FALLBACK_BY_LANG), (
+    "语种键必须同步："
+    f"directive={set(_REPORT_LANG_INSTRUCTION)} vs fallback={set(_FALLBACK_BY_LANG)}; "
+    f"差异={set(_REPORT_LANG_INSTRUCTION) ^ set(_FALLBACK_BY_LANG)}"
+)
 
 
 def _fill_dangling_labels(md: str, language: str = "zh_cn") -> str:

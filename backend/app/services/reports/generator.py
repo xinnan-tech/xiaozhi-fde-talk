@@ -106,12 +106,28 @@ _REPORT_LANG_INSTRUCTION: dict[str, str] = {
           "structural guidance only**: adopt the heading hierarchy, the section order, "
           "and the placeholder substitution rules; but rewrite all section labels and "
           "example phrasings in English.\n"
-          "- When filling a `{{ ... }}` placeholder, delete the `{{` and `}}` wrappers "
-          "around your fill content. Leave no raw placeholder label visible in the "
-          "output.\n"
-          "- `{{session.X}}` placeholders are pre-filled by the system — keep them "
-          "verbatim. `{{skill: ...}}` tags are invocation points — keep them verbatim "
-          "(do not touch the inner `{{ }}`).\n"
+          "- **Ordinary `{{ ... }}` placeholders only — wrapper deletion applies to "
+          "these, NOT to the EXEMPT categories listed below.** When you fill an "
+          "ordinary placeholder (e.g. `{{ 客户/行业 }}` or `{{ 痛点描述 }}`), replace "
+          "the entire `{{ ... }}` block with your content: delete both the `{{` and "
+          "`}}` markers and any prompt text inside. Leave no raw placeholder label "
+          "visible in the output.\n"
+          "- **Two categories of placeholders are EXEMPT from the deletion rule "
+          "above — keep them VERBATIM, including their `{{`/`}}` markers. Deleting "
+          "their wrappers would corrupt the report (loss of session metadata / broken "
+          "skill invocations).**\n"
+          "    1. `{{session.X}}` — pre-filled by the system with the interview's "
+          "project (`{{session.project}}`), interviewee (`{{session.interviewee}}`), "
+          "goal, start_time, and end_time metadata. The skeleton you see already has "
+          "these resolved into actual values; if you ever see a literal `{{session.*}}` "
+          "marker in your output, leave it exactly as it appears.\n"
+          "    2. `{{skill: <id>, inputs: <json>}}` — invocation points that the "
+          "system executes AFTER you finish writing the Markdown. Keep both the outer "
+          "`{{ ... }}` and the inner `skill:` tag intact; do not modify, split, or "
+          "annotate them.\n"
+          "If you are ever unsure whether a placeholder is ordinary or exempt, keep "
+          "it verbatim — the post-processing step will then surface any genuinely "
+          "unfilled slots for the system to fix, rather than silently lose data.\n"
           "- If a section has no content in the transcript, render the label followed "
           "by `Not mentioned in this interview.` (in English). Do not leave the "
           "placeholder, do not leave the section empty.\n"
@@ -138,10 +154,12 @@ _ALLOWED_TAGS = [
 _ALLOWED_ATTRS = {"a": ["href", "title"], "code": ["class"]}
 
 
-# 兜底：LLM 偶尔会在 `{{ ... }}` 里填内容但忘了删 `{{`/`}}` 包装。
-# 保留 `{{skill: ...}}`（标记技能调用），其它整块删掉。
-# 匹配 `{{` 后面非 `skill:` 开头、非 `}` 字符、再到 `}}`。
-_ORPHAN_PLACEHOLDER_RE = re.compile(r"\{\{(?!skill:)[^}]*\}\}", re.DOTALL)
+# 兜底：LLM 偶尔会在 `{{ ... }}` 里填内容但忘了删 `{{`/`}}` 包装，整块清除。
+# 保留两类 EXEMPT：`{{skill: ...}}`（技能调用点，系统后处理要识别）+ `{{session.X}}`
+# （会话元数据占位符，与 base skeleton 的 _prefill_session_placeholders 同形态——
+# 如果误以为是 orphan 删掉，会丢项目名/受访者/时间等关键元数据，且前端无法再补回）。
+# 匹配 `{{` 后面既非 `skill:` 也非 `session.` 开头的占位符。
+_ORPHAN_PLACEHOLDER_RE = re.compile(r"\{\{(?!(?:skill:|session\.))[^}]*\}\}", re.DOTALL)
 
 
 def _strip_orphan_placeholders(md: str) -> str:

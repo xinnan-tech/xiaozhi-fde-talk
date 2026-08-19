@@ -40,20 +40,34 @@ def test_en_directive_uses_chinese_scaffolding_as_structural_only():
     - "chinese" + "scaffolding"（承认 base 是中文骨架）
     - "structural"（声明按结构用）
     - "rewrite"（要求把标签/措辞改写成英文）
-    反向：禁止偷渡成"do not" + 同三词。
+    反向：禁止偷渡成"do not" / "don't" + 同三词。
     """
     body = _report_system("en").lower()
-    # 正向：三组关键词必须以正向指令（肯定式）形态同时出现
+    # 正向：三组关键词必须以正向指令（肯定式）形态同时出现。
+    # 跨度 200 字符略松是为了给将来措辞微调留余地——同事评审认可此权衡。
     pos_pattern = re.compile(
         r"\bchinese\b[\s\S]{0,200}?\bstructur(?:al|ally|e)\b[\s\S]{0,200}?(?<!do not )(?<!don't )\b(?:rewrite|use them|adopt)\b"
     )
     assert pos_pattern.search(body), (
         f"en 指令未把中文骨架声明为「仅结构性脚手架并改写」——会丢结构性规则：{body!r}"
     )
-    # 反向：禁止否定形式偷过（如 future LLM 把这句写反）
-    neg_pattern = re.compile(r"\bdo\s+not\b[\s\S]{0,80}?\bchinese\b[\s\S]{0,80}?\bstructur")
-    assert not neg_pattern.search(body), (
-        f"en 指令不可被偷渡成「do not ... chinese ... structural」否定形式：{body!r}"
+    # 反向：禁止否定形式偷过（包括 don't / do not / do n't 三种 ASCII 形态）。
+    # 用 lookbehind 直接断言"ignore/ignoring 前面不能是 do not / don't"，
+    # 比单独跑两条 regex 更稳：未来措辞改成 "don't ignore the chinese ..." 这类
+    # 也直接命中。
+    neg_pattern = re.compile(
+        r"(?<!do not )(?<!don't )(?<!do n't )\bignore\w*\b[\s\S]{0,80}?\bchinese\b[\s\S]{0,80}?\bstructur"
+    )
+    assert neg_pattern.search(body) is None, (
+        f"en 指令不可被偷渡成「do not / don't ignore ... chinese ... structural」否定形式：{body!r}"
+    )
+    # 双保险：单独跑一次 "don't / do not ... chinese ... structural" 反向匹配，
+    # 防止将来有人忘了走 neg_pattern 这条路径。
+    assert not re.search(
+        r"\b(?:do\s+not|don't|do\s+n't)\b[\s\S]{0,80}?\bchinese\b[\s\S]{0,80}?\bstructur",
+        body,
+    ), (
+        f"en 指令被显式否定引导：{body!r}"
     )
 
 
@@ -62,9 +76,30 @@ def test_en_directive_instructs_placeholder_wrapper_deletion():
     否则 base prompt 的中文"删包装"规则在 en 输出时被 LLM 当成"语言内容"丢掉。
     """
     body = _report_system("en")
-    assert "delete the `{{` and `}}` wrappers" in body, (
+    # 措辞演进：原"delete the `{{` and `}}` wrappers"已并入 EXEMPT-aware 的版本里
+    # 以"delete both the `{{` and `}}` markers"形式出现。两者都视为满足硬要求。
+    has_delete_phrase = (
+        "delete both the `{{` and `}}` markers" in body
+        or "delete the `{{` and `}}` wrappers" in body
+    )
+    assert has_delete_phrase, (
         f"en 指令未显式要求删除 {{ }} 包装——{{ }} 兜底仅靠 _strip_orphan_placeholders 会丢语义上下文：{body!r}"
     )
+
+
+def test_en_directive_enumerates_exempt_placeholders():
+    """直接列出 EXEMPT 类别（session.X / skill:），让 LLM 不会泛化"删包装"
+    到这两类。同时验证"OPS+ET" 措辞——同事评审指出「删除与保留挨太近会误读」
+    之后已物理分开。
+    """
+    body = _report_system("en").lower()
+    # "exempt" 这个关键词必须出现在 en 指令里（明示豁免）
+    assert "exempt" in body, f"en 指令未明确豁免占位符列表：{body!r}"
+    # 两种豁免类别必须分别点名
+    assert "{{session.x}}" in body or "session.x" in body, (
+        f"en 指令未点名 {{session.X}} 豁免：{body!r}"
+    )
+    assert "skill:" in body, f"en 指令未点名 skill 豁免：{body!r}"
 
 
 def test_en_directive_preserves_placeholder_and_skill_rules():

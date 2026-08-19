@@ -76,6 +76,37 @@ def test_strip_preserves_skill_marker():
     assert "}}" in out
 
 
+def test_strip_preserves_session_marker():
+    """`{{session.X}}` 占位符保留——会话元数据，丢则前端无法补救。
+
+    回归需求：旧正则 `\\{\\{(?!skill:)...)` 会把 `{{session.project}}` 当 orphan 删，
+    造成项目名 / 受访者 / 时间等关键元数据静默丢失。改成同时保护 `session.` 前缀。
+    """
+    md = (
+        "# {{session.project}}\n"
+        "> 受访者：{{session.interviewee}}\n"
+        "{{session.start_time}} — {{session.end_time}}\n"
+    )
+    out = _strip_orphan_placeholders(md)
+    assert "{{session.project}}" in out
+    assert "{{session.interviewee}}" in out
+    assert "{{session.start_time}}" in out
+    assert "{{session.end_time}}" in out
+
+
+def test_strip_preserves_session_marker_mixed_with_orphan():
+    """混合：session 占位符保留，普通 orphan 清除。"""
+    md = (
+        "# {{session.project}}\n"
+        "- 客户行业：{{ 客户与行业标签 }}\n"
+        "- 受访者：{{session.interviewee}}\n"
+    )
+    out = _strip_orphan_placeholders(md)
+    assert "{{session.project}}" in out
+    assert "{{session.interviewee}}" in out
+    assert "{{ 客户与行业标签 }}" not in out
+
+
 def test_strip_handles_chinese():
     """长中文描述（含 + / ；）也能识别为占位符。"""
     md = "目标：{{ 优先支持iPad端离线转写+实时摘要生成；中文标点 }}"

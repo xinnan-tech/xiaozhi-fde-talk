@@ -129,6 +129,28 @@
   }
 }
 
+/* 统一 ElMessageBox.confirm 的容器、内容间距和按钮圆角 */
+.el-message-box {
+  padding: 16px !important;
+  border-radius: 16px !important;
+}
+
+.el-message-box__header {
+  padding: 0 0 16px !important;
+}
+
+.el-message-box__content {
+  padding: 0 !important;
+}
+
+.el-message-box__btns {
+  padding: 16px 0 0 !important;
+
+  .el-button {
+    border-radius: 8px !important;
+  }
+}
+
 /* 自定义菜单搜索样式 */
 .pure-search-dialog {
   @media screen and (width > 760px) and (width <= 940px) {

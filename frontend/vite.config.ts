@@ -10,9 +10,15 @@ import {
 } from "./build/utils";
 
 export default ({ mode }: ConfigEnv): UserConfigExport => {
-  const { VITE_PORT, VITE_COMPRESSION, VITE_PUBLIC_PATH } = wrapperEnv(
-    loadEnv(mode, root)
-  );
+  const env = loadEnv(mode, root);
+  const {
+    VITE_PORT,
+    VITE_COMPRESSION,
+    VITE_PUBLIC_PATH,
+    VITE_API_URL,
+    VITE_WS_BASE_URL
+  } = wrapperEnv(env);
+
   return {
     base: VITE_PUBLIC_PATH,
     root,
@@ -28,11 +34,11 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       proxy: {
         "/api": {
           // 这里填写后端地址
-          target: "http://192.168.4.119:8000",
+          target: VITE_API_URL,
           changeOrigin: true
         },
         "/ws": {
-          target: "ws://192.168.4.119:8000",
+          target: VITE_WS_BASE_URL,
           changeOrigin: true,
           ws: true
         }

@@ -2,7 +2,7 @@ const Layout = () => import("@/layout/index.vue");
 
 export default [
   {
-    path: "/interview",
+    path: "/interview/:id",
     name: "Interview",
     component: () => import("@/views/interview/index.vue"),
     meta: {

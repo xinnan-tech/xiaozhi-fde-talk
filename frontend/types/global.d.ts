@@ -65,6 +65,8 @@ declare global {
     VITE_ROUTER_HISTORY: string;
     VITE_HIDE_HOME: string;
     VITE_COMPRESSION: ViteCompression;
+    VITE_API_URL: string;
+    VITE_WS_BASE_URL: string;
   }
 
   /**

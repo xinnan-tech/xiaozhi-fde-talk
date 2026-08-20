@@ -1,7 +1,6 @@
 import { defineStore } from "pinia";
 import { store } from "../utils";
 import { useUserStoreHook } from "./user";
-import { ElMessage } from "element-plus";
 
 export const useDialogStore = defineStore("intv-dialog", {
   state: () => ({
@@ -11,10 +10,6 @@ export const useDialogStore = defineStore("intv-dialog", {
   actions: {
     openCreateInterview() {
       if (!useUserStoreHook().accessToken) {
-        ElMessage({
-          message: "请先登录",
-          type: "warning"
-        });
         this.openLogin();
         return;
       }

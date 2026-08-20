@@ -140,8 +140,7 @@ const openCreateDialog = () => {
 
 const openInterviewPage = (item: (typeof interviewList.value)[number]) => {
   router.push({
-    path: item.status !== "ended" ? "/interview" : "/report",
-    query: { title: item.title }
+    path: item.status !== "ended" ? `/interview/${item.id}` : "/report"
   });
 };
 
@@ -421,8 +420,6 @@ watch(
               role="button"
               tabindex="0"
               @click="openInterviewPage(item)"
-              @keydown.enter="openInterviewPage(item)"
-              @keydown.space.prevent="openInterviewPage(item)"
             >
               <div class="card-header">
                 <div class="card-icon-box">

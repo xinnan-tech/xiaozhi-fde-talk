@@ -111,13 +111,15 @@ async def test_extract_real_config_store_uses_llm_output_language_key(extract_cl
 
     验 key 名拼写：若代码改成 llm.output_lang，set 注入失效，endpoint 仍 fallback zh_cn，本测试 fail。
     走 public API（get/set）而非私有 _cache，DB + cache + broadcast 都生效；finally 按 snapshot 还原。
+
+    finally 不写空串：validate_value 对 llm.output_language 走 enum 校验，空串不在派生枚举里会抛
+    I18nError，反而把真正断言失败顶掉。original 为 None 索性不还原——warm() 默认会种 zh_cn。
     """
     from app.core.config_store import get_config_store
 
     store = get_config_store()
     key = "llm.output_language"
 
-    # snapshot：读 DB+cache 一致视图；原始 None 视为「未配置」
     original = await store.get(key)
 
     captured = {}
@@ -137,6 +139,6 @@ async def test_extract_real_config_store_uses_llm_output_language_key(extract_cl
         assert "English" in captured["system"], f"system prompt 缺 'English' directive: {captured['system'][:300]}"
         assert "简体中文" not in captured["system"]
     finally:
-        # 还原：None → 写空串（端点 `... or "zh_cn"` 视同未配置）；非 None → 还原原值
-        restore_value = "" if original is None else original
-        await store.set(key, restore_value)
+        # original 为 None 时 DB 没这行（warm() 启动会种 DEFAULTS），不还原避免 enum 校验拒绝空串
+        if original is not None:
+            await store.set(key, original)

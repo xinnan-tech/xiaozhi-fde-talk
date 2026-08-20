@@ -148,6 +148,7 @@ new WebSocket(url, ["bearer." + jwt])
 - `session.ended`：`session_id`（string）。
 - `session.suspended`：`session_id`（string）。
 - `audio.low_level`：`dbfs`（number，30s 滑窗（攒满 20s 即判）的 p95，单位 dBFS）/ `message`（string）— 提示文案。触发条件：p95 < -40 dBFS 且窗内有语音动态（p95−p10 > 15dB，排除纯停顿/环境噪声）；与客户端 AGC 分层——AGC 保可识别下限，本帧兜底 AGC 救不回的场景（系统输入音量近零/浏览器无 AGC/超出最大增益）。每个开麦周期（`listen:start` 之间）至多一帧；连接保持不变。
+- `error`：`type`（固定 `"error"`）/ `code`（string wire code，见 §9 表）/ `message`（string，本地化文案，回退到 code 本身）/ `i18n_key`（string，从语种目录查表，前端用此字段调用本地化）/ `i18n_params`（object，渲染模板时需要的命名参数；前置 i18n 化落地）/ `close`（number，RFC6455 关闭码；**仅在服务端会同时关闭本连接时存在**）。完整示例与 code 全集见 §9。
 
 ---
 
@@ -300,7 +301,7 @@ asr 推送频率由服务端 ASR 断句策略决定，客户端无法控制。`f
 服务端用 `error` 帧通告错误；除 `asr_unavailable` 的会话中场景（见下）外，发帧后紧接关闭连接：
 
 ```json
-{ "type": "error", "code": "asr_unavailable", "message": "语音识别连接已断开" }
+{ "type": "error", "code": "asr_unavailable", "i18n_key": "ws.asr.connect_fail", "i18n_params": {}, "message": "语音识别连接已断开" }
 ```
 
 关闭前还可能推两类通知帧（不是 `error`）：`session.ended`（REST end 后对在线端的兜底通知）和 `session.suspended`（空闲挂起）。

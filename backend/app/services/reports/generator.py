@@ -198,18 +198,21 @@ _DANGLING_LABEL_RE = re.compile(r"^(\s*[-*]\s*.*[:：])\s*$")
 
 # 兜底短语按语种切：与 _report_system 中的 directive 严丝合缝。
 # 避免 LLM 输出正确英文报告后被后处理注入中文（之前硬编码「本次访谈未提及」时的隐性 bug）。
-_FALLBACK_BY_LANG: dict[str, str] = {
-    "zh_cn": "本次访谈未提及",
-    "zh_tw": "本次訪談未提及",
-    "en": "Not mentioned in this interview.",
-}
+# 从 app.core.i18n.lang_meta 派生：单一真源 _LANG_META，加语种只改一处。
+from app.core.i18n.lang_meta import (
+    _LANG_META,
+    derived_fallback_phrases,
+)
+
+_FALLBACK_BY_LANG: dict[str, str] = derived_fallback_phrases()
 
 
-# 跨 dict 不变量：directive 语种集合 = 兜底语种集合。任一有缺失就在 import 期
-# fail-fast——比单元测试 delayed-feedback 更早暴露 drift。两侧键必须完全相等。
-assert set(_REPORT_LANG_INSTRUCTION) == set(_FALLBACK_BY_LANG), (
-    "语种键必须同步："
-    f"directive={set(_REPORT_LANG_INSTRUCTION)} vs fallback={set(_FALLBACK_BY_LANG)}; "
+# 跨 dict 不变量：兜底短语键集合必须等于 _LANG_META 键集合——任一缺都意味着派生源
+# 漂移，import 期 fail-fast 比单测 delayed-feedback 更早暴露。Stage 2 删
+# _REPORT_LANG_INSTRUCTION 后此 assert 保留（约束仍成立：fallback ⊆ _LANG_META）。
+assert set(_FALLBACK_BY_LANG) == set(_LANG_META), (
+    "兜底短语键集合必须等于 _LANG_META 键集合："
+    f"fallback={set(_FALLBACK_BY_LANG)} vs lang_meta={set(_LANG_META)}; "
     f"差异={set(_REPORT_LANG_INSTRUCTION) ^ set(_FALLBACK_BY_LANG)}"
 )
 

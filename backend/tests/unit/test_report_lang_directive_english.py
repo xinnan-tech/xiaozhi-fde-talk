@@ -4,6 +4,7 @@
 """
 import re
 
+from app.core.i18n.lang_meta import _LANG_META
 from app.services.reports.generator import (
     _FALLBACK_BY_LANG,
     _REPORT_LANG_INSTRUCTION,
@@ -128,9 +129,18 @@ def test_en_longer_than_zh_cn():
 
 
 def test_directive_keys_match_fallback_keys():
-    """键集合必须完全相等——任一缺都意味着某边没同步更新。"""
-    assert set(_REPORT_LANG_INSTRUCTION) == set(_FALLBACK_BY_LANG), (
-        f"语种键必须同步：{set(_REPORT_LANG_INSTRUCTION) ^ set(_FALLBACK_BY_LANG)}"
+    """directive 与 fallback 键集合都必须是 _LANG_META 子集——Stage 1 派生后两边各自
+    可以有多有少（fallback 派生 10 条，directive 仍 3 条），但都不能漂出 _LANG_META。
+
+    Stage 2 删 _REPORT_LANG_INSTRUCTION 后这条 assert 整体退化为"fallback ⊆ _LANG_META"，
+    已被 generator.py 模块级 assert 覆盖——届时此测试可删。
+    """
+    lang_meta_keys = set(_LANG_META)
+    assert set(_REPORT_LANG_INSTRUCTION) <= lang_meta_keys, (
+        f"directive 键漂出 _LANG_META：{set(_REPORT_LANG_INSTRUCTION) - lang_meta_keys}"
+    )
+    assert set(_FALLBACK_BY_LANG) <= lang_meta_keys, (
+        f"fallback 键漂出 _LANG_META：{set(_FALLBACK_BY_LANG) - lang_meta_keys}"
     )
 
 

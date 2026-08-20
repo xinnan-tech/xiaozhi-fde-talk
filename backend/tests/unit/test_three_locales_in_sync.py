@@ -62,3 +62,18 @@ def test_directive_keys_only_in_en_us():
     for locale in ("zh_CN", "zh_TW"):
         leaked = [k for k in _load_keys(locale) if k.startswith(_DIRECTIVE_PREFIX)]
         assert not leaked, f"{locale}.json 含应只在 en_US 的 directive keys: {leaked}"
+
+
+def test_directive_values_no_format_placeholders():
+    """directive 值不能含 `{` / `}`——`_EXTRACT_BASE.format()` 遇未注册占位符会 KeyError 炸 /extract。
+
+    若未来 directive 想用 `{` 字面，加转义 `{{` 或换写法。
+    """
+    en_us = json.loads((DATA_DIR / "en_US.json").read_text())
+    bad = []
+    for key, value in en_us.items():
+        if not key.startswith(_DIRECTIVE_PREFIX):
+            continue
+        if "{" in value or "}" in value:
+            bad.append((key, value))
+    assert not bad, f"directive 值含未转义花括号，会让 .format() 炸: {bad}"

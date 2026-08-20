@@ -199,6 +199,7 @@
 
   "diag.label.asr": "ASR (speech recognition)",
   "diag.label.llm": "LLM (language model)",
+  "diag.label.ocr": "OCR (text recognition)",
   "diag.label.ok": "✅ OK",
   "diag.label.config_missing": "⚠️ Missing config",
   "diag.label.unreachable": "🔌 Unreachable",

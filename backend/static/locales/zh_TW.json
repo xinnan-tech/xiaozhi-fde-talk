@@ -199,6 +199,7 @@
 
   "diag.label.asr": "ASR 語音辨識",
   "diag.label.llm": "LLM 大語言模型",
+  "diag.label.ocr": "OCR 文字辨識",
   "diag.label.ok": "✅ 正常",
   "diag.label.config_missing": "⚠️ 設定缺失",
   "diag.label.unreachable": "🔌 連不上",

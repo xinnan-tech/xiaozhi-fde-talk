@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+from app.core.i18n import Keys, t
 from app.services.sessions.runtime import SessionRuntime
 
 
@@ -25,7 +26,8 @@ async def test_end_notifies_and_closes_owner_ws(make_state):
     rt._evict_fn = AsyncMock(side_effect=lambda c, r: evicted.append((c, r)))
     await rt.end()
     assert any(m.get("type") == "session.ended" for m in sent)
-    assert evicted == [(4406, "访谈已结束")]
+    # 用 i18n 目录里的字串对照，不硬编码中文——避免 i18n 文案微调导致断言变脆。
+    assert evicted == [(4406, t(Keys.WS_CLOSE_SESSION_ENDED.value, locale=rt.state.locale))]
 
 
 async def test_end_without_owner_is_noop(make_state):
@@ -42,4 +44,4 @@ async def test_end_send_failure_still_closes(make_state):
     rt._send_fn = AsyncMock(side_effect=RuntimeError("send dead"))
     rt._evict_fn = AsyncMock(side_effect=lambda c, r: evicted.append((c, r)))
     await rt.end()
-    assert evicted == [(4406, "访谈已结束")]
+    assert evicted == [(4406, t(Keys.WS_CLOSE_SESSION_ENDED.value, locale=rt.state.locale))]

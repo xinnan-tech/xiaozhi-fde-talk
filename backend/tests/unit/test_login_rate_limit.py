@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.core.i18n.errors import I18nError
 from app.transport.http.routes import auth as auth_route
 
 
@@ -27,9 +28,9 @@ async def test_login_allows_burst_then_returns_429(monkeypatch):
     for _ in range(rl.capacity):
         with pytest.raises(Exception) as ei:
             await auth_route.login(req, request, db)
-        seen.append(getattr(ei.value, "status_code", None))
+        seen.append(getattr(ei.value, "http_status", None))
     assert all(code == 401 for code in seen), f"burst should reach auth (401), got {seen}"
 
     with pytest.raises(Exception) as ei:
         await auth_route.login(req, request, db)
-    assert getattr(ei.value, "status_code", None) == 429
+    assert getattr(ei.value, "http_status", None) == 429

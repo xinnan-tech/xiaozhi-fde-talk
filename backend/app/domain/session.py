@@ -29,6 +29,7 @@ class TranscriptSegment(BaseModel):
     - text 是覆盖式（该段当前完整文本，不是增量）
     - final:true 之后同 seg_id 仍可能来修正，以最后收到为准
     - end_ms 留服务端，不下发客户端
+    - corrected_text：LLM 在 done 时刻给出的 ASR 错字纠正；空串=未纠正，下游优先读此字段。
     """
     seg_id: str
     start_ms: int
@@ -36,6 +37,7 @@ class TranscriptSegment(BaseModel):
     speaker: str = "unknown"
     text: str
     final: bool = True
+    corrected_text: str = ""
 
 
 class Session(BaseModel):

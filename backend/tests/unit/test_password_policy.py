@@ -12,10 +12,11 @@ import asyncio
 
 import pytest
 
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
 from app.core.password_policy import (
     MIN_LENGTH,
     PasswordTooLongError,
-    PasswordTooShortError,
     WeakPasswordError,
     validate_password_strength,
 )
@@ -24,16 +25,19 @@ from app.core.password_policy import (
 # ---------- validate_password_strength 单元分支 ----------
 
 def test_empty_password_raises_too_short():
-    """空串 → PasswordTooShortError（不能漏到弱密码表分支）。"""
-    with pytest.raises(PasswordTooShortError, match="不能为空"):
+    """空串 → I18nError(code=PASSWORD_TOO_SHORT)（不能漏到弱密码表分支）。"""
+    with pytest.raises(I18nError) as ei:
         validate_password_strength("")
+    assert ei.value.code == Keys.PASSWORD_TOO_SHORT.value
 
 
 def test_short_password_raises_too_short():
-    """< 8 位 → PasswordTooShortError，带长度信息。"""
-    with pytest.raises(PasswordTooShortError) as ei:
+    """< 8 位 → I18nError(code=PASSWORD_TOO_SHORT_MIN)，带长度参数。"""
+    with pytest.raises(I18nError) as ei:
         validate_password_strength("a" * (MIN_LENGTH - 1))
-    assert str(MIN_LENGTH) in str(ei.value)
+    assert ei.value.code == Keys.PASSWORD_TOO_SHORT_MIN.value
+    assert ei.value.params["min"] == MIN_LENGTH
+    assert ei.value.params["actual"] == MIN_LENGTH - 1
 
 
 def test_weak_password_raises_weak():

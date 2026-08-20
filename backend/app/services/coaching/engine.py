@@ -81,6 +81,8 @@ class CoachingEngine:
         self._recompute_lock = asyncio.Lock()
         self._bound: bool = True
         self._initialized = False
+        # 非 LLM 路径可能引用；每次 LLM 调用前都会再读 ConfigStore 覆盖（见 _read_output_language）。
+        self._output_language: str = "zh_cn"
         self._persist: Callable[[], Awaitable[None]] = lambda: interview_repo.save_state_auto(self.state)
 
     def ainit(self) -> None:
@@ -102,6 +104,17 @@ class CoachingEngine:
         self._llm_timeout_s = _g("coach.llm_timeout_s", float, "45.0")
         self._llm = get_llm()
         self._initialized = True
+
+    def _read_output_language(self) -> str:
+        """每次 prompt 构建前现读 llm.output_language，不缓存。
+
+        ainit 时读一次作为兜底（_output_language 字段保留供非 LLM 路径用），
+        但每次 _recompute / first_generate / _final_recompute 调 LLM 前必须现读——
+        否则管理员改语种后，旧 session 一直用旧值直到结束。
+        """
+        from app.core.config_store import get_config_store
+        raw = get_config_store().get_sync("llm.output_language")
+        return (raw or "zh_cn").strip().lower() or "zh_cn"
 
     # ── 外部钩子（由 WSHandler 调用）─────────────────────────────────
 
@@ -134,7 +147,7 @@ class CoachingEngine:
             version = self.version
             await self._safe_send(_coaching_update("recomputing", version, []))
             try:
-                system, user = build_first_batch(self.template, self.state.session)
+                system, user = build_first_batch(self.template, self.state.session, self._read_output_language())
                 parsed = await self._llm_with_timeout(system, user)
                 items = self._apply(validate_llm_output(parsed))
                 for i, it in enumerate(items):
@@ -292,7 +305,7 @@ class CoachingEngine:
             version = self.version
             await self._safe_send(_coaching_update("recomputing", version, []))
             try:
-                system = build_system(self.template, self.state.session.goal)
+                system = build_system(self.template, self.state.session.goal, self._read_output_language())
                 user = build_user(self.state)
                 parsed = await self._llm_with_timeout(system, user)
                 self.state.items = self._apply(validate_llm_output(parsed))
@@ -328,7 +341,7 @@ class CoachingEngine:
             version = self.version
             await self._safe_send(_coaching_update("recomputing", version, []))
             try:
-                system = build_system(self.template, self.state.session.goal)
+                system = build_system(self.template, self.state.session.goal, self._read_output_language())
                 user = build_user(self.state)
                 parsed = await self._llm_with_timeout(system, user)
                 self.state.items = self._apply(validate_llm_output(parsed))
@@ -381,6 +394,21 @@ class CoachingEngine:
             text = item.text.strip() if item.text else ""
             if not text:
                 continue
+
+            # 1) 先算 corrections —— 在 CoachingItem(...) 构造之前
+            corrections = getattr(item, "corrected_segments", None) or {}
+            corrections = corrections if (corrections and status == ItemStatus.DONE) else {}
+
+            # 2) 写回 transcript 段的 corrected_text。
+            # 一个段可能支撑多条 done；后写覆盖前写——LLM 不该对同一段给出冲突纠正。
+            if corrections:
+                seg_by_id = {s.seg_id: s for s in self.state.transcript}
+                for seg_id, corrected in corrections.items():
+                    seg = seg_by_id.get(seg_id)
+                    if seg is not None and corrected and corrected.strip():
+                        seg.corrected_text = corrected.strip()
+
+            # 3) 构造 CoachingItem 时把 corrected_segments 传出去 —— 前端 done 卡片用它显「已纠错 N 处」徽标
             result.append(CoachingItem(
                 id=item_id,
                 text=text,
@@ -388,6 +416,7 @@ class CoachingEngine:
                 reason=item.reason.strip() if item.reason else "",
                 priority=priority,
                 desc=desc,
+                corrected_segments=corrections,
             ))
             if status == ItemStatus.DONE and item.covered_segments:
                 self.state.coverage[item_id] = list(item.covered_segments)

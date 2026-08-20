@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 
-from app.core.exceptions import IllegalTransitionError
+from app.core.i18n import Keys, current_locale, t
+from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
 from app.services.coaching.engine import TERMINAL_SESSION_STATUSES
@@ -37,6 +39,15 @@ _STATUS_TYPE = {
 }
 
 
+def _utc_isoformat(value: datetime | None) -> str | None:
+    """将数据库时间按 UTC 明确输出，供客户端安全本地化显示。"""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
 def _session_summary(rec, tpl) -> dict:
     """ORM InterviewRecord + Template → summary dict（含派生计数与展示字段）。
 
@@ -62,21 +73,21 @@ def _session_summary(rec, tpl) -> dict:
         "status": rec.status,
         "status_type": _STATUS_TYPE.get(rec.status, "info"),
         "base_info": base_info,
-        "title": base_info.get("project") or "未命名访谈",
+        "title": base_info.get("project") or t(Keys.HTTP_SESSION_TITLE_DEFAULT, locale=current_locale()),
         "interviewee": base_info.get("interviewee", ""),
         "type": tpl.name if tpl else "",
-        "recent_time": max(
+        "recent_time": _utc_isoformat(max(
             filter(None, [rec.created_at, rec.started_at, rec.ended_at])
-        ).isoformat() if any([rec.created_at, rec.started_at, rec.ended_at]) else None,
+        )) if any([rec.created_at, rec.started_at, rec.ended_at]) else None,
         "goal": rec.goal,
         "pending_count": pending_count,
         "covered_count": covered_count,
         "asked_count": asked_count,
         "ignored_count": len(ignored_ids),
         "total_count": len(items),
-        "created_at": rec.created_at.isoformat() if rec.created_at else None,
-        "started_at": rec.started_at.isoformat() if rec.started_at else None,
-        "ended_at": rec.ended_at.isoformat() if rec.ended_at else None,
+        "created_at": _utc_isoformat(rec.created_at),
+        "started_at": _utc_isoformat(rec.started_at),
+        "ended_at": _utc_isoformat(rec.ended_at),
     }
 
 
@@ -91,7 +102,7 @@ async def _summary_from_session_id(session_id: str) -> dict:
     async with SessionLocal() as db:
         rec = await db.get(InterviewRecord, session_id)
         if rec is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在")
+            raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
         tpl = get_template(rec.template_id)
         return _session_summary(rec, tpl)
 
@@ -107,9 +118,9 @@ def _state_detail(state) -> dict:
         "goal": s.goal,
         "first_batch_generated": s.first_batch_generated,
         "consumed_seq": s.consumed_seq,
-        "created_at": s.created_at,
-        "started_at": s.started_at,
-        "ended_at": s.ended_at,
+        "created_at": _utc_isoformat(s.created_at),
+        "started_at": _utc_isoformat(s.started_at),
+        "ended_at": _utc_isoformat(s.ended_at),
         "items": [it.model_dump(mode="json") for it in state.items],
         "skipped_ids": sorted(state.skipped_ids),
         "ignored_ids": sorted(state.ignored_ids),
@@ -126,7 +137,7 @@ async def create_interview(
     try:
         state = await manager.create(user.user_id, req.template_id, req.base_info, req.goal)
     except KeyError:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "模板不存在")
+        raise I18nError(Keys.HTTP_TEMPLATE_NOT_FOUND, http_status=404)
     return await _summary_from_session_id(state.session.id)
 
 
@@ -145,7 +156,7 @@ async def list_interviews(
                 SessionStatus(s.strip()) for s in status.split(",") if s.strip()
             ]
         except ValueError as e:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"未知状态：{e}")
+            raise I18nError(Keys.HTTP_UNKNOWN_STATUS, http_status=400, value=str(e))
     pairs = await manager.list_summaries_for_user(user.user_id, statuses=statuses)
     return {"items": [_session_summary(rec, tpl) for rec, tpl in pairs]}
 
@@ -166,7 +177,7 @@ async def get_interview(
     state = await manager.get(session_id)
     # 资源隔离：不是本人的访谈一律 404（不泄露存在性）
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     return _state_detail(state)
 
 
@@ -178,11 +189,10 @@ async def update_interview(
 ):
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
-    try:
-        await manager.update(session_id, req.base_info, req.goal)
-    except IllegalTransitionError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    # manager.update 抛 I18nError 子类（SessionIllegalTransitionError / Edit/...），
+    # 全局 I18nError handler 会以 409 + 本地化 detail 返回，无需在此 catch。
+    await manager.update(session_id, req.base_info, req.goal)
     return await _summary_from_session_id(session_id)
 
 
@@ -227,7 +237,7 @@ async def first_batch_interview(
     """
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     if state.session.status in TERMINAL_SESSION_STATUSES:
         return _first_batch_response(state)
     rt = registry.get(session_id)
@@ -258,11 +268,9 @@ async def end_interview(
     """
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
-    try:
-        await manager.end(session_id)
-    except IllegalTransitionError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    # manager.end 抛 I18nError 子类，全局 handler 处理。
+    await manager.end(session_id)
     _teardown_runtime(session_id)
     return await _summary_from_session_id(session_id)
 
@@ -274,11 +282,9 @@ async def delete_interview(
 ):
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
-    try:
-        await manager.delete(session_id)
-    except IllegalTransitionError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    # manager.delete 抛 I18nError 子类，全局 handler 处理。
+    await manager.delete(session_id)
     return {"ok": True}
 
 
@@ -290,7 +296,7 @@ async def ignore_item(
 ):
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     await manager.set_item_status(session_id, item_id, "ignore")
     return {"ok": True}
 
@@ -303,7 +309,7 @@ async def unignore_item(
 ):
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     await manager.set_item_status(session_id, item_id, "unignore")
     return {"ok": True}
 
@@ -316,7 +322,7 @@ async def skip_item(
 ):
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     await manager.set_item_status(session_id, item_id, "skip")
     return {"ok": True}
 
@@ -329,6 +335,6 @@ async def unskip_item(
 ):
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "访谈不存在")
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     await manager.set_item_status(session_id, item_id, "unskip")
     return {"ok": True}

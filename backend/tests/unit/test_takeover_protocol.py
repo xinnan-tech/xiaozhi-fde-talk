@@ -193,8 +193,10 @@ async def test_on_takeover_reactivates_parked_runtime_when_owner_gone(monkeypatc
     assert h.runtime is reactivated
 
 
-async def test_on_takeover_refuses_if_terminated():
+async def test_on_takeover_refuses_if_terminated(monkeypatch):
     """会话已结束（runtime terminated）时接管无意义 → 回 session_ended 并关连接。"""
+    import app.transport.websocket.handler as h_mod
+
     fake_ws = AsyncMock()
     h = WSHandler(fake_ws, "s1")
     h.client_id = "clientB"
@@ -202,8 +204,11 @@ async def test_on_takeover_refuses_if_terminated():
     rt._fsm.is_terminated = True
     h.runtime = rt
     fails = []
-    async def fake_fail(code, message, close_code=4000): fails.append(code)
-    h._fail = fake_fail
+
+    async def fake_fail(ws, state=None, *, code, i18n_key=None, close_code=None, **params):
+        fails.append(code)
+
+    monkeypatch.setattr(h_mod, "_fail", fake_fail)
 
     await h._on_takeover()
     assert fails == ["session_ended"]

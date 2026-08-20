@@ -20,7 +20,13 @@ import websockets
 
 from app.adapters.asr.base import ASRProvider
 from app.core.config_store import get_config_store
-from app.core.exceptions import ASRProviderError
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
+
+# Aliased: ASRProviderError = I18nError. Existing `raise ASRProviderError(...)` and
+# `except ASRProviderError` (in services/diagnostics.py) keep working; the
+# localized message comes from Keys.*.
+ASRProviderError = I18nError
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,21 @@ _STRIP_RE = re.compile(r"<\|[^|]*\|>")
 # 让 FunASR 内部 VAD 立刻检测到句尾并切句（避免等 30s 句尾超时）。
 # 1000ms 给 VAD 留足识别窗口（部分服务 VAD 最短静音阈值 ≥600ms）。
 _TAIL_SILENCE_MS = 1000
+
+# FunASR `language` 字段合法值：zh | en | ja | ko | yue | auto。
+# Admin UI 的 asr.language 下拉是 {zh, yue, en}（与 FunASR 合法集对齐）。
+# 我们的 ENUM_KEYS 已经把选项限定到这三个 —— 映射层在 adapter 这里是 identity +
+# 防御性 normalize（万一 DB 里漏进 ja/ko 等也能静默回退自动检测）。
+_FUNASR_LANG_MAP: dict[str, str] = {
+    "zh": "zh",
+    "yue": "yue",
+    "en": "en",
+}
+
+
+def _to_funasr_language(config_value: str | None) -> str:
+    """asr.language 配置值 → FunASR init_msg.language；未识别回退空串（FunASR 自动检测）。"""
+    return _FUNASR_LANG_MAP.get((config_value or "").strip().lower(), "")
 
 
 def _is_local(url: str) -> bool:
@@ -92,6 +113,7 @@ class FunASRServerProvider(ASRProvider):
         store = get_config_store()
         self._ws_url = store.get_sync("asr.ws_url") or "wss://localhost:10096"
         self._sample_rate = int(store.get_sync("asr.sample_rate") or 16000)
+        self._funasr_language: str = _to_funasr_language(store.get_sync("asr.language"))
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         # 连接已不可用（recv_loop 结束）。只立标志不清 self._ws：句柄必须保留
         # 到 close() 真正关闭底层 TCP——先单独跑过 stop_stream 的调用方
@@ -142,6 +164,8 @@ class FunASRServerProvider(ASRProvider):
                 "use_itn": True,
                 "audio_fs": self._sample_rate,
             }
+            if self._funasr_language:
+                init_msg["language"] = self._funasr_language
             await self._ws.send(json.dumps(init_msg))
         except (OSError, asyncio.TimeoutError, ssl.SSLError, websockets.WebSocketException) as e:
             # connect 成功但 send(init_msg) 失败时，self._ws 已是建立好的连接——
@@ -155,20 +179,22 @@ class FunASRServerProvider(ASRProvider):
             # 连接失败属于运营/配置问题，翻成领域异常：handler 走"干净告警"分支，
             # 不打 traceback，并把真实原因（服务未启动 / ws_url 错 / TLS）告诉用户
             raise ASRProviderError(
-                f"语音识别（ASR）连接失败：{ws_url}（{_connect_reason(e)}）。"
-                f"请到「⚙️ 后端配置」检查 asr.ws_url，或启动 ASR 服务后重试。"
+                Keys.ASR_CONNECT_FAIL, http_status=502,
+                ws_url=ws_url, reason=_connect_reason(e),
             ) from e
         logger.info("ASR 流已启动：%s", ws_url)
         self._recv_task = asyncio.create_task(self._recv_loop())
 
     async def feed_stream(self, pcm_bytes: bytes) -> None:
         if self._ws is None or self._ws_dead or self._is_stopping:
-            raise ASRProviderError("ASR 连接已断开（funasr 假活）")
+            raise ASRProviderError(Keys.ASR_DEAD, http_status=502)
         async with self._send_lock:
             try:
                 await self._ws.send(pcm_bytes)
             except Exception as e:  # noqa: BLE001
-                raise ASRProviderError(f"ASR feed 失败：{e}") from e
+                raise ASRProviderError(
+                    Keys.ASR_FEED_FAIL, http_status=502, err=str(e),
+                ) from e
 
     async def stop_stream(self) -> None:
         """通知 ASR 服务端音频发送完毕，触发最终结果返回。

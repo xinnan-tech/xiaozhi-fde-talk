@@ -1,8 +1,8 @@
 """dev DB 自愈：create_all 之后的缺列 ALTER。
 
 回归需求：
-- 现有 reports 表缺 transcript_signature → ADD COLUMN 补上
-- 已有 transcript_signature → 跳过（idempotent）
+- 现有 reports 表缺 transcript_signature / output_language → ADD COLUMN 补上
+- 已有这些列 → 跳过（idempotent）
 - 多调用一次也不报错
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from app.persistence.bootstrap import _column_exists, _ensure_columns, _SELF_HEA
 
 @pytest.fixture
 async def fake_old_db_engine():
-    """造一个缺自愈列的老 dev DB：reports 缺 transcript_signature、interviews 缺 first_batch_generated。"""
+    """造一个缺自愈列的老 dev DB：reports 缺 transcript_signature 与 output_language、interviews 缺 first_batch_generated。"""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         # 对应 ORM 模型之外的最小字段集（不引入 Base.metadata，避免新表自带列）
@@ -54,6 +54,7 @@ async def test_ensure_columns_adds_missing(fake_old_db_engine):
     async with fake_old_db_engine.begin() as conn:
         await _ensure_columns(conn)
         assert await _column_exists(conn, "reports", "transcript_signature") is True
+        assert await _column_exists(conn, "reports", "output_language") is True
         assert await _column_exists(conn, "interviews", "first_batch_generated") is True
 
 
@@ -81,6 +82,11 @@ async def test_ensure_columns_uses_ddl_with_default(fake_old_db_engine):
             "SELECT transcript_signature FROM reports WHERE id='r1'"
         ))).one()
         assert row[0] == ""
+        # output_language 也需 DEFAULT '' 落实
+        row2 = (await conn.execute(text(
+            "SELECT output_language FROM reports WHERE id='r1'"
+        ))).one()
+        assert row2[0] == ""
         irow = (await conn.execute(text(
             "SELECT first_batch_generated FROM interviews WHERE id='i1'"
         ))).one()

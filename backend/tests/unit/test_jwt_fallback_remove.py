@@ -19,6 +19,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
 from app.core.secret import DB_KEY, JWTSecretResolver
 from app.core.settings import Settings
 from app.persistence.models import SystemConfig
@@ -69,7 +71,7 @@ def _settings(env: str = "dev", secret: str | None = None) -> Settings:
 
 
 def test_resolve_no_env_fallback_in_prod(monkeypatch):
-    """prod: env 无 secret + DB 无 secret → RuntimeError（不静默生成）。
+    """prod: env 无 secret + DB 无 secret → I18nError(SECRET_RESOLVE_FAILED)（不静默生成）。
 
     关掉 APP_JWT_ALLOW_ENV_FALLBACK 兜底（默认关闭）。
     """
@@ -78,8 +80,10 @@ def test_resolve_no_env_fallback_in_prod(monkeypatch):
     fake = _FakeSessionBase()  # stored=None → DB 读不到
     resolver = JWTSecretResolver(settings, session_factory=lambda: fake)
 
-    with pytest.raises(RuntimeError, match="prod|密钥|system_config"):
+    with pytest.raises(I18nError) as ei:
         asyncio.run(resolver.resolve())
+    assert ei.value.code == Keys.SECRET_RESOLVE_FAILED.value
+    assert ei.value.http_status == 503
 
     # 关键不变量：prod 绝不能写入新密钥覆盖/生成
     assert len(fake.executed) == 0
@@ -179,3 +183,27 @@ def test_save_to_db_uses_column_name_not_value(monkeypatch):
     assert '"key"' in sql or "'key'" in sql or "key " in sql
     # 不应是字面 value "system.jwt_secret"
     assert '"system.jwt_secret"' not in sql
+
+
+def test_resolve_prod_failure_does_not_leak_secret(monkeypatch):
+    """T14 step 4: prod 启动失败的 I18nError 渲染文本不能含 DB/env 密钥。
+
+    回归保护：避免有人在 future 重构中把 secret 值塞进 params 让 admin UI 暴露它。
+    """
+    monkeypatch.delenv("APP_JWT_ALLOW_ENV_FALLBACK", raising=False)
+    sensitive_value = "super-secret-32-bytes-padding-leak"
+    # env 配的是 sensitive_value；DB 是空（fake.stored=None）。prod 走到
+    # 失败分支时，env 也不会被纳入 SECRET_RESOLVE_FAILED 的 params。
+    settings = _settings(env="prod", secret=sensitive_value)
+    fake = _FakeSessionBase()  # stored=None → DB 读不到
+    resolver = JWTSecretResolver(settings, session_factory=lambda: fake)
+
+    with pytest.raises(I18nError) as ei:
+        asyncio.run(resolver.resolve())
+
+    # params / 任何 locale 渲染 / str(e) 都不能包含敏感值
+    assert sensitive_value not in ei.value.params.values()
+    assert sensitive_value not in ei.value.localized(locale="en-US")
+    assert sensitive_value not in ei.value.localized(locale="zh-CN")
+    assert sensitive_value not in ei.value.localized(locale="zh-TW")
+    assert sensitive_value not in str(ei.value)

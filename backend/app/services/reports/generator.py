@@ -19,6 +19,7 @@ import bleach
 
 from app.adapters.llm.base import LLMError
 from app.adapters.llm.factory import get_llm
+from app.core.config_store import get_config_store
 from app.domain.session import TranscriptSegment
 from app.persistence.repositories.interview import interview_repo
 from app.persistence.repositories.report import report_repo
@@ -39,7 +40,7 @@ def _transcript_signature(transcript: list[TranscriptSegment]) -> str:
     transcript 任何段变化（新增/修改/删除）→ 签名变 → 报告缓存失效 → 重生。
     """
     payload = json.dumps(
-        [{"seg_id": s.seg_id, "text": s.text} for s in transcript],
+        [{"seg_id": s.seg_id, "text": s.text, "corrected_text": s.corrected_text} for s in transcript],
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -80,6 +81,68 @@ _REPORT_SYSTEM = """你是访谈报告撰写助手。照给定的 Markdown 骨�
 - 保持标题层级与章节顺序，不要增删章节。
 - 只输出填好的 Markdown，不要加解释或代码块包裹。"""
 
+# 报告输出语种指令：默认 zh_cn 不追加（与现有报告形态一致），其他语种显式切换。
+# 设计要点（en directive）：
+# 1. 强约束全文英文（含 heading / bullet label / 占位符填充）。
+# 2. 正面说法——把 base prompt 的"中文骨架"重新声明为"语言中立脚手架"，让 LLM
+#    继承 heading 层级、占位符替换等结构性规则，但**改写** section 标签、example
+#    措辞为英文。负面"ignore"句式易让 LLM 走偏丢掉 {{ }} 删除这类**结构性但语言中立**
+#    的规则。
+# 3. 提供 fallback 短语，与 _fill_dangling_labels 的兜底严丝合缝。
+# 4. 保留通用规则（{{session.X}} 预填、{{skill: ...}} 标记、章节层级、Markdown 输出形态）。
+_REPORT_LANG_INSTRUCTION: dict[str, str] = {
+    "zh_cn": "",
+    "zh_tw": "\n\n## 輸出語言\n報告正文請用繁體中文撰寫（標點用全形繁體標點）。"
+          "Markdown 結構（`#` / `-` / 列表）保持不變。空章節兜底用「本次訪談未提及」。",
+    "en": "\n\n## Output language (English, mandatory)\n"
+          "- Write the ENTIRE report body in English — including all section headings, "
+          "bullet labels, and every fill-in for `{{ ... }}` placeholders.\n"
+          "- Even if the conversation transcript and the user-provided project / "
+          "interviewee / goal metadata are in Chinese, do NOT copy Chinese text. "
+          "Synthesize the user's points into English prose, and translate metadata "
+          "into English when you restate them.\n"
+          "- The base system prompt's headings and example phrasings are written in "
+          "Chinese as scaffolding for zh_cn reports. For English output, **use them as "
+          "structural guidance only**: adopt the heading hierarchy, the section order, "
+          "and the placeholder substitution rules; but rewrite all section labels and "
+          "example phrasings in English.\n"
+          "- **Ordinary `{{ ... }}` placeholders only — wrapper deletion applies to "
+          "these, NOT to the EXEMPT categories listed below.** When you fill an "
+          "ordinary placeholder (e.g. `{{ 客户/行业 }}` or `{{ 痛点描述 }}`), replace "
+          "the entire `{{ ... }}` block with your content: delete both the `{{` and "
+          "`}}` markers and any prompt text inside. Leave no raw placeholder label "
+          "visible in the output.\n"
+          "- **Two categories of placeholders are EXEMPT from the deletion rule "
+          "above — keep them VERBATIM, including their `{{`/`}}` markers. Deleting "
+          "their wrappers would corrupt the report (loss of session metadata / broken "
+          "skill invocations).**\n"
+          "    1. `{{session.X}}` — pre-filled by the system with the interview's "
+          "project (`{{session.project}}`), interviewee (`{{session.interviewee}}`), "
+          "goal, start_time, and end_time metadata. The skeleton you see already has "
+          "these resolved into actual values; if you ever see a literal `{{session.*}}` "
+          "marker in your output, leave it exactly as it appears.\n"
+          "    2. `{{skill: <id>, inputs: <json>}}` — invocation points that the "
+          "system executes AFTER you finish writing the Markdown. Keep both the outer "
+          "`{{ ... }}` and the inner `skill:` tag intact; do not modify, split, or "
+          "annotate them.\n"
+          "If you are ever unsure whether a placeholder is ordinary or exempt, keep "
+          "it verbatim — the post-processing step will then surface any genuinely "
+          "unfilled slots for the system to fix, rather than silently lose data.\n"
+          "- If a section has no content in the transcript, render the label followed "
+          "by `Not mentioned in this interview.` (in English). Do not leave the "
+          "placeholder, do not leave the section empty.\n"
+          "- Keep the heading hierarchy and section order from the skeleton; do NOT add "
+          "or remove sections. Output only the filled Markdown — no explanations or "
+          "code-block wrapping.",
+}
+
+
+def _report_system(output_language: str) -> str:
+    """根据 llm.output_language 拼出报告 system prompt。"""
+    return _REPORT_SYSTEM + _REPORT_LANG_INSTRUCTION.get(
+        (output_language or "zh_cn").lower(), ""
+    )
+
 # P3-9: 报告渲染为 HTML 前的白名单。strip=True 移除非白名单标签（含属性）。
 _ALLOWED_TAGS = [
     "h1", "h2", "h3", "h4", "h5", "h6",
@@ -91,10 +154,12 @@ _ALLOWED_TAGS = [
 _ALLOWED_ATTRS = {"a": ["href", "title"], "code": ["class"]}
 
 
-# 兜底：LLM 偶尔会在 `{{ ... }}` 里填内容但忘了删 `{{`/`}}` 包装。
-# 保留 `{{skill: ...}}`（标记技能调用），其它整块删掉。
-# 匹配 `{{` 后面非 `skill:` 开头、非 `}` 字符、再到 `}}`。
-_ORPHAN_PLACEHOLDER_RE = re.compile(r"\{\{(?!skill:)[^}]*\}\}", re.DOTALL)
+# 兜底：LLM 偶尔会在 `{{ ... }}` 里填内容但忘了删 `{{`/`}}` 包装，整块清除。
+# 保留两类 EXEMPT：`{{skill: ...}}`（技能调用点，系统后处理要识别）+ `{{session.X}}`
+# （会话元数据占位符，与 base skeleton 的 _prefill_session_placeholders 同形态——
+# 如果误以为是 orphan 删掉，会丢项目名/受访者/时间等关键元数据，且前端无法再补回）。
+# 匹配 `{{` 后面既非 `skill:` 也非 `session.` 开头的占位符。
+_ORPHAN_PLACEHOLDER_RE = re.compile(r"\{\{(?!(?:skill:|session\.))[^}]*\}\}", re.DOTALL)
 
 
 def _strip_orphan_placeholders(md: str) -> str:
@@ -112,13 +177,34 @@ def _strip_orphan_placeholders(md: str) -> str:
 # 「- 标签：」行尾（标签后无内容）。合法形态是同行跟内容或下一行缩进子条目。
 _DANGLING_LABEL_RE = re.compile(r"^(\s*[-*]\s*.*[:：])\s*$")
 
+# 兜底短语按语种切：与 _report_system 中的 directive 严丝合缝。
+# 避免 LLM 输出正确英文报告后被后处理注入中文（之前硬编码「本次访谈未提及」时的隐性 bug）。
+_FALLBACK_BY_LANG: dict[str, str] = {
+    "zh_cn": "本次访谈未提及",
+    "zh_tw": "本次訪談未提及",
+    "en": "Not mentioned in this interview.",
+}
 
-def _fill_dangling_labels(md: str) -> str:
+
+# 跨 dict 不变量：directive 语种集合 = 兜底语种集合。任一有缺失就在 import 期
+# fail-fast——比单元测试 delayed-feedback 更早暴露 drift。两侧键必须完全相等。
+assert set(_REPORT_LANG_INSTRUCTION) == set(_FALLBACK_BY_LANG), (
+    "语种键必须同步："
+    f"directive={set(_REPORT_LANG_INSTRUCTION)} vs fallback={set(_FALLBACK_BY_LANG)}; "
+    f"差异={set(_REPORT_LANG_INSTRUCTION) ^ set(_FALLBACK_BY_LANG)}"
+)
+
+
+def _fill_dangling_labels(md: str, language: str = "zh_cn") -> str:
     """悬空标签兜底：LLM 无内容可填时偶尔只留「- 标签：」空行，机械补上说明。
 
     提示词已有「须写未提及」规则，但 LLM 执行不稳定——这里是确定性兜底，
     保证报告里不会出现看起来像生成失败的空章节。
+
+    language 参数决定兜底短语：默认 zh_cn（与改前一致），en/zh_tw 显式切换。
+    未知语种回退到 zh_cn 短语（保守）。
     """
+    fallback = _FALLBACK_BY_LANG.get((language or "zh_cn").lower(), _FALLBACK_BY_LANG["zh_cn"])
     lines = md.splitlines()
     filled = 0
     for i, ln in enumerate(lines):
@@ -127,10 +213,10 @@ def _fill_dangling_labels(md: str) -> str:
             continue
         has_sub = i + 1 < len(lines) and lines[i + 1][:1] in (" ", "\t")
         if not has_sub:
-            lines[i] = m.group(1) + " 本次访谈未提及"
+            lines[i] = m.group(1) + " " + fallback
             filled += 1
     if filled:
-        logger.warning("报告有 %d 个空章节标签，已补「本次访谈未提及」", filled)
+        logger.warning("报告有 %d 个空章节标签，已补兜底短语（语种=%s）", filled, language)
     return "\n".join(lines)
 
 
@@ -149,9 +235,10 @@ def sanitize_report_markdown(md: str) -> str:
 
 
 def _build_user(state: SessionState, template) -> str:
-    transcript = (
-        "\n".join(f"[{s.seg_id}] {s.text}" for s in state.transcript) or "（无对话）"
-    )
+    def _seg_text(s: TranscriptSegment) -> str:
+        return s.corrected_text.strip() or s.text
+
+    transcript = "\n".join(f"[{s.seg_id}] {_seg_text(s)}" for s in state.transcript) or "（无对话）"
     bi = state.session.base_info or {}
     doc = _prefill_session_placeholders(template.report.doc, state)
     return (
@@ -163,11 +250,17 @@ def _build_user(state: SessionState, template) -> str:
     )
 
 
-async def generate_report(state: SessionState, template) -> str:
-    """LLM 照骨架填报告 → Markdown（已消毒）。"""
+async def generate_report(state: SessionState, template, language: str) -> str:
+    """LLM 照骨架填报告 → Markdown（已消毒）。
+
+    language 由调用方（get_or_generate）一次性从 ConfigStore 读出并透传——
+    避免 get_or_generate 与 generate_report 之间 read-then-read 的窗口被 admin
+    翻语种污染（之前会出现「cache 标 post-flip、content pre-flip EN」的 race，
+    报告内容跟缓存标签不一致，下次请求继续按新语种命中失配的内容）。
+    """
     llm = get_llm()
-    md = await llm.chat_text(_REPORT_SYSTEM, _build_user(state, template))
-    md = _fill_dangling_labels(_strip_orphan_placeholders(md.strip()))
+    md = await llm.chat_text(_report_system(language), _build_user(state, template))
+    md = _fill_dangling_labels(_strip_orphan_placeholders(md.strip()), language=language)
     return sanitize_report_markdown(md)
 
 
@@ -176,14 +269,20 @@ async def generate_report(state: SessionState, template) -> str:
 _gen_locks: dict[str, asyncio.Lock] = {}
 
 
-def _cache_hit(rec, sig: str) -> bool:
-    """报告缓存有效：ready + 有内容 + 指纹匹配（旧行指纹为空 → 视为失效，重生一次后填上）。"""
+def _cache_hit(rec, sig: str, language: str) -> bool:
+    """报告缓存有效：ready + 有内容 + 指纹匹配 + 语种匹配。
+
+    旧行 transcript_signature 为空 → 视为失效；output_language 为空（迁移前老行）
+    同样视为未标 → 失效。管理员改 llm.output_language 后，存量的旧语种报告不会再
+    一直命中——避免「中文报告永远返回」的隐性 bug。
+    """
     return bool(
         rec
         and rec.status == "ready"
         and rec.content_md
         and rec.transcript_signature
         and rec.transcript_signature == sig
+        and (rec.output_language or "") == language
     )
 
 
@@ -205,9 +304,14 @@ async def get_or_generate(
     if state is None:
         raise ValueError(f"session not found: {session_id}")
     current_sig = _transcript_signature(state.transcript)
+    # 一次性读 llm.output_language：本次请求全程共用一个值（缓存命中判定 / 调 LLM
+    # / 落库标签）。彻底消除之前「cache 标 post-flip、content pre-flip」的 race。
+    language = (
+        get_config_store().get_sync("llm.output_language") or "zh_cn"
+    ).strip().lower() or "zh_cn"
 
     rec = await report_repo.get_by_interview_auto(session_id)
-    if _cache_hit(rec, current_sig):
+    if _cache_hit(rec, current_sig, language):
         await _fire_on_ready(on_ready, session_id, "ready")
         return ("ready", rec.content_md)
 
@@ -215,7 +319,7 @@ async def get_or_generate(
     lock = _gen_locks.setdefault(session_id, asyncio.Lock())
     async with lock:
         rec = await report_repo.get_by_interview_auto(session_id)
-        if _cache_hit(rec, current_sig):
+        if _cache_hit(rec, current_sig, language):
             await _fire_on_ready(on_ready, session_id, "ready")
             return ("ready", rec.content_md)
 
@@ -226,15 +330,18 @@ async def get_or_generate(
 
         # 4. 生成
         try:
-            md = await generate_report(state, template)
+            md = await generate_report(state, template, language)
             md = await render_skills(md)
             status = "ready"
         except LLMError as e:
             logger.warning("报告生成失败：session=%s 原因=%s", session_id, e)
             md, status = "", "failed"
 
-        # 5. 落库（upsert + 更新指纹）
-        await report_repo.upsert_auto(session_id, md, status, transcript_signature=current_sig)
+        # 5. 落库（upsert + 更新指纹 + 语种）
+        await report_repo.upsert_auto(
+            session_id, md, status,
+            transcript_signature=current_sig, output_language=language,
+        )
 
         await _fire_on_ready(on_ready, session_id, status)
         return (status, md)

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _SELF_HEAL_COLUMNS: list[tuple[str, str, str]] = [
     # (table, column, ddl_type_with_default)
     ("reports", "transcript_signature", "VARCHAR(64) DEFAULT ''"),
+    ("reports", "output_language", "VARCHAR(16) DEFAULT ''"),
     ("interviews", "first_batch_generated", "BOOLEAN DEFAULT 0"),
 ]
 

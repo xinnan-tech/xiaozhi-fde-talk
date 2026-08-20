@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 import websockets
@@ -77,7 +78,22 @@ async def test_full_flow(client, login, create_session, end_session, zh_webm):
         r = await c.get(f"/api/v1/interviews/{sid}/report", headers=h)
         assert r.status_code == 200 and r.json()["status"] == "ready", r.text
         md = r.json()["content_md"]
-        assert any(k in md for k in ("需求调研报告", "背景与目的")), f"报告缺骨架: {md[:200]}"
+        # 报告骨架应至少保留一个模板里的 heading——直接从 templates/pm.json 抽
+        # headings，不硬编码中文字串。i18n directive / LLM 输出模板都可能微调标题
+        # 字面，但骨架结构（h1 + 多个 h2）必须保留。
+        tpl_doc = json.loads(
+            (Path(__file__).resolve().parents[2] / "templates" / "pm.json").read_text(
+                encoding="utf-8"
+            )
+        )["doc"]
+        headings = [
+            line.lstrip("# ").strip()
+            for line in tpl_doc.splitlines()
+            if line.startswith("# ") or line.startswith("## ")
+        ]
+        assert any(h_ in md for h_ in headings), (
+            f"报告缺骨架；模板 headings={headings}; 报告前 200 字={md[:200]!r}"
+        )
         for fmt in ("md", "html", "word"):
             r = await c.post(f"/api/v1/interviews/{sid}/export?format={fmt}", headers=h)
             assert r.status_code == 200 and len(r.content) > 0, f"导出 {fmt} 失败: {r.status_code}"

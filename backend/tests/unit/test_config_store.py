@@ -36,7 +36,10 @@ async def test_warm_seeds_missing_keys(store, monkeypatch):
 
     await store.warm()
     assert len(store._cache) == len(DEFAULTS)
-    assert store._cache["llm.base_url"] == ""
+    # 默认 base_url 已改为国内百炼入口（之前是空字符串）
+    assert store._cache["llm.base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # idle_timeout_s 默认 30 分钟（之前是 120 秒，用户原话要求放宽）
+    assert store._cache["session.idle_timeout_s"] == "1800.0"
 
 
 async def test_get_returns_none_for_missing(store, monkeypatch):

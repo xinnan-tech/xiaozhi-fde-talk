@@ -68,6 +68,7 @@ class _FakeRec:
     status: str = "ready"
     content_md: str = ""
     transcript_signature: str = ""
+    output_language: str = ""
 
 
 @pytest.mark.asyncio
@@ -82,7 +83,8 @@ async def test_cache_hit_same_transcript(monkeypatch):
     ))
     monkeypatch.setattr(generator, "report_repo", MagicMock(
         get_by_interview_auto=AsyncMock(return_value=_FakeRec(
-            status="ready", content_md="cached content", transcript_signature=sig,
+            status="ready", content_md="cached content",
+            transcript_signature=sig, output_language="zh_cn",
         )),
         upsert_auto=AsyncMock(),
     ))

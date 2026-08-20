@@ -6,6 +6,7 @@ services:
   funasr:
     image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-runtime-sdk-online-cpu-0.1.12
     container_name: funasr_server
+    restart: unless-stopped
     privileged: true
     ports:
       - "10096:10095"

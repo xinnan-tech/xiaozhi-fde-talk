@@ -92,7 +92,7 @@ async def test_get_config_requires_admin(client, login, create_non_admin_once):
 
 
 async def test_get_config_admin_returns_all_groups(client, login):
-    admin_token = await login(client, "admin", "admin")
+    admin_token = await login(client)
     r = await client.get("/api/v1/admin/config",
                           headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200
@@ -106,7 +106,7 @@ async def test_get_config_admin_returns_all_groups(client, login):
 
 
 async def test_get_config_group(client, login):
-    admin_token = await login(client, "admin", "admin")
+    admin_token = await login(client)
     r = await client.get("/api/v1/admin/config/llm",
                           headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 200
@@ -115,7 +115,7 @@ async def test_get_config_group(client, login):
 
 
 async def test_put_config_updates_non_sensitive(client, login):
-    admin_token = await login(client, "admin", "admin")
+    admin_token = await login(client)
     r = await client.put(
         "/api/v1/admin/config/llm",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -130,7 +130,7 @@ async def test_put_config_updates_non_sensitive(client, login):
 
 
 async def test_put_config_unknown_key_rejected(client, login):
-    admin_token = await login(client, "admin", "admin")
+    admin_token = await login(client)
     r = await client.put(
         "/api/v1/admin/config/llm",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -218,7 +218,7 @@ async def test_non_admin_cannot_list_groups(client, login, create_non_admin_once
 
 
 async def test_unknown_group_404(client, login):
-    admin_token = await login(client, "admin", "admin")
+    admin_token = await login(client)
     r = await client.get("/api/v1/admin/config/bogus",
                           headers={"Authorization": f"Bearer {admin_token}"})
     assert r.status_code == 404

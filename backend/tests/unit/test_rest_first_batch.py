@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core.i18n.errors import I18nError
 from app.core.policies import get_policy
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
@@ -59,9 +60,9 @@ async def test_first_batch_other_user_404(mem_db, monkeypatch):
     state = await _create(mem_db)
     _llm_mock(monkeypatch)
     intruder = CurrentUser(user_id="u-2", username="t")
-    with pytest.raises(HTTPException) as e:
+    with pytest.raises(I18nError) as e:
         await first_batch_interview(state.session.id, intruder)
-    assert e.value.status_code == 404
+    assert e.value.http_status == 404
 
 
 async def test_first_batch_ended_session_skips_llm(mem_db, monkeypatch):

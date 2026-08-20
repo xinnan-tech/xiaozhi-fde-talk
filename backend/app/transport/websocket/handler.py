@@ -20,6 +20,10 @@ from structlog.contextvars import bind_contextvars
 from app.core.exceptions import ASRProviderError, AuthError, IllegalTransitionError
 from app.domain.auth import CurrentUser
 from app.core.config_store import get_session_runtime_config
+from app.core.constants import _WS_ERROR_KEY, WsMsgType
+from app.core.i18n import Keys, t as i18n_t
+from app.core.i18n.context import current_locale, force_locale
+from app.core.i18n.negotiator import resolve_locale
 from app.core.policies import get_policy
 from app.domain.session import SessionStatus
 from app.services.sessions.manager import ConcurrentLimitError, manager
@@ -40,6 +44,90 @@ def _token_from_subprotocols(subprotocols: list[str]) -> Optional[str]:
     return None
 
 
+def _ws_upgrade_accept_language(scope: dict) -> Optional[str]:
+    """从 ASGI scope.headers 提取 Accept-Language（首条匹配的 tag）。"""
+    for k, v in scope.get("headers", []) or []:
+        try:
+            kd = k.decode("latin-1").lower() if isinstance(k, bytes) else str(k).lower()
+        except Exception:  # noqa: BLE001
+            continue
+        if kd == "accept-language":
+            try:
+                vd = v.decode("latin-1") if isinstance(v, bytes) else str(v)
+            except Exception:  # noqa: BLE001
+                continue
+            # parse_accept_language 接受整条 header；我们只想拿首条 tag
+            for raw in vd.split(","):
+                tag = raw.strip().split(";", 1)[0].strip()
+                if tag and tag != "*":
+                    return tag
+    return None
+
+
+def _resolve_hello_locale(hello: dict, scope: dict) -> str:
+    """hello 帧携带的 locale → Accept-Language → 默认（en-US）。"""
+    return resolve_locale(
+        hello.get("locale"),
+        _ws_upgrade_accept_language(scope),
+    )
+
+
+async def _fail(
+    ws,
+    state=None,
+    *,
+    code: str,
+    i18n_key: Optional[str] = None,
+    close_code: Optional[int] = None,
+    **params,
+) -> None:
+    """Send a localized error frame; optionally close.
+
+    Args:
+        ws: WebSocket connection.
+        state: optional SessionState. If provided, locale is read from
+            `state.locale` (set at hello). If None, falls back to
+            `current_locale()` — the contextvar set by I18nHTTPMiddleware /
+            hello parsing.
+        code: wire code (e.g. "bad_handshake", "asr_unavailable",
+            "session_ended").
+        i18n_key: explicit i18n key (overrides default lookup). Required when
+            the wire code alone is ambiguous (e.g. "asr_unavailable" can be
+            initial connect failure OR mid-session disconnect).
+        close_code: if set, also close with this RFC6455 code.
+
+    `state` is intentionally positional with `None` default rather than
+    keyword-only: existing call sites that pass only `ws` continue to work;
+    new sites with a state handle pass it positionally without breaking the
+    old call sites.
+    """
+    if state is not None:
+        locale = getattr(state, "locale", None) or current_locale()
+    else:
+        locale = current_locale()
+    key = i18n_key or _WS_ERROR_KEY.get(code)
+    msg = i18n_t(key, locale=locale, **params) if key else code
+    payload = {
+        "type": "error",
+        "code": code,
+        "i18n_key": key,
+        "i18n_params": dict(params),
+        "message": msg,
+    }
+    if close_code is not None:
+        payload["close"] = close_code
+    await ws.send_json(payload)
+    if close_code is not None:
+        # WebSocket close reason is byte-limited (123B per RFC6455). Slice by
+        # bytes to avoid splitting a multibyte sequence; Starlette's
+        # WebSocket.close(reason: str) requires a string — uvicorn forwards
+        # to websockets.frames.Close.serialize() which calls .encode() on the
+        # reason and would raise AttributeError if passed bytes.
+        reason_bytes = (msg or code).encode("utf-8")[:123]
+        reason_text = reason_bytes.decode("utf-8", errors="ignore")
+        await ws.close(code=close_code, reason=reason_text)
+
+
 class WSHandler:
     """一条 WS 连接 = 一次访谈会话的连接层句柄。只路由/IO，业务在 Runtime。"""
 
@@ -56,10 +144,6 @@ class WSHandler:
     # ---- IO 辅助 ----
     async def _send(self, obj: dict) -> None:
         await self.ws.send_json(obj)
-
-    async def _fail(self, code: str, message: str, close_code: int = 4000) -> None:
-        await self._send({"type": "error", "code": code, "message": message})
-        await self.ws.close(code=close_code)
 
     # ---- 生命周期 ----
     async def run(self) -> None:
@@ -88,14 +172,19 @@ class WSHandler:
             # ASR 连接失败是运营/配置问题（服务未启动 / ws_url 错），非内部 bug：
             # 只打一行告警（不打 traceback），并把可操作的原因发回前端
             logger.warning("ASR 不可用：session=%s 原因=%s", self.session_id, e)
+            # ASRProviderError = I18nError；str(e) 会渲染成 "i18n:asr.connect_fail{...}"
+            # 这种内部调试串不能直接喂给 ws.asr.connect_fail 模板的 {reason}。
+            # 取 params 里的 clean reason，缺失时再退回 str(e)。
             try:
-                await self._fail("asr_unavailable", str(e))
+                await _fail(self.ws, code="asr_unavailable",
+                            i18n_key=Keys.WS_ASR_CONNECT_FAIL,
+                            reason=e.params.get("reason", str(e)))
             except Exception:
                 pass
         except Exception as e:  # noqa: BLE001
             logger.exception("WebSocket 异常：session=%s 原因=%s", self.session_id, e)
             try:
-                await self._fail("internal", "服务内部错误，请重试或联系管理员")
+                await _fail(self.ws, code="internal")
             except Exception:
                 pass
         finally:
@@ -111,23 +200,29 @@ class WSHandler:
                 self.ws.receive_text(), timeout=self._handshake_timeout_s
             )
         except asyncio.TimeoutError:
-            await self._fail("handshake_timeout", "5s 内未收到 hello", close_code=4408)
+            await _fail(self.ws, code="handshake_timeout", close_code=4408)
             return False
         except WebSocketDisconnect:
             return False
         try:
             msg = json.loads(first)
         except json.JSONDecodeError:
-            await self._fail("bad_handshake", "expect JSON hello")
+            await _fail(self.ws, code="bad_handshake", i18n_key=Keys.WS_BAD_HANDSHAKE_JSON)
             return False
         if msg.get("type") != "hello":
-            await self._fail("bad_handshake", "expect hello first")
+            await _fail(self.ws, code="bad_handshake", i18n_key=Keys.WS_BAD_HANDSHAKE_ORDER)
             return False
 
         state = await manager.get(self.session_id)
         if state is None or state.session.user_id != self._user.user_id:
-            await self._fail("not_found", "session not found", close_code=4404)
+            await _fail(self.ws, code="not_found", close_code=4404)
             return False
+
+        # 在 hello 通过 → 业务校验 → manager.start 之前捕获 locale：start 之后
+        # 后续 _fail 调用可读 state.locale；contextvar 同步设置使 run() 内 _fail
+        # 路径也能拿到正确 locale（manager.start 抛 I18nError 时 state 未刷新）。
+        state.locale = _resolve_hello_locale(msg, self.ws.scope)
+        force_locale(state.locale)
 
         try:
             is_reconnect = state.status in (SessionStatus.IN_PROGRESS, SessionStatus.SUSPENDED)
@@ -136,12 +231,15 @@ class WSHandler:
             else:
                 state = await manager.start(self.session_id)
         except ConcurrentLimitError as e:
-            await self._fail("concurrent_limit", str(e), close_code=4409)
+            limit = getattr(e, "params", {}).get("limit", 0)
+            await _fail(self.ws, code="concurrent_limit",
+                        i18n_key=Keys.WS_SESSION_CONCURRENT_LIMIT,
+                        close_code=4409, limit=limit)
             return False
         except IllegalTransitionError:
             # 会话已是终态（ended）：start 的 ended→in_progress 转换非法。
             # 这是业务状态而非内部错误，须以 session_ended + 4406 告知前端。
-            await self._fail("session_ended", "会话已结束，请新建访谈继续", close_code=4406)
+            await _fail(self.ws, code="session_ended", close_code=4406)
             return False
 
         # 获取或复用 Runtime（存活窗口内重连复用同一管线+引擎）
@@ -150,8 +248,12 @@ class WSHandler:
         # 必须在 get_or_create 之前判断，否则 _parked/_active 均空会新建孤儿 runtime
         # 漏进 _active 且无人回收。语义是终态：runtime 正在销毁，重试无意义。
         if registry.is_terminating(self.session_id):
-            await self._fail("session_ended", "会话已结束，请新建访谈继续", close_code=4406)
+            await _fail(self.ws, code="session_ended", close_code=4406)
             return False
+        # 同步 start/on_reconnect 后：state 已被刷新，保留刚解析出的 locale。
+        if state.locale is None:
+            state.locale = _resolve_hello_locale(msg, self.ws.scope)
+            force_locale(state.locale)
         self.runtime = registry.get_or_create(self.session_id, state, policy)
         # 同步初始化（ConfigStore._cache + LLM 单例）—— ainit 幂等，重连场景 no-op
         self.runtime.ainit()
@@ -165,7 +267,9 @@ class WSHandler:
                 and self.runtime._bound_client_id != self.client_id):
             await self._send({
                 "type": "connection.conflict",
-                "message": "该访谈已有另一个连接，是否接管？",
+                "i18n_key": Keys.WS_CONNECTION_CONFLICT.value,
+                "i18n_params": {},
+                "message": i18n_t(Keys.WS_CONNECTION_CONFLICT, locale=state.locale),
             })
             logger.info("连接检测到已有 owner，进入待决（pending）：session=%s owner=%s new=%s",
                         self.session_id, self.runtime._bound_client_id, self.client_id)
@@ -200,15 +304,14 @@ class WSHandler:
             # P3-6: 单帧大小上限（text/bytes 任一 payload）
             payload = raw.get("bytes") or raw.get("text") or ""
             if len(payload) > self._max_frame_bytes:
-                await self._fail(
-                    "frame_too_large", "单帧最大 64KB", close_code=4410
-                )
+                await _fail(self.ws, code="frame_too_large",
+                            close_code=4410, max_kb=64)
                 return
             if "text" in raw:
                 try:
                     await self._dispatch(json.loads(raw["text"]))
                 except json.JSONDecodeError:
-                    await self._fail("bad_json", "invalid JSON")
+                    await _fail(self.ws, code="bad_json", close_code=4411)
                     return
             elif "bytes" in raw:
                 # 隔离单帧异常：解码/喂流偶发失败不能拖垮整条访谈连接
@@ -246,6 +349,11 @@ class WSHandler:
             await self.runtime.skip(msg.get("id"))
         elif t == "coaching.ignore":
             await self.runtime.ignore(msg.get("id"))
+        elif t == WsMsgType.SESSION_TOUCH:
+            # 纯 keepalive：只重置 manager._last_activity_at，不碰 ASR/引擎/管线。
+            # 用户主动暂停过麦时发 listen:start 会重启录制管线——专门一个无副作用帧
+            # 让 keepAlive 按钮安全。
+            manager.touch(self.session_id)
         elif t == "hello":
             pass
         else:
@@ -271,7 +379,7 @@ class WSHandler:
         if rt is None:
             return
         if rt._fsm.is_terminated:
-            await self._fail("session_ended", "会话已结束，请新建访谈", close_code=4406)
+            await _fail(self.ws, code="session_ended", close_code=4406)
             return
         # 旧 owner 可能在待决期间自行离开（runtime 已 unbind / 被 park）。重新取回：
         # 取消 park 的存活窗口定时器，并让寄存账目回到 _active，避免接管后无人回收。
@@ -281,8 +389,7 @@ class WSHandler:
             rt = registry.get_or_create(self.session_id, fresh, get_policy("ws"))
             rt.ainit()
             self.runtime = rt
-        await rt.takeover(self._send, self.client_id, self._self_evict,
-                          reason="连接已被另一个客户端接管")
+        await rt.takeover(self._send, self.client_id, self._self_evict)
         logger.info("连接已接管会话：session=%s client=%s", self.session_id, self.client_id)
         # 接管成功 → 回 hello（含 resume_from_seq），前端据此开麦发 listen:start。
         # takeover 内部已 bind（推了 coaching snapshot），hello 随后到，前端正常开麦。

@@ -7,9 +7,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from app.core.i18n.errors import I18nError
 
-class LLMError(Exception):
-    pass
+# Aliased so existing call-sites (`raise LLMError(...)`, `except LLMError`,
+# `from app.adapters.llm.base import LLMError`) keep working after adoption.
+LLMError = I18nError
 
 
 class LLMProvider(ABC):

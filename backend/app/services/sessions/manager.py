@@ -20,7 +20,18 @@ from typing import Optional
 from uuid import uuid4
 
 from app.core.config_store import get_max_concurrent, get_session_runtime_config
-from app.core.exceptions import ConcurrentLimitError, IllegalTransitionError
+from app.core.i18n.errors import (
+    SessionConcurrentLimitError,
+    SessionDeleteForbiddenError,
+    SessionEditForbiddenError,
+    SessionIllegalTransitionError,
+)
+# Legacy aliases: existing `except ConcurrentLimitError` / `except IllegalTransitionError`
+# in transports/services continue to match because these names are the SAME class.
+from app.core.exceptions import (
+    ConcurrentLimitError,  # noqa: F401  (re-exported alias)
+    IllegalTransitionError,  # noqa: F401  (re-exported alias)
+)
 from app.domain.session import Session, SessionStatus
 from app.domain.template import Template
 from app.persistence.models import InterviewRecord
@@ -140,8 +151,8 @@ class SessionManager:
     # ---- 状态转换 ----
     async def _transition(self, state: SessionState, to: SessionStatus) -> None:
         if to not in _TRANSITIONS.get(state.status, set()):
-            raise IllegalTransitionError(
-                f"非法状态转换: {state.status.value} → {to.value}"
+            raise SessionIllegalTransitionError(
+                from_state=state.status.value, to_state=to.value,
             )
         state.session.status = to
         await interview_repo.save_state_auto(state)
@@ -161,7 +172,7 @@ class SessionManager:
             active = await interview_repo.count_active_auto()
             limit = await get_max_concurrent()
             if active >= limit:
-                raise ConcurrentLimitError(f"活跃访谈数已达上限（{limit}）")
+                raise SessionConcurrentLimitError(limit=limit)
 
             if state.status == SessionStatus.CREATED:
                 await self._transition(state, SessionStatus.SETTING_UP)
@@ -201,7 +212,7 @@ class SessionManager:
         if state is None:
             raise KeyError(session_id)
         if state.status not in (SessionStatus.CREATED, SessionStatus.SUSPENDED):
-            raise IllegalTransitionError(f"当前状态({state.status.value})不可编辑")
+            raise SessionEditForbiddenError(state=state.status.value)
         merged = {**state.session.base_info, **base_info} if base_info is not None else None
         if ((goal is not None and goal != state.session.goal)
                 or (merged is not None and merged != state.session.base_info)):
@@ -249,7 +260,7 @@ class SessionManager:
         if state is None:
             raise KeyError(session_id)
         if state.status in (SessionStatus.IN_PROGRESS, SessionStatus.SETTING_UP):
-            raise IllegalTransitionError(f"进行中的访谈不可删除(当前:{state.status.value})")
+            raise SessionDeleteForbiddenError(state=state.status.value)
         runtime = registry.get(session_id)
         registry.drop(session_id)  # 取消 parked 存活定时器，杜绝过期 end() 复活
         if runtime is not None:
@@ -307,7 +318,7 @@ class SessionManager:
                     active = await interview_repo.count_active_auto()
                     limit = await get_max_concurrent()
                     if active >= limit:
-                        raise ConcurrentLimitError(f"活跃访谈数已达上限（{limit}）")
+                        raise SessionConcurrentLimitError(limit=limit)
                     await self._transition(state, SessionStatus.IN_PROGRESS)
         if state is not None:
             self._active[session_id] = state

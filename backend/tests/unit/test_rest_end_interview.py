@@ -13,6 +13,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
 from app.persistence.models import Base
@@ -66,9 +67,9 @@ async def test_end_interview_not_found(mem_db):
             await conn.run_sync(Base.metadata.create_all)
 
         user = CurrentUser(user_id="u-1", username="t")
-        with pytest.raises(HTTPException) as ei:
+        with pytest.raises(I18nError) as ei:
             await end_interview("no-such-session", user)
-        assert ei.value.status_code == 404
+        assert ei.value.http_status == 404
     finally:
         await engine.dispose()
 

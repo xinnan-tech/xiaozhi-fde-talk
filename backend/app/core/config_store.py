@@ -1,7 +1,7 @@
 """DB 配置 KV 存储 + 内存缓存 + 失效广播单例。
 
 设计要点：
-- 19 个 B 类 key（前后端共用清单 ALL_B_KEYS）
+- 21 个 B 类 key（前后端共用清单 ALL_B_KEYS）
 - 启动期 warm() 一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入
 - 单条 set() / 批量 set_many() 都走 DB + 内存 + 订阅者广播
 - 敏感字段（SENSITIVE_KEYS）GET 返 None、空值 PUT 跳过——避免误清密钥
@@ -16,6 +16,8 @@ from typing import Callable, Iterable, Optional
 
 from sqlalchemy import select
 
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
 from app.persistence.db import SessionLocal
 from app.persistence.models import SystemConfig
 
@@ -23,8 +25,8 @@ logger = logging.getLogger(__name__)
 
 # B 类 19 个 key 的合法清单（前后端共用）
 ALL_B_KEYS: list[str] = [
-    "llm.type", "llm.base_url", "llm.api_key", "llm.model",
-    "asr.type", "asr.sample_rate", "asr.ws_url", "asr.ws_verify_ssl",
+    "llm.type", "llm.base_url", "llm.api_key", "llm.model", "llm.output_language",
+    "asr.type", "asr.language", "asr.sample_rate", "asr.ws_url", "asr.ws_verify_ssl",
     "coach.pause_s", "coach.max_pending_segments", "coach.min_interval_s", "coach.llm_timeout_s",
     "auth.jwt_expire_minutes", "auth.demo_username",
     "session.grace_period_s",
@@ -57,9 +59,35 @@ NUMERIC_KEYS: dict[str, type] = {
     "session.liveness_window_s": float,
 }
 
+# 枚举 key 的合法清单：写入前校验。坏值若落库，admin 配置页会把脏值
+# 显示给用户；运行时 llm.output_language 错值会让 LLM 报错或行为异常。
+ENUM_KEYS: dict[str, set[str]] = {
+    # FunASR 实际支持 {zh, en, ja, ko, yue, auto}，但我们只把常用的 3 个
+    # 暴露给管理员——粤语场景明确支持（用户需求），ja/ko 当前无需求。
+    "asr.language": {"zh", "yue", "en"},
+    # LLM 输出语种：跟 ASR 是独立维度（详见 plan Task 2.5 注释）。
+    "llm.output_language": {"zh_cn", "zh_tw", "en"},
+}
+
 
 def validate_value(key: str, value: str) -> None:
-    """数值 key 的写入校验：可解析且为正数，否则 ValueError（HTTP 层转 422）。"""
+    """key 写入校验：NUMERIC_KEYS 校验数值；ENUM_KEYS 校验枚举。其他 key 放行。
+
+    枚举分支走 I18nError(Keys.CONFIG_INVALID_ENUM_VALUE, http_status=400) 让
+    admin 配置页 / API 客户端拿到结构化的 code + params；
+    数值分支保留 ValueError（仅 admin 后台 CLI 路径，暂无对应 Keys）。
+    """
+    if key in ENUM_KEYS:
+        allowed = ENUM_KEYS[key]
+        if value not in allowed:
+            raise I18nError(
+                Keys.CONFIG_INVALID_ENUM_VALUE,
+                http_status=400,
+                field=key,
+                value=value,
+                allowed=" / ".join(sorted(allowed)),
+            )
+        return
     typ = NUMERIC_KEYS.get(key)
     if typ is None:
         return
@@ -78,10 +106,12 @@ def validate_value(key: str, value: str) -> None:
 # 默认值（首次 warm 时若 DB 缺则种入）
 DEFAULTS: dict[str, str] = {
     "llm.type": "openai",
-    "llm.base_url": "",
+    "llm.base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "llm.api_key": "",
     "llm.model": "qwen-plus",
+    "llm.output_language": "zh_cn",
     "asr.type": "funasr_server",
+    "asr.language": "zh",
     "asr.sample_rate": "16000",
     "asr.ws_url": "wss://localhost:10096",
     "asr.ws_verify_ssl": "false",
@@ -92,7 +122,7 @@ DEFAULTS: dict[str, str] = {
     "auth.jwt_expire_minutes": "1440",
     "auth.demo_username": "admin",
     "session.grace_period_s": "60.0",
-    "session.idle_timeout_s": "120.0",
+    "session.idle_timeout_s": "1800.0",
     "session.idle_check_interval_s": "30.0",
     "session.liveness_window_s": "60.0",
     # 全局同时活跃访谈上限（= FunASR 房间容量）。suspended 不占名额。
@@ -303,7 +333,7 @@ async def get_session_runtime_config() -> dict[str, float]:
     s = get_config_store()
     return {
         "grace_period_s": float(await s.get("session.grace_period_s") or "60.0"),
-        "idle_timeout_s": float(await s.get("session.idle_timeout_s") or "120.0"),
+        "idle_timeout_s": float(await s.get("session.idle_timeout_s") or "1800.0"),
         "idle_check_interval_s": float(await s.get("session.idle_check_interval_s") or "30.0"),
         "liveness_window_s": float(await s.get("session.liveness_window_s") or "60.0"),
     }

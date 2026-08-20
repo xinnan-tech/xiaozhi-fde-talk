@@ -9,10 +9,21 @@ import os
 import sys
 
 from app import __version__
+from app.core.i18n import Keys, t
+from app.core.i18n.locales import DEFAULT
 from app.core.logging import configure_logging
 from app.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _startup_msg(key: Keys, **params) -> str:
+    """Resolve a startup message in the default locale.
+
+    Startup runs before any HTTP request, so there is no negotiated locale
+    to fall back on. Pin to ``DEFAULT`` for stable, deployment-locale-
+    independent stderr output."""
+    return t(key.value, locale=DEFAULT, **params)
 
 
 def _load_settings_or_exit():
@@ -28,33 +39,13 @@ def _load_settings_or_exit():
     """
     try:
         return get_settings()
-    except Exception as e:  # noqa: BLE001
-        # pydantic ValidationError 把 model_validator 抛的 ValueError 裹成
-        # ValidationError(value_error=...)；按"取最短的原始错误信息"原则抽取。
-        msg = _extract_user_message(e)
-        print(f"\n[配置错误] {msg}\n", file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001
+        print(
+            f"\n[配置错误] {_startup_msg(Keys.STARTUP_ADMIN_PASSWORD_MISSING)}\n",
+            file=sys.stderr,
+            flush=True,
+        )
         os._exit(2)
-
-
-def _extract_user_message(e: BaseException) -> str:
-    """从 pydantic ValidationError 里挖出业务错误原文（去掉字段路径/类型噪声）。"""
-    # pydantic v2: ValidationError.errors() -> [{type, msg, loc, ...}]
-    errors = getattr(e, "errors", None)
-    if callable(errors):
-        try:
-            items = errors()
-        except Exception:  # noqa: BLE001
-            items = []
-        for item in items:
-            if item.get("type") == "value_error":
-                ctx = item.get("ctx") or {}
-                err = ctx.get("error") or item.get("msg") or ""
-                # ValueError.__str__ 已经就是我们写在 password_policy 里的中文文案
-                return str(err)
-        # 兜底：取第一条 msg
-        if items:
-            return str(items[0].get("msg") or e)
-    return str(e)
 
 
 def main() -> None:

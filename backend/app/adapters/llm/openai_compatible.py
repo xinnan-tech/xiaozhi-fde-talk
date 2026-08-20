@@ -20,8 +20,14 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel
 
-from app.adapters.llm.base import LLMError, LLMProvider
+from app.adapters.llm.base import LLMProvider
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
 from app.core.retry import BackoffPolicy
+
+# Aliased: LLMError = I18nError. Existing `raise LLMError(...)` and
+# `except LLMError` keep working; the localized message comes from Keys.*.
+LLMError = I18nError
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +100,7 @@ class OpenAILLMProvider(LLMProvider):
         网络错走 BackoffPolicy 指数退避。
         """
         if not self.configured:
-            raise LLMError("LLM 未配置（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL）")
+            raise LLMError(Keys.LLM_NOT_CONFIGURED, http_status=502)
         url = f"{self._base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
         backoff = BackoffPolicy(base_delay=1.0, max_delay=10.0, factor=2.0)
@@ -128,7 +134,10 @@ class OpenAILLMProvider(LLMProvider):
                         return content
                 # 4xx（除 408/429）：不可重试
                 if 400 <= status < 500 and status not in (408, 429):
-                    raise LLMError(f"LLM 调用不可重试：HTTP {status} {resp.text[:200]}")
+                    raise LLMError(
+                        Keys.LLM_NON_RETRYABLE, http_status=502,
+                        status=status, body=resp.text[:200],
+                    )
                 # 5xx / 429 / 408：可重试
                 last_err = f"HTTP {status}: {resp.text[:200]}"
                 logger.warning("LLM 调用第 %d/%d 次失败：%s", attempt + 1, retries + 1, last_err)
@@ -138,7 +147,10 @@ class OpenAILLMProvider(LLMProvider):
                 logger.warning("LLM 网络错第 %d/%d 次：%s", attempt + 1, retries + 1, last_err)
             if attempt < retries:
                 await asyncio.sleep(backoff.delay_for(attempt))
-        raise LLMError(f"LLM 调用 {retries + 1} 次仍失败：{last_err}")
+        raise LLMError(
+            Keys.LLM_RETRY_EXHAUSTED, http_status=502,
+            retries=retries + 1, last_err=last_err,
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -168,18 +180,26 @@ class OpenAILLMProvider(LLMProvider):
         content = await self._request(body, retries)
         fence = re.search(r"\{.*\}", content, re.DOTALL)
         if fence is None:
-            raise LLMError(f"LLM 返回无 JSON 块：{content[:200]}")
+            raise LLMError(
+                Keys.LLM_NO_JSON_BLOCK, http_status=502,
+                snippet=content[:200],
+            )
         json_str = fence.group(0)
         try:
             parsed = json.loads(json_str)
         except json.JSONDecodeError as e:
-            raise LLMError(f"LLM 返回非法 JSON：{e}；原文：{json_str[:200]}") from e
+            raise LLMError(
+                Keys.LLM_INVALID_JSON, http_status=502,
+                err=str(e), json_str=json_str[:200],
+            ) from e
         if output_schema is not None:
             try:
                 output_schema.model_validate(parsed)
             except Exception as e:  # noqa: BLE001
                 raise LLMError(
-                    f"LLM 输出不符合 schema：{e}；原文：{json_str[:200]}") from e
+                    Keys.LLM_SCHEMA_MISMATCH, http_status=502,
+                    err=str(e), json_str=json_str[:200],
+                ) from e
         return parsed
 
     async def chat_text(self, system: str, user: str, retries: int = 2) -> str:
@@ -198,4 +218,4 @@ class OpenAILLMProvider(LLMProvider):
         try:
             return await asyncio.wait_for(self._request(body, retries), timeout=budget)
         except asyncio.TimeoutError as e:
-            raise LLMError(f"chat_text 总超时（>{budget:.0f}s）") from e
+            raise LLMError(Keys.LLM_TIMEOUT, http_status=504, budget=budget) from e

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+from app.core.i18n.messages import Keys
 from app.services.sessions.runtime import SessionRuntime
 from app.transport.websocket.handler import WSHandler
 
@@ -37,7 +38,11 @@ def _sent_types(send_mock) -> list[str]:
 # ── runtime.takeover ──────────────────────────────────────────────────
 
 async def test_takeover_kicks_old_owner_and_binds_new(make_state):
-    """有旧 owner 时：发 connection.kicked 给旧 owner + 调其 evict_fn 关 WS + 绑新 owner。"""
+    """有旧 owner 时：发 connection.kicked 给旧 owner + 调其 evict_fn 关 WS + 绑新 owner。
+
+    PR1: 同时锁定 kicked 帧的 i18n_key + i18n_params 契约，保证前端能用
+    i18n.t(key, params) 完整渲染（i18n_params 当前空 dict，留 forward-compat 接口）。
+    """
     rt = SessionRuntime(make_state())
     _binds(rt)
     sendA, evictA = AsyncMock(), AsyncMock()
@@ -56,6 +61,14 @@ async def test_takeover_kicks_old_owner_and_binds_new(make_state):
     evictA.assert_awaited_once()
     # 新 owner B 不应收到 kicked
     assert "connection.kicked" not in _sent_types(sendB)
+
+    # PR1: kicked 帧携带 i18n_key + i18n_params 契约
+    kicked_frame = next(
+        c.args[0] for c in sendA.call_args_list
+        if isinstance(c.args[0], dict) and c.args[0].get("type") == "connection.kicked"
+    )
+    assert kicked_frame["i18n_key"] == Keys.WS_CONNECTION_KICKED.value
+    assert kicked_frame["i18n_params"] == {}
 
 
 async def test_takeover_skips_kick_when_no_owner(make_state):
@@ -107,6 +120,28 @@ async def test_bind_same_client_id_over_living_is_zombie_warn(make_state, caplog
     with caplog.at_level(logging.WARNING, logger="app.services.sessions.runtime"):
         await rt.bind(AsyncMock(), "clientA", AsyncMock())
     assert any("zombie" in r.message for r in caplog.records)
+
+
+async def test_kicked_frame_carries_i18n_key_for_client_side_render(make_state):
+    """PR1: kicked 帧必须带 i18n_key（前端 client-side 渲染）+ i18n_params（forward-comat
+    接口，当前空 dict），保证前端能 i18n.t(key, params) 完整渲染而不是只读 message。
+    """
+    rt = SessionRuntime(make_state())
+    _binds(rt)
+    sendA, evictA = AsyncMock(), AsyncMock()
+    await rt.bind(sendA, "clientA", evictA)
+    sendB, evictB = AsyncMock(), AsyncMock()
+    await rt.takeover(sendB, "clientB", evictB)
+
+    # 找出发到旧 owner A 的 kicked 帧
+    kicked_frames = [c.args[0] for c in sendA.call_args_list
+                     if c.args and isinstance(c.args[0], dict)
+                     and c.args[0].get("type") == "connection.kicked"]
+    assert len(kicked_frames) == 1, f"应恰好 1 个 kicked 帧，实际 {len(kicked_frames)}"
+    frame = kicked_frames[0]
+    assert frame["type"] == "connection.kicked"
+    # PR1: kicked 帧也带 i18n_params（当前无业务参数，留接口）
+    assert frame["i18n_params"] == {}
 
 
 # ── WSHandler 入站 ownership 守卫 ─────────────────────────────────────
@@ -193,8 +228,10 @@ async def test_on_takeover_reactivates_parked_runtime_when_owner_gone(monkeypatc
     assert h.runtime is reactivated
 
 
-async def test_on_takeover_refuses_if_terminated():
+async def test_on_takeover_refuses_if_terminated(monkeypatch):
     """会话已结束（runtime terminated）时接管无意义 → 回 session_ended 并关连接。"""
+    import app.transport.websocket.handler as h_mod
+
     fake_ws = AsyncMock()
     h = WSHandler(fake_ws, "s1")
     h.client_id = "clientB"
@@ -202,8 +239,11 @@ async def test_on_takeover_refuses_if_terminated():
     rt._fsm.is_terminated = True
     h.runtime = rt
     fails = []
-    async def fake_fail(code, message, close_code=4000): fails.append(code)
-    h._fail = fake_fail
+
+    async def fake_fail(ws, state=None, *, code, i18n_key=None, close_code=None, **params):
+        fails.append(code)
+
+    monkeypatch.setattr(h_mod, "_fail", fake_fail)
 
     await h._on_takeover()
     assert fails == ["session_ended"]

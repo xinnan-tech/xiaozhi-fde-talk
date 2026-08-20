@@ -9,9 +9,13 @@
 pivot 先用目标语种 system 调一次，detect_language_match 通过 → 直接返回；
 不符则切到 fallback_lang（_LANG_META 默认 en）system 重试一次。
 
-返回 (output, effective_lang)——调用方需把 effective_lang 传给：
-- _fill_dangling_labels（决定兜底短语）
-- 缓存标签 / 日志（pivot 后用 fallback_lang）
+返回 (output, effective_lang)。effective_lang 用于：
+- _fill_dangling_labels（pivot 后 zh_cn 请求产出 en 报告，兜底短语也得跟 en）
+- 日志 / on_pivot 回调（观测 pivot 频率）
+
+缓存标签保持 requested（pivot 输出的 fallback_lang 不影响 cache 命中——
+若改用 effective_lang 作 cache 键，会出现「同语言请求每次都 cache miss → 永远付 2 次 LLM」
+的反向 bug）。
 
 不接 LLMError：调用方的现有 except 已处理「LLM 完全失败」语义；pivot 只关心
 「LLM 通了但输出语言错」的窄场景，避免吞错。
@@ -26,12 +30,12 @@ from app.core.i18n.script_detect import detect_language_match_json, detect_scrip
 
 logger = logging.getLogger(__name__)
 
-# type aliases —— 单纯为了 _with_lang_fallback 签名可读
+# type aliases —— 单纯为了 with_lang_fallback 签名可读
 CallFn = Callable[[str, str], Awaitable[str]]
 SystemFactory = Callable[[str], str]
 
 
-async def _with_lang_fallback(
+async def with_lang_fallback(
     call: CallFn,
     system: str,
     system_factory: SystemFactory,

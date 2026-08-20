@@ -20,7 +20,12 @@ import bleach
 from app.adapters.llm.base import LLMError
 from app.adapters.llm.factory import get_llm
 from app.core.config_store import get_config_store
-from app.core.i18n.pivot import _with_lang_fallback
+from app.core.i18n.pivot import with_lang_fallback
+from app.core.i18n.lang_meta import (
+    _LANG_META,
+    derived_fallback_phrases,
+    get_lang_meta,
+)
 from app.domain.session import TranscriptSegment
 from app.persistence.repositories.interview import interview_repo
 from app.persistence.repositories.report import report_repo
@@ -102,7 +107,7 @@ Process: translate heading `## 背景与目的` to your output language (e.g. `#
 
 ## Output language ({lang_native}, mandatory)
 - Write the ENTIRE output in {lang_native} ({lang_english}, {lang_bcp47}) — including all section headings, bullet labels, and every fill-in for `{{ ... }}` placeholders.
-- The transcript is in Chinese and the session metadata values pre-filled into `{{session.X}}` may also be in Chinese. Translate them into {lang_native} when you RESTATE them in the report's prose. (Keep the literal pre-filled `{{session.X}}` markers as the system has resolved them; only translate the metadata when you paraphrase it elsewhere.)
+- The transcript and the session metadata values pre-filled into `{{session.X}}` may be in Chinese. Translate them into {lang_native} when you RESTATE them in the report's prose. (Keep the literal pre-filled `{{session.X}}` markers as the system has resolved them; only translate the metadata when you paraphrase it elsewhere.)
 - Two categories of placeholders are EXEMPT from wrapper deletion — keep them VERBATIM, including their `{{`/`}}` markers: (1) `{{session.X}}` placeholders already pre-filled by the system, and (2) `{{skill: <id>, inputs: <json>}}` invocation points.
 
 ## Other
@@ -163,12 +168,6 @@ _DANGLING_LABEL_RE = re.compile(r"^(\s*[-*]\s*.*[:：])\s*$")
 # 兜底短语按语种切：与 _report_system 中的 directive 严丝合缝。
 # 避免 LLM 输出正确英文报告后被后处理注入中文（之前硬编码「本次访谈未提及」时的隐性 bug）。
 # 从 app.core.i18n.lang_meta 派生：单一真源 _LANG_META，加语种只改一处。
-from app.core.i18n.lang_meta import (
-    _LANG_META,
-    derived_fallback_phrases,
-    get_lang_meta,
-)
-
 _FALLBACK_BY_LANG: dict[str, str] = derived_fallback_phrases()
 
 
@@ -224,7 +223,7 @@ def _build_user(state: SessionState, template) -> str:
     def _seg_text(s: TranscriptSegment) -> str:
         return s.corrected_text.strip() or s.text
 
-    transcript = "\n".join(f"[{s.seg_id}] {_seg_text(s)}" for s in state.transcript) or "（无对话）"
+    transcript = "\n".join(f"[{s.seg_id}] {_seg_text(s)}" for s in state.transcript) or "(no transcript yet)"
     bi = state.session.base_info or {}
     doc = _prefill_session_placeholders(template.report.doc, state)
     return (
@@ -232,7 +231,7 @@ def _build_user(state: SessionState, template) -> str:
         f"【会话基础信息】\n项目：{bi.get('project', '')}　受访者：{bi.get('interviewee', '')}"
         f"　目标：{state.session.goal or ''}\n\n"
         f"【对话原文】\n{transcript}\n\n"
-        "请照骨架填报告。"
+        "Fill the skeleton now."
     )
 
 
@@ -253,7 +252,7 @@ async def generate_report(state: SessionState, template, language: str) -> str:
     async def _call(system: str, user: str) -> str:
         return await llm.chat_text(system, user)
 
-    md, effective_lang = await _with_lang_fallback(
+    md, effective_lang = await with_lang_fallback(
         _call, _report_system(language), _report_system, _build_user(state, template), language,
     )
     md = _fill_dangling_labels(_strip_orphan_placeholders(md.strip()), language=effective_lang)

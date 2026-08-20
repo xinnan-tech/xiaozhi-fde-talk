@@ -15,7 +15,7 @@ from typing import Awaitable, Callable, Optional
 from app.adapters.llm.base import LLMError, LLMProvider
 from app.adapters.llm.factory import get_llm
 from app.core.i18n.messages import Keys
-from app.core.i18n.pivot import _with_lang_fallback
+from app.core.i18n.pivot import with_lang_fallback
 from app.core.outbound_send import safe_send
 from app.domain.coaching import CoachingItem, ItemStatus
 from app.domain.session import SessionStatus
@@ -408,7 +408,7 @@ class CoachingEngine:
                 self._get_llm().chat_text(s, u),
                 timeout=self._llm_timeout_s,
             )
-        text, _ = await _with_lang_fallback(_call, system, system_factory, user, lang)
+        text, _ = await with_lang_fallback(_call, system, system_factory, user, lang)
         return self._extract_json_dict(text)
 
     def _extract_json_dict(self, text: str) -> dict:

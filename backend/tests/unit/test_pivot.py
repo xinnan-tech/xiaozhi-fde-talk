@@ -12,7 +12,7 @@ from typing import Awaitable, Callable
 
 import pytest
 
-from app.core.i18n.pivot import _with_lang_fallback
+from app.core.i18n.pivot import with_lang_fallback
 from app.core.i18n.script_detect import detect_script
 
 
@@ -34,7 +34,7 @@ async def test_no_pivot_when_script_matches():
 
     factory = lambda lang: f"<system lang={lang}>"
 
-    out, eff = await _with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "zh_cn")
+    out, eff = await with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "zh_cn")
 
     assert out == "你好世界，本次访谈未提及"
     assert eff == "zh_cn"
@@ -56,7 +56,7 @@ async def test_pivot_fires_when_script_mismatch():
         return "本中文重試"  # CJK，匹配 en 的 fallback（CJK 不在 en 期望）
 
     factory = lambda lang: f"<system lang={lang}>"
-    out, eff = await _with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "zh_cn")
+    out, eff = await with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "zh_cn")
 
     # 第二次调用一定是 fallback system（en），且 effective_lang = en
     assert len(calls) == 2
@@ -76,7 +76,7 @@ async def test_pivot_uses_lang_meta_fallback_lang():
         return "你好中文测试"
 
     factory = lambda lang: f"<system lang={lang}>"
-    out, eff = await _with_lang_fallback(call, "<system lang=ru>", factory, "<user>", "ru")
+    out, eff = await with_lang_fallback(call, "<system lang=ru>", factory, "<user>", "ru")
     assert eff == "en"
     assert len(calls) == 2
     assert "lang=en" in calls[1][0]
@@ -102,12 +102,12 @@ async def test_on_pivot_called_only_when_pivot_fires():
     # 主路：on_pivot 不应被调用
     async def call_match(system: str, user: str) -> str:
         return "你好世界"
-    out, eff = await _with_lang_fallback(call_match, "<system lang=zh_cn>", factory, "<user>", "zh_cn", on_pivot=cb)
+    out, eff = await with_lang_fallback(call_match, "<system lang=zh_cn>", factory, "<user>", "zh_cn", on_pivot=cb)
     assert seen == []
     assert eff == "zh_cn"
 
     # pivot 路：on_pivot 调用一次
-    await _with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "zh_cn", on_pivot=cb)
+    await with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "zh_cn", on_pivot=cb)
     assert len(seen) == 1
     req, obs, fb = seen[0]
     assert req == "zh_cn"
@@ -128,7 +128,7 @@ async def test_on_pivot_callback_exception_swallowed():
         return "中文兜底"
 
     factory = lambda lang: f"<system lang={lang}>"
-    out, eff = await _with_lang_fallback(call, "<system lang=vi>", factory, "<user>", "vi", on_pivot=bad_cb)
+    out, eff = await with_lang_fallback(call, "<system lang=vi>", factory, "<user>", "vi", on_pivot=bad_cb)
     assert eff == "en"
     assert out == "中文兜底"
 
@@ -145,7 +145,7 @@ async def test_llm_error_propagates_not_caught_by_pivot():
 
     factory = lambda lang: "<sys>"
     with pytest.raises(LLMError, match="test llm boom"):
-        await _with_lang_fallback(call, "<sys>", factory, "<user>", "zh_cn")
+        await with_lang_fallback(call, "<sys>", factory, "<user>", "zh_cn")
 
 
 # ── 边界：lang 大小写 / 空 ──────────────────────────────────
@@ -162,6 +162,6 @@ async def test_uppercase_lang_normalized():
     factory = lambda lang: f"<system lang={lang}>"
     # 主路 system 由调用方按归一后 lang 构建；pivot 归一 lang 用于查 _LANG_META 与
     # fallback_lang 选择，system 字面值不变（factory 用归一后 lang 时才会 lowercase）。
-    out, eff = await _with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "ZH_CN")
+    out, eff = await with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "ZH_CN")
     assert eff == "zh_cn"  # lowercase normalized
     assert calls[0][0] == "<system lang=zh_cn>"

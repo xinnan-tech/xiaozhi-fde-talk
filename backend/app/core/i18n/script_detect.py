@@ -136,3 +136,13 @@ def detect_language_match_json(text: str, expected_lang: str) -> bool:
     except (ValueError, TypeError):
         stripped = _JSON_SYNTAX_RE.sub("", text or "")
         return detect_language_match(stripped, expected_lang)
+
+
+# 键集合同步债：_EXPECTED_SCRIPT 与 _LANG_META 必须一一对应——任何 lang 漏写
+# 都会让该 lang 走默认 {LATIN} 集合（detect_language_match line 90），被
+# 静默接受任何文本，从而 pivot 失效。import 期 fail-fast 比单测更早暴露。
+from app.core.i18n.lang_meta import _LANG_META  # noqa: E402
+assert set(_EXPECTED_SCRIPT) == set(_LANG_META), (
+    "_EXPECTED_SCRIPT 键集合必须等于 _LANG_META："
+    f"expected={set(_EXPECTED_SCRIPT)} vs lang_meta={set(_LANG_META)}"
+)

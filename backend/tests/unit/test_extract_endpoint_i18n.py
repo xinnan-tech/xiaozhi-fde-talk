@@ -107,20 +107,32 @@ def test_extract_directive_keys_match_lang_meta():
 
 
 async def test_extract_real_config_store_uses_llm_output_language_key(extract_client):
-    """真 config store（不 mock）：snapshot → set 'en' → 端点读 'en' → 指令含 'English' → restore。
+    """真 config store（不 mock）：init_db+warm → snapshot → set 'en' → 端点读 'en' → 指令含 'English' → restore。
 
     验 key 名拼写：若代码改成 llm.output_lang，set 注入失效，endpoint 仍 fallback zh_cn，本测试 fail。
     走 public API（get/set）而非私有 _cache，DB + cache + broadcast 都生效；finally 按 snapshot 还原。
 
-    finally 不写空串：validate_value 对 llm.output_language 走 enum 校验，空串不在派生枚举里会抛
-    I18nError，反而把真正断言失败顶掉。original 为 None 索性不还原——warm() 默认会种 zh_cn。
+    不走 `with TestClient(app)` 触发 lifespan——manager.start_idle_watchdog() 创建的
+    asyncio.Event 绑死在 TestClient 内部 loop，pytest-asyncio 的 async 测试另起 loop
+    会 RuntimeError。这里只调 init_db + warm 拿 DEFAULTS 种入（含 llm.output_language
+    ="zh_cn"），跳过 JWT 解析 / 僵尸清扫 / 模板加载 / watchdog 这些与本测试无关的副作用。
+    下面的 assert 把「DB 一定有 llm.output_language 行」从注释里的隐含前提变成代码里的校验。
     """
     from app.core.config_store import get_config_store
+    from app.persistence.bootstrap import init_db
 
     store = get_config_store()
     key = "llm.output_language"
 
+    # 手动跑 init_db + warm：建表 + 种 DEFAULTS（lifespan 那条路 watchdog 会绑 loop）
+    await init_db()
+    await store.warm()
+
     original = await store.get(key)
+    assert original is not None, (
+        f"warm() 跑完 DB 应有 {key!r} 默认行（DEFAULTS['llm.output_language']='zh_cn'），"
+        f"实际为 None——查 init_db 是否建表成功、warm 是否读到 DEFAULTS。"
+    )
 
     captured = {}
 
@@ -139,6 +151,4 @@ async def test_extract_real_config_store_uses_llm_output_language_key(extract_cl
         assert "English" in captured["system"], f"system prompt 缺 'English' directive: {captured['system'][:300]}"
         assert "简体中文" not in captured["system"]
     finally:
-        # original 为 None 时 DB 没这行（warm() 启动会种 DEFAULTS），不还原避免 enum 校验拒绝空串
-        if original is not None:
-            await store.set(key, original)
+        await store.set(key, original)

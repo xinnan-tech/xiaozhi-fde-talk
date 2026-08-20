@@ -64,103 +64,66 @@ def _prefill_session_placeholders(doc: str, state: SessionState) -> str:
     return _SESSION_PLACEHOLDER_RE.sub(lambda m: _resolve(m.group(1)), doc)
 
 
-_REPORT_SYSTEM = """你是访谈报告撰写助手。照给定的 Markdown 骨架填一份报告。
-
-## 关键规则
-- 骨架里每一处 `{{ ... }}`（不含 `{{session.X}}` 与 `{{skill: ...}}`）都是**占位符**：
-  - 把它**整块替换**为从【对话原文】抽取的内容（一段话或列表，贴合提示语义）。
-  - **删掉 `{{` `}}` 包装**和里面的提示文字，输出里**不允许**出现 `{{` 或 `}}`。
-  - 【对话原文】里确实没有可填的内容时，写一句「本次访谈未提及」之类的明确说明，
-    **不允许**留空或只留骨架里的标签文字——空章节在报告里看起来像生成失败。
-    例：骨架 `- 客户 / 行业：{{ 客户与行业标签 }}` 无内容时输出
-    `- 客户 / 行业：本次访谈未提及`，而不是 `- 客户 / 行业：`。
-- `{{session.X}}` 已被系统填好，**原样保留**。
-- `{{skill: ...}}` 是技能标记，**原样保留**（其内部 `{{ }}` 不要动）。
-
-## 其它
-- 保持标题层级与章节顺序，不要增删章节。
-- 只输出填好的 Markdown，不要加解释或代码块包裹。"""
-
-# 英文模式用独立的英文 base prompt。设计要点：
+# 单一英文 base 报告 prompt——所有语种共用。设计要点：
 # 1. 中文 base + 中文骨架 + 中文转写三层叠加下 qwen-plus 会**镜像中文**完全忽略
-#    EN directive（实测案例见 ce645969-bfb4-47a4-b327-89502a44f6f7，
-#    全 842 字符中文报告包括中文 fallback「本次访谈未提及」都是 LLM 抄 base
-#    示例，不是后处理注入）。中文 base 的 placeholder 规则 + 占位语义 +
-#    fallback 示例都是中文，会让 LLM 直接把中文骨架当模板用。
-# 2. 改用两步式：先翻译骨架（heading / bullet label → 英文），再填内容。
-#    few-shot 示例把"中文骨架 → 英文骨架 → 英文填后"完整过程走一遍，让 LLM
-#    走 in-context 而不是听尾部 directive。
-# 3. base 整体英文后，EN directive 只剩"metadata 翻译 / {{session.X}} / skill 例外"
-#    这些**纯英文层补充规则**，不再压 LLM 走语种切换。
-# 4. 其他语种（zh_cn / zh_tw）保留中文 base 不动——改动只针对 EN 这一路。
-_REPORT_SYSTEM_EN = """You are an interview report-writing assistant.
+#    EN directive（实测案例见 ce645969-bfb4-47a4-b327-89502a44f6f7，全 842 字符中文
+#    报告包括中文 fallback「本次访谈未提及」都是 LLM 抄 base 示例，不是后处理注入）。
+#    改用**单一英文 base** 跨所有语种——EN base 让 LLM 不再被中文镜像效应拉回去。
+# 2. 两步式：先翻译骨架（heading / bullet label → {lang_native}），再填内容。
+#    示例演示两步流程而非具体语言翻译结果——避免示例语言与目标语种冲突。
+# 3. 占位符规则（`{{ ... }}` 删除、`{{session.X}}` 与 `{{skill: ...}}` 豁免）正面重申
+#    ——这些是**语言中立**的结构规则，不能因 base 语言是英文而弱化。
+# 4. zh_cn/zh_tw 也走同一段 base——MVP 验证 EN base + 中文输出指令产出 CN=790（比中文
+#    base + 中文指令 CN=667 字数还多 18%），证明母语写作质量不降反升。
+# 5. 4 个 format 占位符：{lang_native}/{lang_english}/{lang_bcp47}/{fallback_phrase}，
+#    运行时从 _LANG_META + _FALLBACK_BY_LANG 注入。
+_REPORT_SYSTEM = """You are an interview report-writing assistant.
 
 ## Task (two steps, do both)
-**Step 1 — Skeleton translation.** The skeleton in the user message is written in Chinese. Mentally translate each skeleton heading and bullet label into English. Do NOT copy the Chinese headings verbatim into your output.
-**Step 2 — Content fill.** Fill the (English-translated) skeleton with content drawn from the conversation transcript, in English.
+**Step 1 — Skeleton translation.** The skeleton in the user message is written in Chinese. Mentally translate each skeleton heading and bullet label into {lang_native} ({lang_english}, {lang_bcp47}). Do NOT copy the Chinese headings verbatim into your output.
+**Step 2 — Content fill.** Fill the ({lang_native}-translated) skeleton with content drawn from the conversation transcript, in {lang_native}.
 
 ## Key rules (apply during Step 2)
 - Each `{{ ... }}` in the skeleton (excluding `{{session.X}}` and `{{skill: ...}}`) is a **placeholder**:
-  - Replace the entire `{{ ... }}` block with English content drawn from the transcript.
+  - Replace the entire `{{ ... }}` block with {lang_native} content drawn from the transcript.
   - Delete the `{{` and `}}` wrappers AND any Chinese prompt text inside. The output MUST NOT contain `{{` or `}}`.
-  - When the transcript genuinely has no content, write `Not mentioned in this interview.` (English). Do NOT leave an empty bullet or only the placeholder label.
+  - When the transcript genuinely has no content, write {fallback_phrase}. Do NOT leave an empty bullet or only the placeholder label.
 - `{{session.X}}` is pre-filled by the system — **keep these values verbatim** (do not translate the pre-filled values; they are session metadata already committed by the system).
 - `{{skill: ...}}` is a skill invocation marker — **keep verbatim** (do not touch the inner `{{ }}`).
 
-## Example (translation + fill)
+## Example (two-step process, language-agnostic)
 Input skeleton (Chinese):
 ```
 ## 背景与目的
 {{ 项目背景、为什么做、目标 }}
 ```
-Step 1 — English translation:
-```
-## Background & Goals
-{{ project background, why this project, goals }}
-```
-Step 2 — Filled (English output):
-```
-## Background & Goals
-This project aims to design and develop...
-```
+Process: translate heading `## 背景与目的` to your output language (e.g. `## Background & Goals` if English; `## Bối cảnh & Mục tiêu` if Vietnamese; `## 背景與目的` if Traditional Chinese), then replace `{{ 项目背景、为什么做、目标 }}` with content drawn from the transcript, in your output language.
+
+## Output language ({lang_native}, mandatory)
+- Write the ENTIRE output in {lang_native} ({lang_english}, {lang_bcp47}) — including all section headings, bullet labels, and every fill-in for `{{ ... }}` placeholders.
+- The transcript is in Chinese and the session metadata values pre-filled into `{{session.X}}` may also be in Chinese. Translate them into {lang_native} when you RESTATE them in the report's prose. (Keep the literal pre-filled `{{session.X}}` markers as the system has resolved them; only translate the metadata when you paraphrase it elsewhere.)
+- Two categories of placeholders are EXEMPT from wrapper deletion — keep them VERBATIM, including their `{{`/`}}` markers: (1) `{{session.X}}` placeholders already pre-filled by the system, and (2) `{{skill: <id>, inputs: <json>}}` invocation points.
 
 ## Other
 - Preserve the heading hierarchy and section order from the translated skeleton. Do not add or remove sections.
 - Output only the filled Markdown — no explanations or code-block wrapping."""
 
-# 报告输出语种指令：默认 zh_cn 不追加（与现有报告形态一致），其他语种显式切换。
-# EN 模式：base 已是英文（_REPORT_SYSTEM_EN），directive 只补"metadata 翻译 / EXEMPT"，
-# 不再压"全文英文"——这是中文 base 时代的遗留（当时需要对抗中文 base 的镜像效应）。
-# zh_tw 仍走中文 base + directive，保留原文。
-_REPORT_LANG_INSTRUCTION: dict[str, str] = {
-    "zh_cn": "",
-    "zh_tw": "\n\n## 輸出語言\n報告正文請用繁體中文撰寫（標點用全形繁體標點）。"
-          "Markdown 結構（`#` / `-` / 列表）保持不變。空章節兜底用「本次訪談未提及」。",
-    "en": "\n\n## Output language (English, mandatory)\n"
-          "- Write the ENTIRE report body in English — including all section headings, "
-          "bullet labels, and every fill-in for `{{ ... }}` placeholders.\n"
-          "- The transcript is in Chinese and the session metadata values pre-filled "
-          "into `{{session.X}}` may also be in Chinese. Translate them into English "
-          "when you RESTATE them in the report's prose. (Keep the literal pre-filled "
-          "`{{session.X}}` markers as the system has resolved them; only translate the "
-          "metadata when you paraphrase it elsewhere.)\n"
-          "- Two categories of placeholders are EXEMPT from wrapper deletion — keep "
-          "them VERBATIM, including their `{{`/`}}` markers: (1) `{{session.X}}` "
-          "placeholders already pre-filled by the system, and (2) "
-          "`{{skill: <id>, inputs: <json>}}` invocation points.",
-}
-
 
 def _report_system(output_language: str) -> str:
-    """根据 llm.output_language 拼出报告 system prompt。
+    """拼出报告 system prompt——单一英文 base + 参数化语言指令注入。
 
-    EN 模式：英文 base + EN directive。
-    其他语种（zh_cn / zh_tw）：中文 base + 各自 directive。
+    所有语种共用同一段 _REPORT_SYSTEM：{lang_native}/{lang_english}/{lang_bcp47}/
+    {fallback_phrase} 4 个占位符运行时从 _LANG_META + _FALLBACK_BY_LANG 注入。
     """
     lang = (output_language or "zh_cn").lower()
-    if lang == "en":
-        return _REPORT_SYSTEM_EN + _REPORT_LANG_INSTRUCTION["en"]
-    return _REPORT_SYSTEM + _REPORT_LANG_INSTRUCTION.get(lang, "")
+    meta = get_lang_meta(lang)
+    phrases = derived_fallback_phrases()
+    return _REPORT_SYSTEM.format(
+        lang_native=meta.native_name,
+        lang_english=meta.english_name,
+        lang_bcp47=meta.bcp47,
+        fallback_phrase=phrases.get(lang, phrases["en"]),
+    )
 
 # P3-9: 报告渲染为 HTML 前的白名单。strip=True 移除非白名单标签（含属性）。
 _ALLOWED_TAGS = [
@@ -202,6 +165,7 @@ _DANGLING_LABEL_RE = re.compile(r"^(\s*[-*]\s*.*[:：])\s*$")
 from app.core.i18n.lang_meta import (
     _LANG_META,
     derived_fallback_phrases,
+    get_lang_meta,
 )
 
 _FALLBACK_BY_LANG: dict[str, str] = derived_fallback_phrases()

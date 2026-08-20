@@ -82,6 +82,7 @@
   "config.diag.run_all": "Run all",
   "config.diag.run_asr": "ASR only",
   "config.diag.run_llm": "LLM only",
+  "config.diag.run_ocr": "OCR only",
   "config.save_hint": "Changes take effect immediately after clicking Save (LLM/ASR clients auto-reload).",
   "config.sensitive_hint": "Sensitive fields show as **********; leave blank to keep the existing value.",
   "config.opt.zh": "Mandarin",

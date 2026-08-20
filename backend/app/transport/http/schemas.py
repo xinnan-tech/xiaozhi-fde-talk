@@ -62,3 +62,24 @@ class InterviewStatisticsResponse(BaseModel):
     week_finish: int
     assist_discovery: int
     interview_coverage: int
+
+
+class ExtractRequest(BaseModel):
+    transcript: str
+    template_id: str
+    fields: list[str]
+    field_labels: dict[str, str] = {}  # key -> label
+    field_types: dict[str, str] = {}   # key -> type: text / datetime / duration
+    current_values: dict[str, str] = {}  # key -> 当前已填的值（不覆盖）
+
+
+class ExtractResponse(BaseModel):
+    values: dict[str, str]
+
+
+class OCRRequest(BaseModel):
+    image_base64: str  # base64 编码的图片数据（不含 data URL 前缀）
+
+
+class OCRResponse(BaseModel):
+    text: str

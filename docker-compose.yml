@@ -11,7 +11,7 @@ services:
     ports:
       - "10096:10095"
     volumes:
-      - ./funasr-runtime-resources/models:/workspace/models
+      - ./backend/models/funasr-runtime-resources:/workspace/models
     # 使用分号隔离命令，确保 cd 和 touch 在主 shell 中按顺序生效
     command: >
       bash -c "cd FunASR/runtime; 

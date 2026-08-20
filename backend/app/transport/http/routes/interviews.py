@@ -8,8 +8,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
+from app.core.config_store import get_config_store
 from app.core.i18n import Keys, current_locale, t
 from app.core.i18n.errors import I18nError
+from app.core.i18n.extract_prompts import build_extract_system
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
 from app.services.coaching.engine import TERMINAL_SESSION_STATUSES
@@ -344,31 +346,6 @@ async def unskip_item(
     return {"ok": True}
 
 
-_EXTRACT_SYSTEM = """你是访谈信息提取助手，擅长从名片、OCR 扫描、粘贴文本、语音转写中提取结构化信息。
-
-## 待提取文字（可能来自名片 OCR / 粘贴文本 / 语音转写）
-{transcript}
-
-## 已有内容（用户在表单中已填写的值，作为参考底稿）
-{current_values}
-
-## 今日日期
-**今天 = {today}**
-遇到相对时间（如"明天下午3点"、"下周"）必须基于此日期推断。
-
-## 字段类型
-- datetime：格式 YYYY-MM-DDTHH:MM，**年份为 {today} 年**（不是其他年份）
-- duration：只返回数字（分钟）
-- text：直接返回原文或语义总结
-
-## 提取原则
-1. 输出只能包含以下 key：{fields}，禁止创建任何新 key
-2. **追加合并**：姓名追加到 interviewee（用","拼接）；公司/服务方追加到 project（用","拼接），不覆盖原值
-3. 已有字段原值不得删除，只能追加拼接
-4. 待提取文字中没有某字段的信息时，才保留原填写值
-5. 只返回 JSON 对象，不解释，不加代码块"""
-
-
 @router.post("/extract", response_model=ExtractResponse)
 async def extract_fields(
     req: ExtractRequest,
@@ -404,11 +381,13 @@ async def extract_fields(
         current_values_str = "（全部为空）"
 
     llm = get_llm()
-    system_prompt = _EXTRACT_SYSTEM.format(
+    output_language = (await get_config_store().get("llm.output_language")) or "zh_cn"
+    system_prompt = build_extract_system(
+        output_language,
         today=today,
         current_values=current_values_str,
         transcript=req.transcript,
-        fields=", ".join(req.fields),
+        fields=list(req.fields),
     )
     user_prompt = (
         f"【待提取字段（仅限以下 key，禁止创建新字段）】\n" + "\n".join(field_lines) + "\n\n"

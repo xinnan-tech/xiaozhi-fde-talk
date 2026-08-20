@@ -257,7 +257,6 @@ async def test_bad_handshake_invalid_json_closes_with_4000(monkeypatch):
     ws.accept = AsyncMock()
     ws.receive_text = AsyncMock(return_value="not-json{")
     ws.send_json = AsyncMock()
-    ws.send = AsyncMock()
     ws.close = AsyncMock()
     user = MagicMock()
     user.user_id = "u1"
@@ -294,7 +293,6 @@ async def test_bad_handshake_wrong_type_closes_with_4000(monkeypatch):
     ws.accept = AsyncMock()
     ws.receive_text = AsyncMock(return_value=json.dumps({"type": "listen"}))
     ws.send_json = AsyncMock()
-    ws.send = AsyncMock()
     ws.close = AsyncMock()
     user = MagicMock()
     user.user_id = "u1"

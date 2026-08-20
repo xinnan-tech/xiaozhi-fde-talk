@@ -82,6 +82,7 @@
   "config.diag.run_all": "執行全部",
   "config.diag.run_asr": "僅 ASR",
   "config.diag.run_llm": "僅 LLM",
+  "config.diag.run_ocr": "僅 OCR",
   "config.save_hint": "修改後點擊「儲存」立即生效（LLM/ASR 用戶端會自動重載）。",
   "config.sensitive_hint": "敏感欄位顯示為 **********，留空 = 保留原值。",
   "config.opt.zh": "普通話",

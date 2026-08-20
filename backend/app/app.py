@@ -19,6 +19,7 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app.adapters.asr.factory import invalidate as asr_invalidate
 from app.adapters.llm.factory import invalidate as llm_invalidate
+from app.adapters.ocr.factory import invalidate as ocr_invalidate
 from app.core.config_store import get_config_store
 from app.core.settings import get_settings
 
@@ -83,6 +84,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # provider 缓存订阅 invalidate
     get_config_store().subscribe(llm_invalidate)
     get_config_store().subscribe(asr_invalidate)
+    get_config_store().subscribe(ocr_invalidate)
 
     swept = await sweep_stale_sessions()
     load_templates()
@@ -132,6 +134,11 @@ def create_app() -> FastAPI:
                 await llm_shutdown()
             except Exception as e:  # noqa: BLE001
                 logger.warning("shutdown 关闭 LLM 客户端失败：%s", e)
+            try:
+                from app.adapters.ocr.factory import shutdown as ocr_shutdown
+                await ocr_shutdown()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("shutdown 关闭 OCR 客户端失败：%s", e)
             await _engine.dispose()
             logger.info("应用已关闭")
 

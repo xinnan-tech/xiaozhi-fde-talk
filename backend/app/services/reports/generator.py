@@ -20,6 +20,7 @@ import bleach
 from app.adapters.llm.base import LLMError
 from app.adapters.llm.factory import get_llm
 from app.core.config_store import get_config_store
+from app.core.i18n.pivot import _with_lang_fallback
 from app.domain.session import TranscriptSegment
 from app.persistence.repositories.interview import interview_repo
 from app.persistence.repositories.report import report_repo
@@ -243,10 +244,20 @@ async def generate_report(state: SessionState, template, language: str) -> str:
     避免 get_or_generate 与 generate_report 之间 read-then-read 的窗口被 admin
     翻语种污染（之前会出现「cache 标 post-flip、content pre-flip EN」的 race，
     报告内容跟缓存标签不一致，下次请求继续按新语种命中失配的内容）。
+
+    pivot：LLM 输出脚本与 language 不符 → 切 fallback_lang（en）重试一次，
+    effective_lang 传给 _fill_dangling_labels 决定兜底短语（pivot 后 zh_cn
+    请求变成 en 输出，兜底短语也得跟着 en）。
     """
     llm = get_llm()
-    md = await llm.chat_text(_report_system(language), _build_user(state, template))
-    md = _fill_dangling_labels(_strip_orphan_placeholders(md.strip()), language=language)
+
+    async def _call(system: str, user: str) -> str:
+        return await llm.chat_text(system, user)
+
+    md, effective_lang = await _with_lang_fallback(
+        _call, _report_system(language), _report_system, _build_user(state, template), language,
+    )
+    md = _fill_dangling_labels(_strip_orphan_placeholders(md.strip()), language=effective_lang)
     return sanitize_report_markdown(md)
 
 

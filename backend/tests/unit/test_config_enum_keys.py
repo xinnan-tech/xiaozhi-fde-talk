@@ -7,8 +7,9 @@ from app.core.i18n.lang_meta import derived_output_language_enum
 from app.core.i18n.messages import Keys
 
 
-def test_enum_keys_dict_has_two_keys():
-    assert set(ENUM_KEYS.keys()) == {"asr.language", "llm.output_language"}
+def test_enum_keys_dict_has_three_keys():
+    """OCR 适配上线后多了 ocr.type 枚举；新增 key 顺手同步此断言。"""
+    assert set(ENUM_KEYS.keys()) == {"asr.language", "llm.output_language", "ocr.type"}
 
 
 def test_enum_keys_values_are_correct_sets():
@@ -16,6 +17,8 @@ def test_enum_keys_values_are_correct_sets():
     # llm.output_language 从 derived_output_language_enum() 派生（10 条头部语种）——
     # 加语种只改 _LANG_META 一处，断言改成"完全等于派生值"以防漂移。
     assert ENUM_KEYS["llm.output_language"] == derived_output_language_enum()
+    # ocr.type 跟 factory.py supported_providers 同步——{openai, baidu}
+    assert ENUM_KEYS["ocr.type"] == {"openai", "baidu"}
 
 
 def test_validate_value_accepts_asr_zh():

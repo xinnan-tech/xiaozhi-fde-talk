@@ -312,7 +312,7 @@ asr 推送频率由服务端 ASR 断句策略决定，客户端无法控制。`f
 | `code` | 含义 | 是否关连接 |
 | --- | --- | --- |
 | `bad_handshake` | 首条消息不是 JSON / 不是 hello | 是（4000） |
-| `bad_json` | 文本帧不是合法 JSON | 是（4000） |
+| `bad_json` | 文本帧不是合法 JSON | 是（4411） |
 | `handshake_timeout` | 5 s 内未收到 hello | 是（4408） |
 | `not_found` | 访谈不存在或不属于当前用户 | 是（4404） |
 | `session_ended` | 会话已结束 / 存活窗口已过 | 是（4406） |
@@ -344,6 +344,7 @@ asr 推送频率由服务端 ASR 断句策略决定，客户端无法控制。`f
 | `4408` | `handshake_timeout` 5 s 内未发 hello | 检查客户端实现 |
 | `4409` | `concurrent_limit` 活跃访谈达上限 | 关掉其他访谈 |
 | `4410` | `frame_too_large` 单帧 > 64 KiB | 检查音频帧大小 |
+| `4411` | `bad_json` 文本帧不是合法 JSON | 检查客户端实现 |
 
 ---
 

@@ -123,8 +123,9 @@ new WebSocket(url, ["bearer." + jwt])
 | `coaching.skip` | `id`: string | 把该辅导项标记为「本次跳过」，不再出现在「待问」列表 |
 | `coaching.ignore` | `id`: string | 标记为「已忽略」，彻底不再展示 |
 | `connection.takeover` | — | 仅在「pending」状态可发，见 §6 |
+| `session.touch` | — | keepalive：只重置空闲看门狗的活跃时间戳，**无任何副作用**（不重启 ASR / 不重算辅导 / 不发帧）。可用于客户端「我还在，我不要被挂起」按钮，不与 §6 重连路径冲突。协议层于 7833a58 后已支持；当前 `frontend/` Vue 工程尚未发送本帧——15faa0a 曾把等价 `keepAlive()` + idle-warning toast 接入到 **已废弃的** `backend/static/index.html`（dev 模式不再 serve、Docker 部署会被 `frontend/dist` 整目录覆盖），前端接入需要独立 PR |
 
-未列出的 `type` 会被服务端忽略并打一条 warning，不影响连接。
+未列出的 `type` 会被服务端忽略并打一条 warning，不影响连接。已列出但前端尚未接入的（如 `session.touch`）同样会被服务端接受并执行预期行为——前端接入时无须修改协议约定。
 
 ### 5.2 服务端 → 客户端（文本 JSON）
 

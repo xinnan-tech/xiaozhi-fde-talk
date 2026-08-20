@@ -7,6 +7,7 @@
   "http.session.unknown_status": "未知状态：{value}",
   "http.report.not_ready": "报告尚未就绪",
   "http.report.format_unsupported": "不支持的导出格式：{fmt}（可选 {supported}）",
+
   "ws.internal": "服务内部错误，请重试或联系管理员",
   "ws.handshake.timeout": "5s 内未收到 hello",
   "ws.bad_handshake": "握手失败",
@@ -26,11 +27,14 @@
   "ws.audio.low_level": "麦克风音量过低，请靠近麦克风",
   "ws.close.session_ended": "访谈已结束",
   "ws.close.suspended": "访谈已挂起",
+
   "session.concurrent_limit": "活跃访谈数已达上限（{limit}）",
   "session.illegal_transition": "非法状态转换：{from_state} → {to_state}",
   "session.edit_forbidden": "当前状态（{state}）不可编辑",
   "session.delete_forbidden": "当前状态（{state}）不可删除",
+
   "report.format_not_implemented": "格式 {fmt!r} 暂未实现",
+
   "llm.not_configured": "LLM 未配置（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL）",
   "llm.non_retryable": "LLM 调用不可重试：HTTP {status} {body}",
   "llm.retry_exhausted": "LLM 调用 {retries} 次仍失败：{last_err}",
@@ -38,10 +42,12 @@
   "llm.invalid_json": "LLM 返回非法 JSON：{err}；原文：{json_str}",
   "llm.schema_mismatch": "LLM 输出不符合 schema：{err}；原文：{json_str}",
   "llm.timeout": "chat_text 总超时（>{budget:.0f}s）",
+
   "asr.url_not_configured": "未配置 ASR_WS_URL",
   "asr.connect_fail": "语音识别（ASR）连接失败：{ws_url}（{reason}）。请到「⚙️ 后端配置」检查 asr.ws_url 并确认 ASR 服务已启动",
   "asr.dead": "ASR 连接已断开（funasr 假活）",
   "asr.feed_fail": "ASR feed 失败：{err}",
+
   "diag.llm.config_missing_raw": "LLM 配置缺失：{detail}",
   "diag.llm.config_missing": "LLM 未配置（缺失：{missing}），请到「⚙️ 后端配置」补齐",
   "diag.llm.unreachable": "无法连接 LLM 服务：{detail}",

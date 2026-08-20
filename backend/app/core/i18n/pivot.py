@@ -26,7 +26,7 @@ import logging
 from typing import Awaitable, Callable
 
 from app.core.i18n.lang_meta import get_lang_meta
-from app.core.i18n.script_detect import detect_language_match_json, detect_script
+from app.core.i18n.script_detect import detect_language_match_json, detect_script, observed_text
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,8 @@ async def with_lang_fallback(
         return (out, requested)
 
     fallback_lang = get_lang_meta(requested).fallback_lang
-    observed = detect_script(out)
+    # observed 对剥结构字符的 values 跑——raw JSON 键名稀释会恒判 LATIN（同事 6.2）。
+    observed = detect_script(observed_text(out))
     if on_pivot:
         try:
             on_pivot(requested, observed, fallback_lang)
@@ -71,4 +72,14 @@ async def with_lang_fallback(
         requested, observed, fallback_lang,
     )
     out = await call(system_factory(fallback_lang), user)
+    # fallback 后复检：若 fallback 输出仍不匹配 → logger.error（不打 warning，
+    # 避免埋点过载）。观测「pivot 兜底真实有效率」——同事 4 提的可观测性提升。
+    if not detect_language_match_json(out, fallback_lang):
+        logger.error(
+            "pivot fallback also mismatched: requested=%s fallback=%s "
+            "observed_script=%s out_snip=%s",
+            requested, fallback_lang,
+            detect_script(observed_text(out)),
+            out[:200],
+        )
     return (out, fallback_lang)

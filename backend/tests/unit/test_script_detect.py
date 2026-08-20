@@ -4,7 +4,9 @@ from __future__ import annotations
 from app.core.i18n.script_detect import (
     _EXPECTED_SCRIPT,
     detect_language_match,
+    detect_language_match_json,
     detect_script,
+    observed_text,
 )
 
 
@@ -122,3 +124,85 @@ def test_expected_script_covers_head_10():
     assert set(_EXPECTED_SCRIPT) >= set(_LANG_META), (
         f"_EXPECTED_SCRIPT 缺语种：{set(_LANG_META) - set(_EXPECTED_SCRIPT)}"
     )
+
+
+# ── 主脚本规则（同事 6.2 提的本 bug 主场景）───────────────
+
+
+def test_main_script_rule_rejects_latin_target_with_pure_cjk_values():
+    """en/vi/fr/de/es 请求下，LLM 输纯中文 values（无 Latin 缩写）
+    → 主脚本 = CJK ∉ {LATIN} → 拒。同事 6.2：本 bug 主场景。
+
+    原宽松规则（any expected script present）会因 schema 字段（"id":"q1" 等
+    LATIN）命中即放行 → pivot 漏。新规则：主脚本必须 ∈ expected 才放行。
+    """
+    payload = (
+        '{"items":[{"id":"q1","text":"你最近的项目背景是什么",'
+        '"reason":"用户最关心库存周转痛点","status":"todo",'
+        '"covered_segments":[],"corrected_segments":{}}]}'
+    )
+    assert detect_language_match_json(payload, "en") is False
+    assert detect_language_match_json(payload, "vi") is False
+    assert detect_language_match_json(payload, "fr") is False
+
+
+def test_main_script_rule_rejects_cjk_target_with_pure_latin_values():
+    """zh_cn/zh_tw 请求下，LLM 输纯英文 values（跑飞）
+    → 主脚本 = LATIN ∉ {CJK} → 拒。"""
+    payload = (
+        '{"items":[{"id":"q1","text":"What is your project background?",'
+        '"reason":"inventory, timeline, budget","status":"todo",'
+        '"covered_segments":[],"corrected_segments":{}}]}'
+    )
+    assert detect_language_match_json(payload, "zh_cn") is False
+    assert detect_language_match_json(payload, "zh_tw") is False
+
+
+def test_main_script_rule_accepts_cjk_target_with_mixed_values():
+    """zh_cn 请求下，values 主体 CJK（带少量 Latin 缩写） → 主脚本 CJK ∈ {CJK} → 通过。"""
+    payload = (
+        '{"items":[{"id":"q1","text":"AI项目预算多少",'
+        '"reason":"用户最关心库存周转痛点、采购效率","status":"todo",'
+        '"covered_segments":[],"corrected_segments":{}}]}'
+    )
+    assert detect_language_match_json(payload, "zh_cn") is True
+
+
+def test_main_script_rule_accepts_latin_target_with_latin_values():
+    """en 请求 + 纯 Latin values → 主脚本 LATIN ∈ {LATIN} → 通过。"""
+    payload = (
+        '{"items":[{"id":"q1","text":"What is your AI project about?",'
+        '"reason":"timeline, budget","status":"todo","covered_segments":[],'
+        '"corrected_segments":{}}]}'
+    )
+    assert detect_language_match_json(payload, "en") is True
+
+
+# ── observed_text：JSON 抽 values 去结构稀释（同事 6.2）───────────
+
+
+def test_observed_text_json_extracts_values():
+    """JSON 输入抽 values——detect_script 不被结构字符稀释为 LATIN。"""
+    raw = '{"items":[{"reason":"用户背景 CTO AI 调研"},{"reason":"timeline"}]}'
+    out = observed_text(raw)
+    # values join 后是「用户背景 CTO AI 调研 timeline」——主脚本 CJK
+    assert "用户背景" in out
+    assert "{" not in out  # 结构字符不应出现
+    assert '"reason"' not in out  # JSON 键名不应出现
+
+
+def test_observed_text_markdown_strips_syntax():
+    """Markdown 输入去结构字符——避免列表符号 / 标题 # 稀释脚本统计。"""
+    raw = "## 背景\n- 项目：AI 项目\n- 受访者：张三"
+    out = observed_text(raw)
+    assert "##" not in out
+    assert "\n" not in out
+    assert "背景" in out
+
+
+def test_observed_text_invalid_json_falls_back_to_strip():
+    """JSON 解析失败 → strip 结构字符（与 detect_language_match_json 兜底一致）。"""
+    raw = "## 普通 Markdown 报告，背景：AI 项目"
+    out = observed_text(raw)
+    assert "##" not in out
+    assert "背景" in out

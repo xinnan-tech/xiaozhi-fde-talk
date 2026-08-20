@@ -137,14 +137,15 @@ async def test_legacy_empty_output_language_forced_regen(monkeypatch):
         upsert_auto=AsyncMock(),
     ))
     llm = MagicMock()
-    llm.chat_text = AsyncMock(return_value="fresh report")
+    # mock 返回含 zh_cn 字符——避免 pivot 误触发；production zh_cn 报告含中文。
+    llm.chat_text = AsyncMock(return_value="## 背景与目的\n新报告内容")
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
     monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
 
     status, md = await generator.get_or_generate("s1")
 
-    assert md == "fresh report"
+    assert md == "## 背景与目的\n新报告内容"
     llm.chat_text.assert_awaited_once()
 
 

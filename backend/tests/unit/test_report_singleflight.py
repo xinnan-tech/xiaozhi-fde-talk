@@ -59,7 +59,8 @@ def _patch_deps(monkeypatch, repo, llm_calls: list[str]):
     async def _slow_chat(system, user):
         await asyncio.sleep(0.05)  # 拉长窗口，让并发请求都聚到这里
         llm_calls.append("call")
-        return "generated report"
+        # 含 zh_cn 字符——避免 zh_cn 配置下 pivot 误触发；production 真实报告是中文。
+        return "## 背景与目的\n生成的报告内容"
 
     llm = MagicMock()
     llm.chat_text = _slow_chat
@@ -79,7 +80,7 @@ async def test_concurrent_generate_calls_llm_once(monkeypatch):
 
     assert len(llm_calls) == 1, f"并发应只调一次 LLM，实际 {len(llm_calls)} 次"
     assert repo.upserts == 1
-    assert results == [("ready", "generated report")] * 3
+    assert results == [("ready", "## 背景与目的\n生成的报告内容")] * 3
     assert repo.rec.transcript_signature == sig
 
 

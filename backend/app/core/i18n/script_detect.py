@@ -9,6 +9,7 @@ ARABIC、LATIN（覆盖英文 + 西欧 + 越南——越南语用拉丁字母 + 
 """
 from __future__ import annotations
 
+import json
 import re
 
 # 各 Unicode 脚本的字符范围——按段粗粒度切，足够区分 CJK / 西文 / 西里尔等。
@@ -96,15 +97,13 @@ def detect_language_match(text: str, expected_lang: str) -> bool:
     return False
 
 
-# JSON 结构字符（括号、引号、冒号、逗号、空白）——脚本中立，剔除它们避免把
-# 比例稀释成 LATIN 主导（"{\\"items\\": [...]}" 30+ ASCII 字符 + 几条 CJK 时，
-# 直接 detect_script 会判定 LATIN，触发误 pivot）。coaching JSON 输出专用。
-_JSON_SYNTAX_RE = re.compile(r"[\s{}\[\]\":,]")
+# 结构中立字符：JSON 结构符号 + Markdown 列表/标题符号 + 空白——脚本中立，
+# 剔除避免比例稀释成 LATIN 主导。coaching JSON 输出 + 报告 Markdown 输出都走这条。
+_JSON_SYNTAX_RE = re.compile(r"[\s{}\[\]\":,#*\-]")
 
 
 def _collect_string_values(node) -> list[str]:
     """递归收集 JSON 树的所有字符串值。"""
-    import json as _json
     if isinstance(node, str):
         return [node]
     if isinstance(node, dict):
@@ -120,19 +119,54 @@ def _collect_string_values(node) -> list[str]:
     return []
 
 
+def observed_text(text: str) -> str:
+    """提取用于日志的脚本可观察文本：JSON 抽 values，Markdown 去结构字符。
+
+    detect_script 按字符统计脚本占比；JSON 输出含大量结构字符（{ } [ ] " : , 空格）
+    都是 LATIN 块，把实际语种占比稀释→日志误导（恒判 LATIN）。
+    """
+    try:
+        parsed = json.loads(text)
+        values = _collect_string_values(parsed)
+        if values:
+            return " ".join(values)
+    except (ValueError, TypeError):
+        pass
+    return _JSON_SYNTAX_RE.sub("", text or "")
+
+
 def detect_language_match_json(text: str, expected_lang: str) -> bool:
     """JSON 输出专用：解析后只对字符串值判脚本族——忽略 JSON 键名（"id"/"text"
     等结构字段固定 LATIN，会把整体比例稀释成 LATIN 主导触发误 pivot）。
 
+    主脚本校验收紧：除了「expected 脚本族任一出现」（detect_language_match 的
+    「any script in expected」宽松规则），先跑 detect_script(values) 拿主脚本；
+    主脚本不在 expected 且不是 MIXED → 拒。这是同事 review 6.2 提的本 bug 主
+    场景——en/vi/fr/de/es 请求下 LLM 输出全中文 reason（含 AI/CTO/10K 等
+    Latin 缩写），原宽松规则因 Latin 缩写命中即放行 → pivot 漏触发；新规则
+    主脚本 = CJK ∉ {LATIN} → 拒。
+
+    MIXED 仍走宽松规则：短文本双族混杂（中文 + Latin 缩写）属正常，不应误拒。
+
     解析失败兜底为 strip 结构字符后判（Markdown 路径也走这个分支）。
     """
-    import json as _json
+    expected = _EXPECTED_SCRIPT.get((expected_lang or "").lower(), {"LATIN"})
     try:
-        parsed = _json.loads(text)
+        parsed = json.loads(text)
         values = _collect_string_values(parsed)
         if not values:
             return detect_language_match(text, expected_lang)
-        return detect_language_match(" ".join(values), expected_lang)
+        joined = " ".join(values)
+        # 主脚本收紧：仅对 expected = {LATIN}（en/vi/fr/de/es）收紧——同事 6.2 本 bug
+        # 主场景：en 请求下 LLM 输中文 values（schema 字段是 Latin，会命中原宽松
+        # {LATIN} 集合），主脚本 = CJK ∉ {LATIN} → 拒。
+        # zh_cn/zh_tw 期望 {CJK}：schema 字段 Latin 会拉低 CJK 比例到主脚本 = LATIN，
+        # 此场景下宽松规则（detect_language_match 命中 CJK content 字段）已足够，
+        # 收紧会因 schema 字段稀释误拒正常 content 输出。
+        main_script = detect_script(joined)
+        if expected == {"LATIN"} and main_script not in expected and main_script != "MIXED":
+            return False
+        return detect_language_match(joined, expected_lang)
     except (ValueError, TypeError):
         stripped = _JSON_SYNTAX_RE.sub("", text or "")
         return detect_language_match(stripped, expected_lang)

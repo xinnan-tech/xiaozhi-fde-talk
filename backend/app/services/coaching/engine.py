@@ -380,12 +380,6 @@ class CoachingEngine:
                 self._in_progress = False
                 self._last_ts = time.time()
 
-    async def _llm_with_timeout(self, system: str, user: str) -> dict:
-        return await asyncio.wait_for(
-            self._get_llm().chat_json(system, user),
-            timeout=self._llm_timeout_s,
-        )
-
     async def _llm_pivot_then_parse_json(
         self,
         system: str,
@@ -398,14 +392,12 @@ class CoachingEngine:
         system 是主路 system（调用方已构建好——保证 spy 能看到首次构建）。
         system_factory 仅在 pivot 时按 fallback_lang 重建 system。
 
-        与 _llm_with_timeout 区别：经 chat_text（暴露原始 text 给 script 检测），
-        LLM 输出脚本与 lang 不符则用 fallback_lang 重试一次，effective_lang 用于
-        下游 _fill_dangling_labels / 日志。chat_json 的 fence+parse 逻辑在这里
-        镜像复刻（_extract_json_dict）。
+        走 chat_text(..., json_mode=True)：raw text 用于 detect_script / 解析。
+        chat_json 的 fence+parse 逻辑在这里镜像复刻（_extract_json_dict）。
         """
         async def _call(s: str, u: str) -> str:
             return await asyncio.wait_for(
-                self._get_llm().chat_text(s, u),
+                self._get_llm().chat_text(s, u, json_mode=True),
                 timeout=self._llm_timeout_s,
             )
         text, _ = await with_lang_fallback(_call, system, system_factory, user, lang)

@@ -202,16 +202,35 @@ class OpenAILLMProvider(LLMProvider):
                 ) from e
         return parsed
 
-    async def chat_text(self, system: str, user: str, retries: int = 2) -> str:
-        """报告生成用：纯文本返回（Markdown）。"""
-        body = {
+    async def chat_text(
+        self,
+        system: str,
+        user: str,
+        retries: int = 2,
+        json_mode: bool = False,
+    ) -> str:
+        """返回原始文本（Markdown 或 JSON 字符串），由调用方解析。
+
+        json_mode=True：带 response_format=json_object + temperature=0.3 +
+        max_tokens=_JSON_MAX_TOKENS 三件套，请求服务端强制 JSON 输出；同时返回
+        raw text 供调用方跑脚本检测 / fence 解析。chat_json 路径被此形参替代——
+        旧 chat_json 保留以备兼容，但生产路径（coaching）改走 chat_text(...,json_mode=True)。
+
+        json_mode=False：纯文本（默认，报告生成用）。
+        """
+        body: dict = {
             "model": self._model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": 0.4,
         }
+        if json_mode:
+            body["response_format"] = {"type": "json_object"}
+            body["temperature"] = 0.3
+            body["max_tokens"] = _JSON_MAX_TOKENS
+        else:
+            body["temperature"] = 0.4
         self._apply_thinking_disabled(body)
         # 外层总预算：跨所有重试 + 退避，避免 LLM 半挂拖住报告生成
         budget = self._llm_timeout_s * (retries + 1) * 1.5

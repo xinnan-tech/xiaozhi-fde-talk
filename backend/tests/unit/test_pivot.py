@@ -165,3 +165,87 @@ async def test_uppercase_lang_normalized():
     out, eff = await with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "ZH_CN")
     assert eff == "zh_cn"  # lowercase normalized
     assert calls[0][0] == "<system lang=zh_cn>"
+
+
+# ── fallback 后复检：兜底真实有效率观测（同事 4）─────────────
+
+
+@pytest.mark.asyncio
+async def test_fallback_also_mismatched_logs_error(caplog):
+    """fallback 输出仍不匹配 → logger.error，不打 warning 避免埋点过载。
+
+    场景：vi 请求 LLM 输出中文（不匹配 vi）→ pivot 切 en → LLM 仍写中文
+    （en 系统 + LLM 没认真按 en 写）→ 检测 mismatch → logger.error。
+    """
+    import logging
+
+    async def call(system: str, user: str) -> str:
+        if "lang=vi" in system:
+            return "中文错误内容"  # vi 期望 LATIN
+        return "中文错误内容"  # en fallback 也写中文 → 不匹配 en
+
+    factory = lambda lang: f"<system lang={lang}>"
+
+    with caplog.at_level(logging.ERROR, logger="app.core.i18n.pivot"):
+        out, eff = await with_lang_fallback(call, "<system lang=vi>", factory, "<user>", "vi")
+    assert eff == "en"
+    # logger.error 应包含「pivot fallback also mismatched」
+    assert any(
+        "pivot fallback also mismatched" in rec.message
+        for rec in caplog.records
+    ), "fallback 复检 mismatch 必须打 logger.error"
+
+
+@pytest.mark.asyncio
+async def test_fallback_matches_no_error_log(caplog):
+    """fallback 输出匹配 → 不打 logger.error。"""
+    import logging
+
+    async def call(system: str, user: str) -> str:
+        if "lang=vi" in system:
+            return "中文错误内容"
+        return "Hello English world"  # en fallback 写英文 → 匹配 en
+
+    factory = lambda lang: f"<system lang={lang}>"
+
+    with caplog.at_level(logging.ERROR, logger="app.core.i18n.pivot"):
+        await with_lang_fallback(call, "<system lang=vi>", factory, "<user>", "vi")
+    assert not any(
+        "pivot fallback also mismatched" in rec.message
+        for rec in caplog.records
+    )
+
+
+# ── observed_script 用 values 不被 raw JSON 稀释（同事 6.2）───
+
+
+@pytest.mark.asyncio
+async def test_observed_script_uses_values_not_raw_json(caplog):
+    """pivot.py:63 的 observed 对剥结构字符的 values 跑——raw JSON 键名稀释
+    会恒判 LATIN，应复用 values 版。
+
+    场景：LLM 写中文 reason + Latin 缩写 → JSON 结构字符多 → 主脚本如果
+    按 raw text 跑会判 LATIN → 误导日志。values 版跑出 CJK。
+    """
+    import logging
+
+    raw_json = (
+        '{"items":[{"id":"q1","text":"能不能描述下AI项目",'
+        '"reason":"用户背景 CTO 10K","status":"todo",'
+        '"covered_segments":[],"corrected_segments":{}}]}'
+    )
+
+    async def call(system: str, user: str) -> str:
+        if "lang=zh_cn" in system:
+            return raw_json  # zh_cn 期望 CJK，但 JSON 结构 + values 含 Latin 缩写
+        return "Hello English"
+
+    factory = lambda lang: f"<system lang={lang}>"
+
+    with caplog.at_level(logging.WARNING, logger="app.core.i18n.pivot"):
+        await with_lang_fallback(call, "<system lang=zh_cn>", factory, "<user>", "zh_cn")
+    # 因为 zh_cn 主脚本仍是 CJK（values 主体），匹配 → 不触发 pivot，无 warning。
+    assert not any(
+        "pivot fired" in rec.message
+        for rec in caplog.records
+    )

@@ -116,7 +116,7 @@ async def _fail(
     }
     if close_code is not None:
         payload["close"] = close_code
-    await ws.send(json.dumps(payload, ensure_ascii=False))
+    await ws.send_json(payload)
     if close_code is not None:
         # WebSocket close reason is byte-limited (123B per RFC6455). Slice by
         # bytes to avoid splitting a multibyte sequence; Starlette's
@@ -265,12 +265,12 @@ class WSHandler:
         # 完成且对 IN_PROGRESS 幂等；pending 断连时 _cleanup 因 _send_fn != self._send 而 no-op。
         if (self.runtime._send_fn is not None
                 and self.runtime._bound_client_id != self.client_id):
-            await self.ws.send(json.dumps({
+            await self._send({
                 "type": "connection.conflict",
                 "i18n_key": Keys.WS_CONNECTION_CONFLICT.value,
                 "i18n_params": {},
                 "message": i18n_t(Keys.WS_CONNECTION_CONFLICT, locale=state.locale),
-            }, ensure_ascii=False))
+            })
             logger.info("连接检测到已有 owner，进入待决（pending）：session=%s owner=%s new=%s",
                         self.session_id, self.runtime._bound_client_id, self.client_id)
             return True  # 进入 _loop 等 connection.takeover；未 bind
@@ -311,7 +311,7 @@ class WSHandler:
                 try:
                     await self._dispatch(json.loads(raw["text"]))
                 except json.JSONDecodeError:
-                    await _fail(self.ws, code="bad_json")
+                    await _fail(self.ws, code="bad_json", close_code=4411)
                     return
             elif "bytes" in raw:
                 # 隔离单帧异常：解码/喂流偶发失败不能拖垮整条访谈连接

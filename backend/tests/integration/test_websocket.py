@@ -68,7 +68,7 @@ async def test_ws_token_in_hello_body_rejected(client, login, create_session):
 
 
 async def test_ws_resource_isolation(client, login, create_session, create_user):
-    admin_token = await login(client, "admin", "admin")
+    admin_token = await login(client)
     await create_user("bob", "bob")
     bob_token = await login(client, "bob", "bob")
     sid = await create_session(client, admin_token)

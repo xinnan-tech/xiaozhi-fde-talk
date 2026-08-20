@@ -98,5 +98,7 @@ async def test_reconnect_during_terminating_is_rejected(monkeypatch):
     assert ok is False
     sent = ws.send_json.call_args[0][0]
     assert sent["code"] == "session_ended", sent
-    ws.close.assert_awaited_once_with(code=4406)
+    # close 必带 code=4406；reason 等 i18n kwargs 服务端可能新增，不能严格匹配。
+    close_kwargs = ws.close.call_args.kwargs
+    assert close_kwargs.get("code") == 4406
     fake_registry.get_or_create.assert_not_called()

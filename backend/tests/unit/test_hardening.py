@@ -9,6 +9,7 @@ import jwt as pyjwt
 import pytest
 
 from app.core.exceptions import AuthError
+from app.core.i18n import Keys, t
 from app.services.auth.token import _AUDIENCE, _ISSUER, _SIGNING_ALG, decode_token
 from app.services.sessions.runtime import SessionRuntime
 from app.transport.base import extract_auth
@@ -179,7 +180,9 @@ async def test_suspend_notifies_suspended_and_closes_4403(make_state):
     await rt.suspend()
     assert any(m.get("type") == "session.suspended" for m in sent)
     assert not any(m.get("type") == "session.ended" for m in sent)
-    assert evicted == [(4403, "访谈已挂起")]
+    # 用 i18n 目录里的 WS_CLOSE_SUSPENDED 字串对照，不硬编码中文——避免 i18n 文案微调
+    # 导致断言变脆。state.locale=None 时回退到 DEFAULT (zh-CN)。
+    assert evicted == [(4403, t(Keys.WS_CLOSE_SUSPENDED.value, locale=rt.state.locale))]
     rt.engine.on_end.assert_not_awaited()  # 会话可继续，无终局重算
     assert rt._fsm.is_terminated
 
@@ -192,5 +195,6 @@ async def test_end_still_notifies_ended_4406(make_state):
     rt._evict_fn = AsyncMock(side_effect=lambda c, r: evicted.append((c, r)))
     await rt.end()
     assert any(m.get("type") == "session.ended" for m in sent)
-    assert evicted == [(4406, "访谈已结束")]
+    # 同上：用 i18n 目录字串对照，绕开硬编码中文的脆性。
+    assert evicted == [(4406, t(Keys.WS_CLOSE_SESSION_ENDED.value, locale=rt.state.locale))]
     rt.engine.on_end.assert_awaited_once()

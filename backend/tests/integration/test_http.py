@@ -16,7 +16,7 @@ async def test_health(client):
 
 
 async def test_interviews(client, login, create_session, create_user):
-    admin_token = await login(client, "admin", "admin")
+    admin_token = await login(client)
     await create_user("bob", "bob")
     bob_token = await login(client, "bob", "bob")
     admin_h = {"Authorization": f"Bearer {admin_token}"}

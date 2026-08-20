@@ -622,7 +622,7 @@ class RuntimeRegistry:
                 if entry is None:
                     return
                 runtime_, _ = entry
-                # P1-4: end() 期间标记 terminating，让并发重连拒绝。
+                # end() 期间标记 terminating，让并发重连拒绝。
                 # 否则该 session 此刻既不在 _active 也不在 _parked，重连 get_or_create
                 # 会落空 → 新建孤儿 runtime 漏进 _active 且无人回收。
                 self._terminating.add(session_id)

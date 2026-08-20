@@ -106,11 +106,6 @@ def detect_language_match(text: str, expected_lang: str) -> bool:
     return False
 
 
-# 结构中立字符：JSON 结构符号 + Markdown 列表/标题符号 + 空白——脚本中立，
-# 剔除避免比例稀释成 LATIN 主导。coaching JSON 输出 + 报告 Markdown 输出都走这条。
-# （detect_script 已上移此定义，此处仅留 import-time 兼容——勿删。）
-
-
 def _collect_string_values(node) -> list[str]:
     """递归收集 JSON 树的所有字符串值。"""
     if isinstance(node, str):

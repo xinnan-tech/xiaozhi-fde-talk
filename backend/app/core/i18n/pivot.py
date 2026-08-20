@@ -60,15 +60,6 @@ async def with_lang_fallback(
         return (out, requested)
 
     fallback_lang = get_lang_meta(requested).fallback_lang
-    # 兜底自身 = requested（如 en.fallback_lang="en"）时无意义重试：en system 第二次
-    # 输出与第一次同概率，浪费 1 次 LLM 调用 + 大概率落入 fallback error 日志。
-    # 跳过重试，记录 warning 让观测发现「en 用户拿中文报告」的真实失配场景。
-    if fallback_lang == requested:
-        logger.warning(
-            "pivot fallback_lang == requested, skip retry: lang=%s observed_script=%s out_snip=%s",
-            requested, detect_script(observed_text(out)), out[:200],
-        )
-        return (out, requested)
     # observed 对剥结构字符的 values 跑——raw JSON 键名稀释会恒判 LATIN。
     observed = detect_script(observed_text(out))
     if on_pivot:

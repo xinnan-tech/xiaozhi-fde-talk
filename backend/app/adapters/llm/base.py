@@ -34,5 +34,6 @@ class LLMProvider(ABC):
 
         json_mode=True：调用方需要 LLM 强制 JSON 输出（如 pivot 解析场景），
         实现层应带 response_format=json_object + temperature 偏 0 + 截断 budget
-        三件套，保证 raw text 是合法 JSON 字符串。
+        三件套，使 raw text **倾向于**合法 JSON 字符串——但 max_tokens 截断 / 模型
+        未严格遵守 / 服务端 bug 仍可能产出不闭合 JSON，调用方应有 parse 容错。
         """

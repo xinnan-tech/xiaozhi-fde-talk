@@ -251,34 +251,56 @@ async def test_observed_script_uses_values_not_raw_json(caplog):
     )
 
 
-# ── en.fallback_lang == "en" 自身时跳过重试 ─────────────────
+# ── en 锚点 pivot：与其他语种一致走 retry，概率性修复 ──────────
 
 
 @pytest.mark.asyncio
-async def test_pivot_skips_retry_when_fallback_lang_equals_requested(caplog):
-    """en.fallback_lang = "en" 自身 → 重试必返回同样英文，浪费 1 次 LLM。
+async def test_pivot_en_anchor_retries_once():
+    """en.fallback_lang == "en"：en 是 fallback 体系锚点，没有「上一层语言」。
 
-    场景：en 请求 + LLM 输中文 → 主脚本 mismatch 触发 pivot；fallback_lang == "en"
-    → 直接返回首份输出 + warning log，不调第二次 call。
+    仍照常重试一次：temperature > 0 下非确定性，统计有概率产出正确语言。
+    不做特殊跳过——与其他语种成本结构一致（花 1 次 LLM 买概率性修复），
+    且 skip 会让 en 成为唯一没有第二次机会的语种。
     """
-    import logging
-
     calls: list[tuple[str, str]] = []
 
     async def call(system: str, user: str) -> str:
         calls.append((system, user))
-        return "本次访谈的主题是 AI 行业转型"  # 全中文，en 期望 LATIN → 主脚本收紧拒
+        return "本次访谈的主题是 AI 行业转型"  # 全中文
 
     factory = lambda lang: f"<system lang={lang}>"
-
-    with caplog.at_level(logging.WARNING, logger="app.core.i18n.pivot"):
-        out, eff = await with_lang_fallback(call, "<system lang=en>", factory, "<user>", "en")
-    # 只调一次 call（无重试）
-    assert len(calls) == 1
-    # effective_lang 仍为 en（fallback == requested → 返回首份）
+    out, eff = await with_lang_fallback(call, "<system lang=en>", factory, "<user>", "en")
+    # 第二次调用就是 en system（fallback_lang == "en" == requested），与首份同 system
+    assert len(calls) == 2
+    assert calls[1][0] == "<system lang=en>"
+    # effective_lang == "en"（fallback == requested）
     assert eff == "en"
-    # warning log 说明跳过重试
-    assert any(
-        "fallback_lang == requested" in rec.message
-        for rec in caplog.records
-    )
+
+
+@pytest.mark.asyncio
+async def test_pivot_en_anchor_on_pivot_called_for_metrics(caplog):
+    """en 锚点失配也要触发 on_pivot 回调——失配事件必须进指标，不能从 metrics 隐形。
+
+    删 skip 分支后所有 pivot 路径一致调 on_pivot，包括 en 锚点失配。
+    """
+    import logging
+
+    seen: list[tuple[str, str, str]] = []
+
+    def cb(req: str, obs: str, fb: str) -> None:
+        seen.append((req, obs, fb))
+
+    async def call(system: str, user: str) -> str:
+        return "本次访谈的主题是 AI 行业转型"  # 全中文 → en 主脚本收紧拒
+
+    factory = lambda lang: f"<system lang={lang}>"
+    with caplog.at_level(logging.WARNING, logger="app.core.i18n.pivot"):
+        await with_lang_fallback(
+            call, "<system lang=en>", factory, "<user>", "en", on_pivot=cb,
+        )
+    # on_pivot 必须被调用（en 锚点失配也是失配事件）
+    assert len(seen) == 1
+    req, obs, fb = seen[0]
+    assert req == "en"
+    assert fb == "en"  # fallback == requested，metrics 看见 fb == req → 锚点失配标记
+    assert obs == "CJK"

@@ -178,7 +178,7 @@ class ConfigStore:
     def get_sync(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """同步读缓存中的配置值（不查 DB）。
 
-        P3-10: 替代外部直接访问 _cache 私有属性。仅用于 warm 后、值已缓存的场景；
+        替代外部直接访问 _cache 私有属性。仅用于 warm 后、值已缓存的场景；
         key 不在缓存返回 default（不回退 DB——保持同步契约）。
         """
         return self._cache.get(key, default)

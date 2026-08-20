@@ -15,23 +15,30 @@ from chaos import check_frame_invariants, check_interview_data
 pytestmark = pytest.mark.e2e
 
 GRACE_PERIOD_S = 60   # session.grace_period_s 默认值：断开到自动挂起的窗口
-IDLE_TIMEOUT_S = 120  # session.idle_timeout_s 默认值：连接在线但无活动的挂起阈值
 
 
-async def test_idle_suspend_notifies_suspended(api, new_sid, make_client):
+async def test_idle_suspend_notifies_suspended(api, new_sid, make_client, restore_idle_window):
     """连接保持但长时间无活动：应发 session.suspended + 4403（可继续），
-    而不是 session.ended + 4406（只读）——挂起语义与 DB 落的 suspended 一致。"""
-    sid = await new_sid("E2E空闲挂起", "操作测试：在线但无活动的挂起通知语义")
-    c = make_client("idle", sid, client_id="e2e-id-1")
-    await c.connect()
-    await c.listen_start()
-    await c.stream(15)
+    而不是 session.ended + 4406（只读）——挂起语义与 DB 落的 suspended 一致。
 
-    # 静默保持连接：idle_timeout 120s + 检查间隔 30s，挂起应在此窗口内触发
-    await asyncio.wait_for(c.closed_event.wait(), IDLE_TIMEOUT_S + 60)
-    assert c.close_code == 4403, f"挂起关闭码应为 4403，实际 {c.close_code}"
-    assert not c.frames_of("session.ended"), "挂起不应发 session.ended"
-    assert c.frames_of("session.suspended"), "挂起应发 session.suspended"
+    默认 idle_timeout=1800s（30 分钟），不符合测试节奏；用 restore_idle_window 临时
+    收缩到 10s/3s，让 watchdog 一轮内即触发；exit finally 一律还原回原值。
+    """
+    async with restore_idle_window("10", "3"):
+        sid = await new_sid("E2E空闲挂起", "操作测试：在线但无活动的挂起通知语义")
+        c = make_client("idle", sid, client_id="e2e-id-1")
+        await c.connect()
+        await c.listen_start()
+        await c.stream(15)
+
+        # idle_timeout 10s + 检查间隔 3s，挂起应在此窗口内触发。
+        # 预算 22s（=10+12）涵盖：idle 触发 + _teardown（pipeline.flush +
+        # force_flush）+ WS close 帧往返。pytest-asyncio 在测试超时后会立刻
+        # cancel reader_task，若 close 帧未到客户端则 reader 拿不到 4403。
+        await asyncio.wait_for(c.closed_event.wait(), 10 + 12)
+        assert c.close_code == 4403, f"挂起关闭码应为 4403，实际 {c.close_code}"
+        assert not c.frames_of("session.ended"), "挂起不应发 session.ended"
+        assert c.frames_of("session.suspended"), "挂起应发 session.suspended"
 
     await asyncio.sleep(5)
     info = await api.get_interview(sid)

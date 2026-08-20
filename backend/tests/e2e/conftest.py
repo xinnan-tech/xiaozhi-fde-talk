@@ -166,6 +166,22 @@ def restore_runtime_windows(api):
     return _factory
 
 
+@pytest.fixture
+def restore_idle_window(api):
+    """临时把 idle_timeout_s / idle_check_interval_s 缩到测试能等的秒数。
+
+    生产 idle_timeout 默认 1800s（30 分钟），本用例在 CI 必须在秒级内完成，
+    因此临时改为 idle=10s / check=3s，让"在线无活动"在秒级触发
+    session.suspended；exit finally 一律还原。
+    """
+    def _factory(idle_s: str, check_s: str):
+        return _ConfigRestore(api, "session", {
+            "idle_timeout_s": idle_s,
+            "idle_check_interval_s": check_s,
+        })
+    return _factory
+
+
 async def _call_get(api, group: str) -> dict:
     """GET /admin/config/{group}：读当前配置原值（string），与 str 输入相容。"""
     async with await api._client() as c:
@@ -189,9 +205,9 @@ def count_asr_connections(pid: int) -> int:
     与到 ASR_ADDR 的全部 TCP 连接」并起来，结果里目标不是 ASR_ADDR 的本地
     连接也会被算进去——这条计数会膨胀、且需要后续 `in line` 筛回，不稳。
 
-    输出列顺序固定：`COMMAND  PID  USER  FD  TYPE  DEVICE  SIZE/OFF  NODE  NAME`，
-    第二列（parts[1]）才是进程号；之前误读 parts[0]（COMMAND）导致恒 0，
-    是错的——本字段在某些 BSD/macOS 派系上还可能是二进制路径片段，匹配会失稳。
+    输出列顺序固定：`COMMAND  PID  USER  FD  TYPE  DEVICE  SIZE/OFF  NODE  NAME`。
+    必须读 parts[1]（PID）——parts[0] 是 COMMAND 列（BSD/macOS 上还可能是二进制
+    路径片段），不能用其值匹配目标进程 PID。
     """
     if shutil.which("lsof") is None:
         pytest.skip("本机无 lsof，无法检查残留连接")

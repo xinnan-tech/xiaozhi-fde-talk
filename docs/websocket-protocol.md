@@ -123,8 +123,9 @@ new WebSocket(url, ["bearer." + jwt])
 | `coaching.skip` | `id`: string | 把该辅导项标记为「本次跳过」，不再出现在「待问」列表 |
 | `coaching.ignore` | `id`: string | 标记为「已忽略」，彻底不再展示 |
 | `connection.takeover` | — | 仅在「pending」状态可发，见 §6 |
+| `session.touch` | — | keepalive：只重置空闲看门狗的活跃时间戳，**无任何副作用**（不重启 ASR / 不重算辅导 / 不发帧）。可用于客户端「我还在，我不要被挂起」按钮，不与 §6 重连路径冲突。协议层于 7833a58 后已支持；当前 `frontend/` Vue 工程尚未发送本帧——15faa0a 曾把等价 `keepAlive()` + idle-warning toast 接入到 **已废弃的** `backend/static/index.html`（dev 模式不再 serve、Docker 部署会被 `frontend/dist` 整目录覆盖），前端接入需要独立 PR |
 
-未列出的 `type` 会被服务端忽略并打一条 warning，不影响连接。
+未列出的 `type` 会被服务端忽略并打一条 warning，不影响连接。已列出但前端尚未接入的（如 `session.touch`）同样会被服务端接受并执行预期行为——前端接入时无须修改协议约定。
 
 ### 5.2 服务端 → 客户端（文本 JSON）
 
@@ -148,6 +149,7 @@ new WebSocket(url, ["bearer." + jwt])
 - `session.ended`：`session_id`（string）。
 - `session.suspended`：`session_id`（string）。
 - `audio.low_level`：`dbfs`（number，30s 滑窗（攒满 20s 即判）的 p95，单位 dBFS）/ `message`（string）— 提示文案。触发条件：p95 < -40 dBFS 且窗内有语音动态（p95−p10 > 15dB，排除纯停顿/环境噪声）；与客户端 AGC 分层——AGC 保可识别下限，本帧兜底 AGC 救不回的场景（系统输入音量近零/浏览器无 AGC/超出最大增益）。每个开麦周期（`listen:start` 之间）至多一帧；连接保持不变。
+- `error`：`type`（固定 `"error"`）/ `code`（string wire code，见 §9 表）/ `message`（string，本地化文案，回退到 code 本身）/ `i18n_key`（string，从语种目录查表，前端用此字段调用本地化）/ `i18n_params`（object，渲染模板时需要的命名参数；前置 i18n 化落地）/ `close`（number，RFC6455 关闭码；**仅在服务端会同时关闭本连接时存在**）。完整示例与 code 全集见 §9。
 
 ---
 
@@ -300,7 +302,7 @@ asr 推送频率由服务端 ASR 断句策略决定，客户端无法控制。`f
 服务端用 `error` 帧通告错误；除 `asr_unavailable` 的会话中场景（见下）外，发帧后紧接关闭连接：
 
 ```json
-{ "type": "error", "code": "asr_unavailable", "message": "语音识别连接已断开" }
+{ "type": "error", "code": "asr_unavailable", "i18n_key": "ws.asr.connect_fail", "i18n_params": {}, "message": "语音识别连接已断开" }
 ```
 
 关闭前还可能推两类通知帧（不是 `error`）：`session.ended`（REST end 后对在线端的兜底通知）和 `session.suspended`（空闲挂起）。
@@ -312,7 +314,7 @@ asr 推送频率由服务端 ASR 断句策略决定，客户端无法控制。`f
 | `code` | 含义 | 是否关连接 |
 | --- | --- | --- |
 | `bad_handshake` | 首条消息不是 JSON / 不是 hello | 是（4000） |
-| `bad_json` | 文本帧不是合法 JSON | 是（4000） |
+| `bad_json` | 文本帧不是合法 JSON | 是（4411） |
 | `handshake_timeout` | 5 s 内未收到 hello | 是（4408） |
 | `not_found` | 访谈不存在或不属于当前用户 | 是（4404） |
 | `session_ended` | 会话已结束 / 存活窗口已过 | 是（4406） |
@@ -344,6 +346,7 @@ asr 推送频率由服务端 ASR 断句策略决定，客户端无法控制。`f
 | `4408` | `handshake_timeout` 5 s 内未发 hello | 检查客户端实现 |
 | `4409` | `concurrent_limit` 活跃访谈达上限 | 关掉其他访谈 |
 | `4410` | `frame_too_large` 单帧 > 64 KiB | 检查音频帧大小 |
+| `4411` | `bad_json` 文本帧不是合法 JSON | 检查客户端实现 |
 
 ---
 

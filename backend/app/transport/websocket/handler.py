@@ -207,10 +207,14 @@ class WSHandler:
         try:
             msg = json.loads(first)
         except json.JSONDecodeError:
-            await _fail(self.ws, code="bad_handshake", i18n_key=Keys.WS_BAD_HANDSHAKE_JSON)
+            await _fail(self.ws, code="bad_handshake",
+                        i18n_key=Keys.WS_BAD_HANDSHAKE_JSON,
+                        close_code=4000)
             return False
         if msg.get("type") != "hello":
-            await _fail(self.ws, code="bad_handshake", i18n_key=Keys.WS_BAD_HANDSHAKE_ORDER)
+            await _fail(self.ws, code="bad_handshake",
+                        i18n_key=Keys.WS_BAD_HANDSHAKE_ORDER,
+                        close_code=4000)
             return False
 
         state = await manager.get(self.session_id)

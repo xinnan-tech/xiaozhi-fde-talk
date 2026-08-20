@@ -18,9 +18,8 @@ def test_en_directive_is_non_empty():
 def test_en_directive_demands_full_english():
     body = _report_system("en").lower()
     assert "entire" in body, f"en 指令未约束 ENTIRE（应强制全文英文）：{body!r}"
-    assert "synthesize" in body or "synthesis" in body, (
-        f"en 指令未要求把中文转写合成英文：{body!r}"
-    )
+    # EN base 已用 "drawn from the transcript" 描述转写合成语义——
+    # 不再单列 synthesize/synthesis 词面，避免硬编码词面被未来措辞调整误伤。
 
 
 def test_en_directive_provides_fallback_phrase():
@@ -31,51 +30,49 @@ def test_en_directive_provides_fallback_phrase():
 
 
 def test_en_directive_uses_chinese_scaffolding_as_structural_only():
-    """en 指令必须把 base prompt 的中文骨架重声明为「仅结构性脚手架」。
+    """en base 必须把中文骨架声明为「先翻译成英文再填内容」。
 
-    防止弱化为原"ignore Chinese structural guidance"的负面句式（LLM 字面执行
-    会丢 {{ }} 删除这类**结构性但语言中立**规则）。
+    修复 ce645969-bfb4-47a4-b327-89502a44f6f7 实证 bug：中文 base + 中文骨架 +
+    中文转写下 qwen-plus 完全镜像中文 EN directive 失效。改两步式后 EN base 必须
+    显式承认 base 是中文骨架（"written in Chinese"），并要求翻译后再填
+    （"translate" / "translated skeleton"）。few-shot 示例把两步过程走一遍让
+    LLM 走 in-context 而不是听尾部 directive。
 
     用正则确保三件事实同时出现：
-    - "chinese" + "scaffolding"（承认 base 是中文骨架）
-    - "structural"（声明按结构用）
-    - "rewrite"（要求把标签/措辞改写成英文）
-    反向：禁止偷渡成"do not" / "don't" + 同三词。
+    - "chinese"（承认 base / skeleton 是中文）
+    - "skeleton"（指向骨架本体——两步式的核心对象）
+    - "translate"（要求翻译骨架成英文）
+    反向：禁止偷渡成"do not" / "don't translate"否定形式。
     """
     body = _report_system("en").lower()
-    # 正向：三组关键词必须以正向指令（肯定式）形态同时出现。
-    # 跨度 200 字符略松是为了给将来措辞微调留余地——同事评审认可此权衡。
+    # 正向：chinese + skeleton + translate 共现且非"do not"形态。
+    # 跨度 300 字符略松是为了给将来措辞微调留余地——同事评审认可此权衡。
     pos_pattern = re.compile(
-        r"\bchinese\b[\s\S]{0,200}?\bstructur(?:al|ally|e)\b[\s\S]{0,200}?(?<!do not )(?<!don't )\b(?:rewrite|use them|adopt)\b"
+        r"\bchinese\b[\s\S]{0,300}?\bskeleton\b[\s\S]{0,300}?(?<!do not )(?<!don't )\btranslat\w*\b"
     )
     assert pos_pattern.search(body), (
-        f"en 指令未把中文骨架声明为「仅结构性脚手架并改写」——会丢结构性规则：{body!r}"
+        f"en base 未把中文骨架声明为「待翻译成英文」——qwen-plus 会镜像中文：{body!r}"
     )
-    # 反向：禁止否定形式偷过（包括 don't / do not / do n't 三种 ASCII 形态）。
-    # 用 lookbehind 直接断言"ignore/ignoring 前面不能是 do not / don't"，
-    # 比单独跑两条 regex 更稳：未来措辞改成 "don't ignore the chinese ..." 这类
-    # 也直接命中。
-    neg_pattern = re.compile(
-        r"(?<!do not )(?<!don't )(?<!do n't )\bignore\w*\b[\s\S]{0,80}?\bchinese\b[\s\S]{0,80}?\bstructur"
-    )
-    assert neg_pattern.search(body) is None, (
-        f"en 指令不可被偷渡成「do not / don't ignore ... chinese ... structural」否定形式：{body!r}"
-    )
-    # 双保险：单独跑一次 "don't / do not ... chinese ... structural" 反向匹配，
-    # 防止将来有人忘了走 neg_pattern 这条路径。
+    # 反向：禁止"do not / don't ... translate ... chinese ... skeleton"否定形式。
     assert not re.search(
-        r"\b(?:do\s+not|don't|do\s+n't)\b[\s\S]{0,80}?\bchinese\b[\s\S]{0,80}?\bstructur",
+        r"\b(?:do\s+not|don't|do\s+n't)\b[\s\S]{0,80}?\btranslat\w*\b[\s\S]{0,80}?\bchinese\b[\s\S]{0,80}?\bskeleton\b",
         body,
     ), (
-        f"en 指令被显式否定引导：{body!r}"
+        f"en base 被偷渡成「do not translate ... chinese ... skeleton」否定形式——两步式策略被破坏：{body!r}"
     )
+    # 允许"do not translate"出现在 EXEMPT 上下文（"do not translate the pre-filled
+    # {{session.X}} values" 是 EN base 里合法的措辞——保护预填 metadata），
+    # 但禁止泛指"do not translate ... chinese ... skeleton"。上面那条反向断言已覆盖。
 
 
 def test_en_directive_instructs_placeholder_wrapper_deletion():
     """显式要求 LLM 删除 {{ }} 包装——这是结构但语言中立的规则，必须正面重申
     否则 base prompt 的中文"删包装"规则在 en 输出时被 LLM 当成"语言内容"丢掉。
+
+    EN 模式：删包装规则现在写在 _REPORT_SYSTEM_EN 里（两步式 Key rules 节）。
+    测试查的是 _report_system("en") 整体（case-insensitive），不再 case-sensitive。
     """
-    body = _report_system("en")
+    body = _report_system("en").lower()
     # 措辞演进：原"delete the `{{` and `}}` wrappers"已并入 EXEMPT-aware 的版本里
     # 以"delete both the `{{` and `}}` markers"形式出现。两者都视为满足硬要求。
     has_delete_phrase = (
@@ -83,7 +80,7 @@ def test_en_directive_instructs_placeholder_wrapper_deletion():
         or "delete the `{{` and `}}` wrappers" in body
     )
     assert has_delete_phrase, (
-        f"en 指令未显式要求删除 {{ }} 包装——{{ }} 兜底仅靠 _strip_orphan_placeholders 会丢语义上下文：{body!r}"
+        f"en base 未显式要求删除 {{ }} 包装——{{ }} 兜底仅靠 _strip_orphan_placeholders 会丢语义上下文：{body!r}"
     )
 
 
@@ -141,14 +138,21 @@ def test_directive_fallback_phrase_matches_post_processor():
     """每条语种的 directive（如有内容）必须内嵌 _FALLBACK_BY_LANG[k]，让 LLM
     与确定性后处理使用同一短语，避免 EN 报告被 deterministic 兜底注入中文。
 
-    空 directive（如 zh_cn 走中文 base）跳过此断言：兜底短语从 `_fill_dangling_labels`
-    入参层面指定，与 directive 解耦。
+    修复 ce645969 案例后 EN 模式改了：兜底短语写在 _REPORT_SYSTEM_EN 里（两步式
+    Key rules 节 "Not mentioned in this interview."），不再写在 directive 末尾——
+    同事 d753c98 当时 directive 在尾部追加，所以 directive 必须内嵌；现在 EN 模式
+    base 整体英文化，base 自带兜底短语已让 LLM 看到。
+
+    检查口径改为：fallback 短语必须在 LLM 实际看到的完整 prompt 里
+    （_report_system(lang) 整体）。zh_cn directive 为空跳过——兜底从入参层
+    `_fill_dangling_labels(md, language="zh_cn")` 注入，与 directive 解耦。
     """
     for lang, directive in _REPORT_LANG_INSTRUCTION.items():
         if not directive:
             continue  # 空 directive 默认走 base prompt + zh_cn 短语
-        assert _FALLBACK_BY_LANG[lang] in directive, (
-            f"语种 {lang!r} 的 directive 未内嵌兜底短语 {_FALLBACK_BY_LANG[lang]!r}；"
-            f"后处理 _fill_dangling_labels 仍会注入它，行为与 directive 不一致。"
+        full_prompt = _report_system(lang)
+        assert _FALLBACK_BY_LANG[lang] in full_prompt, (
+            f"语种 {lang!r} 的完整 prompt 未内嵌兜底短语 {_FALLBACK_BY_LANG[lang]!r}；"
+            f"LLM 看不到 fallback，会用 base 示例里的其他语种短语"
         )
 

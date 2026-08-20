@@ -7,7 +7,6 @@
 - 修改密钥的方式：直接改 DB（system_config.key='system.jwt_secret' 的 value）
 - 数据库备份即密钥备份——丢失 DB 备份意味着所有 token 失效，需全员重登
 
-P2-15:
 - prod 环境 env fallback 必须 fail-fast（无 DB → 启动失败，而不是静默生成）
 - dev 环境保留 APP_JWT_ALLOW_ENV_FALLBACK=1 逃生口（本地 docker-compose 不想污染 DB）
 - _save_to_db 必须用列名 'key' 作为 index_elements（PK 已存在则 ON CONFLICT DO NOTHING 生效）
@@ -33,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 DB_KEY = "system.jwt_secret"
 
-# P2-15: dev 环境的 env 逃生口。生产（env=prod）无视此开关。
+# dev 环境的 env 逃生口。生产（env=prod）无视此开关。
 _ENV_FALLBACK_FLAG = "APP_JWT_ALLOW_ENV_FALLBACK"
 
 
@@ -55,7 +54,7 @@ class JWTSecretResolver:
             logger.info("JWT 密钥已从数据库加载")
             return stored
 
-        # P2-15: env fallback 开关
+        # env fallback 开关
         if os.environ.get(_ENV_FALLBACK_FLAG) == "1":
             env_secret = self.settings.jwt_secret or ""
             if env_secret:
@@ -116,7 +115,7 @@ class JWTSecretResolver:
         按引擎方言选 insert：SQLite/PostgreSQL 走 ON CONFLICT DO NOTHING；
         MySQL 走 INSERT IGNORE（MySQL 无 ON CONFLICT 语法）。
 
-        P2-15: index_elements 必须用列对象（SystemConfig.key），不能用字面量
+        index_elements 必须用列对象（SystemConfig.key），不能用字面量
         DB_KEY（= "system.jwt_secret"）。否则 SQLAlchemy 会把字面量当列名引用，
         找不到匹配 UNIQUE/PK 约束 → SQLite 抛 OperationalError。
         """

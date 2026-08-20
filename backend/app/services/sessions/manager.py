@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import uuid4
 
-from app.core.config_store import get_max_concurrent, get_session_runtime_config
+from app.core.config_store import get_config_store, get_max_concurrent, get_session_runtime_config
 from app.core.i18n.errors import (
     SessionConcurrentLimitError,
     SessionDeleteForbiddenError,
@@ -60,6 +60,14 @@ class SessionManager:
         self._grace: dict[str, asyncio.Task] = {}
         # idle 看门狗：每 idle_check_interval_s 扫一次 _active
         self._idle_task: Optional[asyncio.Task] = None
+        # _stop_flag：被外部置位让 watchdog 跳出 sleep（lifespan shutdown 用）
+        self._stop_flag: asyncio.Event = asyncio.Event()
+        # _config_change_flag：cfg 改了让 watchdog 立刻重读+重排队；避免 30s
+        # 区间下挂起要等当前 sleep 走完才反应
+        self._config_change_flag: asyncio.Event = asyncio.Event()
+        # ConfigStore._subscribers 是 WeakSet，临时 bound method 会被立即 GC；须持
+        # 强引用，否则订阅静默失效，cfg 改动后 watchdog 仍睡满当前区间才反应
+        self._config_change_sub = self._on_config_change
         self._last_activity_at: dict[str, float] = {}
         # idle 配置（每次 start_idle_watchdog 时刷新）
         self._idle_timeout_s: float = 120.0
@@ -296,7 +304,7 @@ class SessionManager:
             if state and state.status == SessionStatus.IN_PROGRESS:
                 await self._transition(state, SessionStatus.SUSPENDED)
                 logger.info("会话已挂起（存活窗口到期）：%s", session_id)
-                # P0-2: 只清 manager 自己的进程内账目。
+                # 只清 manager 自己的进程内账目。
                 # 不调 registry.drop / runtime.end()——runtime（ASR/LLM 实例）归
                 # registry，由 registry._expire 在 liveness_window_s 到期时销毁。
                 self._active.pop(session_id, None)
@@ -338,41 +346,72 @@ class SessionManager:
     def start_idle_watchdog(self) -> None:
         """lifespan startup 调一次。"""
         if self._idle_task is None or self._idle_task.done():
+            self._stop_flag.clear()
+            self._config_change_flag.clear()
             self._idle_task = asyncio.create_task(self._idle_watchdog_loop())
             logger.info("空闲看门狗已启动（检查间隔=%ss，超时阈值=%ss）",
                         self._idle_check_interval_s, self._idle_timeout_s)
+            # 订阅 session.* 改动：UI 调参后立即唤醒 watchdog 重读 cfg + 重排队，
+            # 不必等当前 sleep 走完，避免 30s 区间下挂起要等 ~30s 才反应。
+            # 仅在 task 新建时挂订阅：ConfigStore._subscribers 是 WeakSet，
+            # 多次 add 不去重，重入 start_idle_watchdog 会累积 weak ref。
+            get_config_store().subscribe(self._config_change_sub)
 
     async def stop_idle_watchdog(self) -> None:
         """lifespan shutdown 调一次。"""
+        # 同时 set 两个 flag：wait_for 只监听 _config_change_flag，
+        # 不监听 _stop_flag。只 set _stop_flag 时 watchdog 仍会卡到下次 timeout。
+        # 复用 cfg 唤醒路径，循环内 _stop_flag 检查让它 return，最坏 0s 退出。
+        self._stop_flag.set()
+        self._config_change_flag.set()
         if self._idle_task is not None:
-            self._idle_task.cancel()
             try:
                 await self._idle_task
             except asyncio.CancelledError:
                 pass
             self._idle_task = None
-            logger.info("空闲看门狗已停止")
+        logger.info("空闲看门狗已停止")
+
+    def _on_config_change(self, changed_keys: set[str]) -> None:
+        """订阅回调：session.* 改动时打断 watchdog 当前 sleep，让它立刻重读 cfg。
+
+        用 Event 触发而不是 cancel：cancel 会让 asyncio.sleep 抛 CancelledError，导致
+        循环意外终止需重启；Event set 后下一次 wait_for 调用立刻返回，watchdog 继续循环。
+        """
+        if not any(k.startswith("session.") for k in changed_keys):
+            return
+        self._config_change_flag.set()
 
     async def _idle_watchdog_loop(self) -> None:
         """每 idle_check_interval_s 扫一次 _active，把 idle 超时的会话转 SUSPENDED。
 
-        拉配置：每次循环开头读一次，允许 UI 调参后下一轮生效（无需重启）。
+        拉配置：每次循环开头读一次，允许 UI 调参后下一轮循环生效（无需重启）。
+        cfg 改动通过订阅回调立即打断 sleep（避免 30s 区间下挂起要等一轮）。
         """
-        try:
-            cfg = await get_session_runtime_config()
-            self._idle_timeout_s = cfg["idle_timeout_s"]
-            self._idle_check_interval_s = cfg["idle_check_interval_s"]
-        except Exception:  # noqa: BLE001
-            logger.exception("空闲看门狗读取配置失败，使用默认值")
-
         while True:
-            await asyncio.sleep(self._idle_check_interval_s)
+            # 读 cfg；如被 cfg 改动事件打断，立刻再读一次
             try:
                 cfg = await get_session_runtime_config()
                 self._idle_timeout_s = cfg["idle_timeout_s"]
                 self._idle_check_interval_s = cfg["idle_check_interval_s"]
             except Exception:  # noqa: BLE001
+                logger.exception("空闲看门狗读取配置失败，使用默认值")
+
+            # 等下一轮循环：timeout = 当前间隔；cfg 改动 / stop 提前唤醒
+            try:
+                await asyncio.wait_for(
+                    self._config_change_flag.wait(),
+                    timeout=self._idle_check_interval_s,
+                )
+                self._config_change_flag.clear()
+                if self._stop_flag.is_set():
+                    return
+                continue  # cfg 改了，立刻重读 + 重排队
+            except asyncio.TimeoutError:
                 pass
+
+            if self._stop_flag.is_set():
+                return
 
             now = time.monotonic()
             for sid, state in list(self._active.items()):

@@ -18,7 +18,7 @@ async def test_internal_error_does_not_leak_detail(monkeypatch):
     ws.scope = {"subprotocols": ["bearer.t"]}
     ws.accept = AsyncMock()
     ws.receive_text = AsyncMock(side_effect=RuntimeError("DB password=hunter2"))
-    ws.send = AsyncMock()
+    ws.send_json = AsyncMock()
     ws.close = AsyncMock()
     user = MagicMock()
     user.user_id = "u1"
@@ -26,7 +26,7 @@ async def test_internal_error_does_not_leak_detail(monkeypatch):
     h = WSHandler(ws, "s1")
     # _handshake 抛内部异常 → run 的兜底 except
     await h.run()
-    sent = json.loads(ws.send.call_args.args[0])
+    sent = ws.send_json.call_args.args[0]
     assert sent["code"] == "internal"
     assert "hunter2" not in sent["message"]
     assert sent["message"]  # 有友好文案
@@ -70,7 +70,7 @@ async def test_handshake_on_ended_session_returns_4406(monkeypatch):
     ws.accept = AsyncMock()
     ws.receive_text = AsyncMock(return_value=json.dumps(
         {"type": "hello", "client_id": "c1"}))
-    ws.send = AsyncMock()
+    ws.send_json = AsyncMock()
     ws.close = AsyncMock()
 
     state = MagicMock()
@@ -90,7 +90,7 @@ async def test_handshake_on_ended_session_returns_4406(monkeypatch):
     h = WSHandler(ws, "s1")
     h._user = MagicMock(user_id="u1")  # run() 已在 accept 前完成鉴权
     assert not await h._handshake()
-    sent = json.loads(ws.send.call_args.args[0])
+    sent = ws.send_json.call_args.args[0]
     assert sent["code"] == "session_ended"
     assert ws.close.call_args.kwargs["code"] == 4406
 
@@ -103,13 +103,13 @@ async def test_fail_payload_carries_i18n_params():
     ws.accept = AsyncMock()
     ws.receive_text = AsyncMock(return_value=json.dumps(
         {"type": "hello", "client_id": "c1", "locale": "en-US"}))
-    ws.send = AsyncMock()
+    ws.send_json = AsyncMock()
     ws.close = AsyncMock()
     # 触发 _fail 的 concurrent_limit 路径需要 manager.get 返回有效 state，
     # 这里直接走 frame_too_large 触发 _fail(limit=...)，更简单：
     from app.transport.websocket.handler import _fail
     await _fail(ws, code="frame_too_large", close_code=4410, max_kb=64)
-    sent = json.loads(ws.send.call_args.args[0])
+    sent = ws.send_json.call_args.args[0]
     assert sent["i18n_key"] == "ws.frame.too_large"
     assert sent["i18n_params"] == {"max_kb": 64}
 
@@ -138,7 +138,7 @@ async def test_handshake_sends_connection_conflict_with_i18n_params(monkeypatch)
     from starlette.websockets import WebSocketState
     ws.receive = AsyncMock(return_value={"type": "websocket.disconnect", "code": 1000})
     ws.client_state = WebSocketState.CONNECTED
-    ws.send = AsyncMock()
+    ws.send_json = AsyncMock()
     ws.close = AsyncMock()
 
     user = MagicMock()
@@ -179,14 +179,9 @@ async def test_handshake_sends_connection_conflict_with_i18n_params(monkeypatch)
                      and c.args[0].get("type") == "connection.conflict"]
     assert old_conflicts == [], "conflict 帧误发给了旧 owner"
 
-    # (1) 新连接 (ws.send) 收到 conflict 帧
-    sent_to_new = []
-    for call in ws.send.call_args_list:
-        arg = call.args[0]
-        if isinstance(arg, str):
-            sent_to_new.append(json.loads(arg))
-        elif isinstance(arg, dict):
-            sent_to_new.append(arg)
+    # (1) 新连接 (ws.send_json) 收到 conflict 帧
+    sent_to_new = [call.args[0] for call in ws.send_json.call_args_list
+                   if call.args and isinstance(call.args[0], dict)]
     conflict_frames = [m for m in sent_to_new if m.get("type") == "connection.conflict"]
     assert len(conflict_frames) == 1, f"应恰好 1 个 conflict 帧，实际 {len(conflict_frames)}"
     frame = conflict_frames[0]

@@ -118,7 +118,9 @@ async def test_cache_miss_transcript_changed(monkeypatch):
         upsert_auto=upsert_mock,
     ))
     llm = MagicMock()
-    llm.chat_text = AsyncMock(return_value="new content")
+    # mock 返回含 zh_cn 字符的 markdown——避免 zh_cn 配置下 pivot 误触发。
+    # production 真实 zh_cn 报告含中文，mock 应反映此特征。
+    llm.chat_text = AsyncMock(return_value="## 背景与目的\n新报告内容")
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
     monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
@@ -126,7 +128,7 @@ async def test_cache_miss_transcript_changed(monkeypatch):
     status, md = await generator.get_or_generate("s1")
 
     assert status == "ready"
-    assert md == "new content"
+    assert md == "## 背景与目的\n新报告内容"
     llm.chat_text.assert_awaited_once()
     upsert_mock.assert_awaited_once()
     # 关键：upsert 时传了新的 transcript_signature

@@ -1,4 +1,7 @@
-"""system prompt 必须携带措辞约束：短口语问句、无问候铺垫、reason 要点化无前缀。"""
+"""system prompt 必须携带措辞约束：短问句、无问候铺垫、reason 要点化无前缀。
+
+Stage 3 单一英文 base 后断言改为英文措辞——约束语义不变。
+"""
 from __future__ import annotations
 
 from app.domain.session import Session
@@ -10,35 +13,60 @@ _TPL = get_template("pm-research")
 
 def test_recompute_system_carries_style_rule():
     system = build_system(_TPL, None)
-    assert "≤20 字" in system
-    assert "问候" in system          # 禁止问候铺垫
-    assert "称呼" in system          # 禁称呼（如「彭经理，」）
-    assert "≤15 字" in system
-    assert "前缀" in system          # reason 不带「方向：/已明确：」前缀
-    assert "编造" in system          # todo/new reason 不编造具体值
-    assert "不要清空" in system       # 已有 reason 重算不清空
-    assert "主题：" in system        # done 摘要带主题词
-    assert "参考风格" in system      # 正向示例存在
-    assert "1万元/年" in system      # done 示例只在会中重算出现
+    assert "~20 words" in system          # 短问句约束
+    assert "honorifics" in system          # 禁止 honorifics / greetings
+    assert "greetings" in system          # 禁止 greetings
+    assert "thanks" in system             # 禁止 thanks
+    assert "≤15 words" in system          # reason 字数约束
+    assert "prefixes like" in system       # reason 不带 "Direction:" 等前缀
+    assert "made-up specifics" in system   # todo/new reason 不编造具体值
+    assert "10K RMB/year" in system        # done 示例只在会中重算出现
+    assert "Reference style" in system     # 正向示例存在
+    assert "topic: conclusion" in system    # done reason 主题: 结论 格式
 
 
 def test_recompute_system_bounds_new_and_orders():
     system = build_system(_TPL, None)
-    assert "最多 2 条" in system     # 单次 status=new ≤2
-    assert "发问顺序" in system      # 最该先问的排最前
-    assert "必须给 reason" in system  # done 必须给摘要
-    assert "措辞不同" in system      # 同义覆盖归并 done
+    assert "at most 2" in system           # 单次 status=new ≤2
+    assert "interview order" in system     # 最该先问的排最前
+    assert "MUST give" in system           # done 必须给 reason
+    assert "phrased differently" in system # 同义覆盖归并 done
 
 
 def test_first_batch_system_carries_style_rule():
     system, _ = build_first_batch(_TPL, Session(id="s1", template_id="pm-research"))
-    assert "≤20 字" in system
-    assert "问候" in system
-    assert "称呼" in system
-    assert "≤15 字" in system
-    assert "前缀" in system
-    assert "编造" in system
-    assert "尽量都给" in system      # todo/new reason 尽量填
-    assert "参考风格" in system
-    assert "可为空" in system        # todo reason 许可：可为空，填了写方向
-    assert "1万元/年" not in system  # 首评全 todo，不带 done 示例
+    assert "~20 words" in system
+    assert "honorifics" in system
+    assert "≤15 words" in system
+    assert "prefixes like" in system
+    assert "made-up specifics" in system
+    assert "Reference style" in system
+    assert "10K RMB/year" not in system    # 首评全 todo，不带 done 示例
+
+
+def test_first_batch_injects_native_name_into_output_language_section():
+    """zh_cn first_batch system 含 `## Output language (简体中文, mandatory)`。"""
+    system, _ = build_first_batch(_TPL, Session(id="s1", template_id="pm-research"), "zh_cn")
+    assert "## Output language (简体中文, mandatory)" in system
+
+
+def test_en_first_batch_injects_english_native_name():
+    """en first_batch system 含 `## Output language (English, mandatory)`。"""
+    system, _ = build_first_batch(_TPL, Session(id="s1", template_id="pm-research"), "en")
+    assert "## Output language (English, mandatory)" in system
+
+
+def test_vi_first_batch_injects_vietnamese_native_name():
+    """vi first_batch system 含越南语 native name。"""
+    system, _ = build_first_batch(_TPL, Session(id="s1", template_id="pm-research"), "vi")
+    assert "Tiếng Việt" in system
+
+
+def test_every_lang_recompute_injects_native_name():
+    """每种语种 recompute system 注入对应 native_name。"""
+    from app.core.i18n.lang_meta import _LANG_META
+    for lang, meta in _LANG_META.items():
+        system = build_system(_TPL, None, lang)
+        assert meta.native_name in system, (
+            f"recompute {lang} system 未注入 {meta.native_name!r}"
+        )

@@ -41,7 +41,8 @@ def _make_engine():
     eng.version = 0
     # _recompute / first_generate 入口都有 `if self._llm is None: raise`，缺这行
     # 会在 await 的第一帧抛 RuntimeError，spy 永远抓不到 build_system 调用。
-    # 真 LLM 不会被调到——_llm_with_timeout 已被 monkeypatch 替换，_llm 仅用作哨兵。
+    # 真 LLM 不会被调到——_llm_pivot_then_parse_json 已被 monkeypatch 替换，
+    # _llm 仅用作哨兵。
     eng._llm = MagicMock()
     return eng
 
@@ -57,7 +58,7 @@ async def test_recompute_reads_current_lang_each_call(monkeypatch):
     monkeypatch.setattr(
         "app.core.config_store.get_config_store", lambda: cfg)
 
-    monkeypatch.setattr(eng, "_llm_with_timeout",
+    monkeypatch.setattr(eng, "_llm_pivot_then_parse_json",
                         _async_return({"items": []}))
     monkeypatch.setattr(eng, "_persist", _noop_async)
     monkeypatch.setattr(eng, "_safe_send", _noop_async)
@@ -106,7 +107,7 @@ async def test_first_generate_reads_current_lang(monkeypatch):
 
     cfg.get_sync.return_value = "en"
     eng1 = _make_engine()
-    monkeypatch.setattr(eng1, "_llm_with_timeout",
+    monkeypatch.setattr(eng1, "_llm_pivot_then_parse_json",
                         _async_return({"items": []}))
     monkeypatch.setattr(eng1, "_persist", _noop_async)
     monkeypatch.setattr(eng1, "_safe_send", _noop_async)
@@ -115,7 +116,7 @@ async def test_first_generate_reads_current_lang(monkeypatch):
 
     cfg.get_sync.return_value = "zh_tw"
     eng2 = _make_engine()
-    monkeypatch.setattr(eng2, "_llm_with_timeout",
+    monkeypatch.setattr(eng2, "_llm_pivot_then_parse_json",
                         _async_return({"items": []}))
     monkeypatch.setattr(eng2, "_persist", _noop_async)
     monkeypatch.setattr(eng2, "_safe_send", _noop_async)

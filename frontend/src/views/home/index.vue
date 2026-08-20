@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useDebounceFn } from "@vueuse/core";
 import { computed, ref, watch } from "vue";
+import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
+import { useInterviewStoreHook } from "@/store/modules/interview";
 import ReSegmented from "@/components/ReSegmented";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -21,6 +23,8 @@ defineOptions({
 const router = useRouter();
 const userStore = useUserStoreHook();
 const dialogStore = useDialogStoreHook();
+const interviewStore = useInterviewStoreHook();
+const { interviewCreated } = storeToRefs(interviewStore);
 
 const searchIcon = useRenderIcon("tabler:search");
 const clearIcon = useRenderIcon("tabler:x");
@@ -136,8 +140,7 @@ const openCreateDialog = () => {
 
 const openInterviewPage = (item: (typeof interviewList.value)[number]) => {
   router.push({
-    path: item.status !== "ended" ? "/interview" : "/report",
-    query: { title: item.title }
+    path: item.status !== "ended" ? `/interview/${item.id}` : "/report"
   });
 };
 
@@ -145,7 +148,9 @@ const openInterviewPage = (item: (typeof interviewList.value)[number]) => {
 const formatRecentTime = (value: string | null) => {
   if (!value) return "--";
 
-  const timestamp = new Date(value).getTime();
+  // 未携带时区后缀的 UTC ISO 字符串
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const timestamp = new Date(hasTimezone ? value : `${value}Z`).getTime();
   if (Number.isNaN(timestamp)) return "--";
 
   const diff = Math.max(0, Date.now() - timestamp);
@@ -224,6 +229,15 @@ const getInterviewList = async () => {
     listLoading.value = false;
   }
 };
+
+const refreshAfterCreate = async () => {
+  if (!isLoggedIn.value) return;
+  await Promise.all([getStatistics(), getInterviewList()]);
+};
+
+watch(interviewCreated, async created => {
+  if (created > 0) await refreshAfterCreate();
+});
 
 watch(
   isLoggedIn,
@@ -406,8 +420,6 @@ watch(
               role="button"
               tabindex="0"
               @click="openInterviewPage(item)"
-              @keydown.enter="openInterviewPage(item)"
-              @keydown.space.prevent="openInterviewPage(item)"
             >
               <div class="card-header">
                 <div class="card-icon-box">

@@ -3,6 +3,7 @@ import pytest
 
 from app.core.config_store import DEFAULTS, ENUM_KEYS, validate_value
 from app.core.i18n.errors import I18nError
+from app.core.i18n.lang_meta import derived_output_language_enum
 from app.core.i18n.messages import Keys
 
 
@@ -12,7 +13,9 @@ def test_enum_keys_dict_has_two_keys():
 
 def test_enum_keys_values_are_correct_sets():
     assert ENUM_KEYS["asr.language"] == {"zh", "yue", "en"}
-    assert ENUM_KEYS["llm.output_language"] == {"zh_cn", "zh_tw", "en"}
+    # llm.output_language 从 derived_output_language_enum() 派生（10 条头部语种）——
+    # 加语种只改 _LANG_META 一处，断言改成"完全等于派生值"以防漂移。
+    assert ENUM_KEYS["llm.output_language"] == derived_output_language_enum()
 
 
 def test_validate_value_accepts_asr_zh():

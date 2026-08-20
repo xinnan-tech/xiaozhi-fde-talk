@@ -227,10 +227,6 @@ const saveConfig = async (group: ConfigGroup) => {
 
 const openSelfCheck = () => {
   if (!userStore.accessToken) {
-    ElMessage({
-      message: "请先登录",
-      type: "warning"
-    });
     useDialogStoreHook().openLogin();
     return;
   }

@@ -90,11 +90,9 @@ const onKeydown = (event: KeyboardEvent) => {
       <div class="flex justify-between -translate-y-7">
         <div class="flex flex-col justify-center">
           <div class="mb-2 text-[28px] font-semibold text-[#1a1a1a]">
-            &#x6B22;&#x8FCE;&#x767B;&#x5F55;
+            欢迎登录
           </div>
-          <div class="text-[14px] text-[#666]">
-            &#x767B;&#x5F55;&#x4E4B;&#x540E;&#x5373;&#x53EF;&#x4F7F;&#x7528;&#x8BBF;&#x8C08;&#x5DE5;&#x4F5C;&#x53F0;
-          </div>
+          <div class="text-[14px] text-[#666]">登录之后即可使用访谈工作台</div>
         </div>
         <img
           src="@/assets/images/login-chat-icon.png"
@@ -107,7 +105,7 @@ const onKeydown = (event: KeyboardEvent) => {
           <el-input
             v-model="ruleForm.username"
             class="login-input"
-            placeholder="&#x8BF7;&#x8F93;&#x5165;&#x7528;&#x6237;&#x540D;"
+            placeholder="请输入用户名"
             :prefix-icon="User"
           />
         </el-form-item>
@@ -117,7 +115,7 @@ const onKeydown = (event: KeyboardEvent) => {
             v-model="ruleForm.password"
             class="login-input"
             type="password"
-            placeholder="&#x8BF7;&#x8F93;&#x5165;&#x5BC6;&#x7801;"
+            placeholder="请输入密码"
             show-password
             :prefix-icon="Lock"
             @keydown="onKeydown"
@@ -129,7 +127,7 @@ const onKeydown = (event: KeyboardEvent) => {
             class="w-full login-btn"
             :loading="loading"
             @click="clickLogin(ruleFormRef)"
-            >&#x767B;&#x5F55;</el-button
+            >登录</el-button
           >
         </el-form-item>
       </el-form>

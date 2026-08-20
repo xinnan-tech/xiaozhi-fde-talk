@@ -26,9 +26,7 @@ def mem_db(monkeypatch):
 
 def _llm_mock(monkeypatch):
     llm = AsyncMock()
-    llm.chat_json.return_value = {"items": [
-        {"id": "objective", "text": "定制目标问题", "status": "todo"},
-    ]}
+    llm.chat_text.return_value = '{"items": [{"id": "objective", "text": "定制目标问题", "status": "todo"}]}'
     monkeypatch.setattr("app.services.coaching.engine.get_llm", lambda: llm)
     return llm
 
@@ -41,11 +39,11 @@ async def test_generate_persists_and_idempotent(mem_db, monkeypatch):
     state = await manager.create("u-1", "pm-research", {"project": "P"}, "目标")
     result = await generate_first_batch(state.session.id)
     assert result.session.first_batch_generated is True
-    assert llm.chat_json.await_count == 1
+    assert llm.chat_text.await_count == 1
 
     result2 = await generate_first_batch(state.session.id)  # 第二次幂等
     assert result2.session.first_batch_generated is True
-    assert llm.chat_json.await_count == 1
+    assert llm.chat_text.await_count == 1
     reloaded = await manager.get(state.session.id)
     assert reloaded.session.first_batch_generated is True
     assert state.session.id not in fb._inflight  # 锁用完回收，不泄漏
@@ -57,21 +55,19 @@ async def test_generate_concurrent_single_llm_call(mem_db, monkeypatch):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     llm = _llm_mock(monkeypatch)
-    payload = {"items": [
-        {"id": "objective", "text": "定制目标问题", "status": "todo"},
-    ]}
+    payload = '{"items": [{"id": "objective", "text": "定制目标问题", "status": "todo"}]}'
 
     async def slow(*a, **k):
         await asyncio.sleep(0.05)  # 拉开重叠窗口：无锁防御时两个请求都会调 LLM
         return payload
 
-    llm.chat_json.side_effect = slow
+    llm.chat_text.side_effect = slow
     state = await manager.create("u-1", "pm-research", {"project": "P"}, "目标")
     r1, r2 = await asyncio.gather(
         generate_first_batch(state.session.id),
         generate_first_batch(state.session.id),
     )
-    assert llm.chat_json.await_count == 1
+    assert llm.chat_text.await_count == 1
     assert r1.session.first_batch_generated is True
     assert r2.session.first_batch_generated is True
 
@@ -90,15 +86,13 @@ async def test_generate_does_not_resurrect_deleted_session(mem_db, monkeypatch):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     llm = _llm_mock(monkeypatch)
-    payload = {"items": [
-        {"id": "objective", "text": "定制目标问题", "status": "todo"},
-    ]}
+    payload = '{"items": [{"id": "objective", "text": "定制目标问题", "status": "todo"}]}'
 
     async def slow(*a, **k):
         await asyncio.sleep(0.05)  # 拉开窗口：delete 须落在 LLM 与落盘之间
         return payload
 
-    llm.chat_json.side_effect = slow
+    llm.chat_text.side_effect = slow
     state = await manager.create("u-1", "pm-research", {"project": "P"}, "目标")
     sid = state.session.id
 

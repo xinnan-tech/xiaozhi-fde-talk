@@ -1,15 +1,33 @@
 ﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import dayjs from "dayjs";
 import Plus from "~icons/ep/plus";
 import ChatDotRound from "~icons/ep/chat-dot-round";
 import EditPen from "~icons/ep/edit-pen";
 import RefreshLeft from "~icons/ep/refresh-left";
 import Delete from "~icons/ep/delete";
 import Download from "~icons/ep/download";
-import { ElMessageBox } from "element-plus";
+import Aim from "~icons/ep/aim";
+import Calendar from "~icons/ep/calendar";
+import SwitchButton from "~icons/ep/switch-button";
+import User from "~icons/ep/user";
+import VideoPlay from "~icons/ep/video-play";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import LayFooter from "@/layout/components/lay-footer/index.vue";
+import {
+  endInterviewApi,
+  getInterviewDetailApi,
+  ignoreInterviewItemApi,
+  InterviewDetailType,
+  unignoreInterviewItemApi
+} from "@/api/interview";
+import { useAudioRecorder } from "@/composables/useAudioRecorder";
+import {
+  useWebSocket,
+  type InterviewServerMessage
+} from "@/composables/useWebSocket";
 
 defineOptions({
   name: "InterviewPage"
@@ -22,6 +40,9 @@ const eraserIcon = useRenderIcon("boxicons:eraser-filled");
 const handwritingIcon = useRenderIcon("boxicons:pencil-draw");
 const ignoreIcon = useRenderIcon("lucide:eye-off");
 const aiLineIcon = useRenderIcon("si:ai-line");
+const newItemIcon = useRenderIcon("clarity:new-solid");
+const microphoneIcon = useRenderIcon("lucide:mic");
+const microphoneOffIcon = useRenderIcon("lucide:mic-off");
 
 const baseInterviewTitle = computed(() => {
   const title = route.query.title;
@@ -29,6 +50,46 @@ const baseInterviewTitle = computed(() => {
   return "访谈";
 });
 
+/** 访谈详情 */
+const interviewDetail = ref<InterviewDetailType>();
+const startedAtDisplay = computed(() => {
+  const startedAt = interviewDetail.value?.started_at;
+  return startedAt ? dayjs(startedAt).format("YYYY-MM-DD HH:mm:ss") : "--";
+});
+const startInterviewButtonText = computed(() => {
+  const status = interviewDetail.value?.status;
+  return status === "in_progress" || status === "suspended"
+    ? "继续访谈"
+    : "开始访谈";
+});
+const interviewStatusText = computed(() => {
+  switch (interviewDetail.value?.status) {
+    case "in_progress":
+      return "进行中";
+    case "suspended":
+      return "已暂停";
+    case "ended":
+    case "extracting":
+    case "done":
+      return "已结束";
+    default:
+      return "待开始";
+  }
+});
+const interviewStatusClass = computed(() => {
+  switch (interviewDetail.value?.status) {
+    case "in_progress":
+      return "status-in_progress";
+    case "suspended":
+      return "status-suspended";
+    case "ended":
+    case "extracting":
+    case "done":
+      return "status-ended";
+    default:
+      return "status-created";
+  }
+});
 const activeMode = ref("转录");
 const activeMetric = ref("待追问");
 const noteContent = ref("");
@@ -57,11 +118,13 @@ const signatureOptions = computed(() => ({
 const noteInputRef = ref();
 
 type SuggestionCard = {
+  itemId: string;
   index: number;
   title: string;
   tag: string;
   tagClass: string;
   status: "待追问" | "已覆盖" | "已忽略";
+  isNew: boolean;
   goal: string;
   hint: string;
   ignoreCountdown: number | null;
@@ -69,76 +132,146 @@ type SuggestionCard = {
   ignoreTimeoutId: number | null;
 };
 
-const suggestionCards = ref<SuggestionCard[]>([
-  {
-    index: 4,
-    title: "既往用药依从性与血压监测",
-    tag: "已覆盖",
-    tagClass: "success",
-    status: "已覆盖",
-    goal: "已完成追问：确认长期用药与居家监测情况",
-    hint: "患者表示规律服药，已说明近期血压波动与自测记录",
-    ignoreCountdown: null,
-    ignoreIntervalId: null,
-    ignoreTimeoutId: null
-  },
-  {
-    index: 5,
-    title: "诱因分析（情绪/睡眠/饮食）",
-    tag: "待追问",
-    tagClass: "warning",
-    status: "待追问",
-    goal: "追问目的：寻找血压升高可逆因素",
-    hint: "已提及睡眠不佳与家中琐事，需深入了解",
-    ignoreCountdown: null,
-    ignoreIntervalId: null,
-    ignoreTimeoutId: null
-  },
-  {
-    index: 6,
-    title: "体格检查与辅助检查",
-    tag: "待追问",
-    tagClass: "warning",
-    status: "待追问",
-    goal: "追问目的：完善诊断依据",
-    hint: "需测量坐位血压、心率，建议查肾功能电解质",
-    ignoreCountdown: null,
-    ignoreIntervalId: null,
-    ignoreTimeoutId: null
-  },
-  {
-    index: 7,
-    title: "治疗方案调整与随访计划",
-    tag: "待追问",
-    tagClass: "warning",
-    status: "待追问",
-    goal: "追问目的：制定下一步治疗方案",
-    hint: "待体格检查后综合判断",
-    ignoreCountdown: null,
-    ignoreIntervalId: null,
-    ignoreTimeoutId: null
+type TranscriptEntry = {
+  segId: string;
+  startMs: number | null;
+  role: string;
+  time: string;
+  text: string;
+  tone: "blue" | "green";
+};
+
+const suggestionCards = ref<SuggestionCard[]>([]);
+
+type SuggestionSourceItem = {
+  id: string;
+  text: string;
+  status: string;
+  priority: number;
+  reason: string;
+  desc: string;
+};
+
+const mapItemStatus = (
+  item: SuggestionSourceItem,
+  ignoredIds: Set<string>
+): SuggestionCard["status"] => {
+  if (
+    ignoredIds.has(item.id) ||
+    item.status === "skipped" ||
+    item.status === "ignored"
+  ) {
+    return "已忽略";
   }
-]);
+  if (item.status === "done") return "已覆盖";
+  return "待追问";
+};
+
+const createSuggestionCardsFromItems = (
+  items: SuggestionSourceItem[],
+  ignoredIds: Set<string> = new Set(),
+  newItemIds: Set<string> = new Set()
+) => {
+  // 新问题统一置顶；待追问问题按 priority 顺序排列，其他状态放在最后。
+  const orderedItems = [...items].sort((left, right) => {
+    const leftGroup =
+      left.status === "new" ? 0 : left.status === "todo" ? 1 : 2;
+    const rightGroup =
+      right.status === "new" ? 0 : right.status === "todo" ? 1 : 2;
+
+    if (leftGroup !== rightGroup) return leftGroup - rightGroup;
+    return left.priority - right.priority;
+  });
+
+  return orderedItems.map((item, index) => {
+    const status = mapItemStatus(item, ignoredIds);
+    const tagClass =
+      status === "已覆盖"
+        ? "success"
+        : status === "已忽略"
+          ? "muted"
+          : "warning";
+
+    return {
+      itemId: item.id,
+      index: index + 1,
+      title: item.text,
+      tag: status,
+      tagClass,
+      status,
+      isNew: newItemIds.has(item.id),
+      goal: item.reason ? `${item.reason}` : "",
+      hint: item.desc || "",
+      ignoreCountdown: null,
+      ignoreIntervalId: null,
+      ignoreTimeoutId: null
+    };
+  });
+};
+
+const createSuggestionCards = (detail: InterviewDetailType) => {
+  const ignoredIds = new Set([
+    ...(detail.ignored_ids ?? []),
+    ...(detail.skipped_ids ?? [])
+  ]);
+  const newItemIds = new Set(
+    detail.items.filter(item => item.status === "new").map(item => item.id)
+  );
+  return createSuggestionCardsFromItems(detail.items, ignoredIds, newItemIds);
+};
+
+const mergeSuggestionCards = (items: SuggestionSourceItem[]) => {
+  const existingCards = new Map(
+    suggestionCards.value.map(card => [card.itemId, card])
+  );
+  const newItemIds = new Set(
+    items
+      .filter(item => {
+        const status = mapItemStatus(item, new Set());
+        return !existingCards.has(item.id) && status === "待追问";
+      })
+      .map(item => item.id)
+  );
+  const existingNewItemIds = new Set(
+    suggestionCards.value.filter(card => card.isNew).map(card => card.itemId)
+  );
+  const nextCards = createSuggestionCardsFromItems(
+    items,
+    new Set(),
+    new Set([...newItemIds, ...existingNewItemIds])
+  );
+  return nextCards;
+};
 
 const suggestionListAnimationEnabled = ref(true);
 let suggestionMetricAnimationToken = 0;
+const isCoachingRecomputing = ref(false);
+const idleWarningSeconds = ref<number | null>(null);
+let idleWarningTimerId: number | null = null;
 
-const interviewElapsedSeconds = ref(0);
-let interviewTimerId: number | null = null;
-
-const formatInterviewElapsedTime = (totalSeconds: number) => {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  return [hours, minutes, seconds]
-    .map(value => String(value).padStart(2, "0"))
-    .join(":");
+const clearIdleWarning = () => {
+  if (idleWarningTimerId !== null) {
+    window.clearInterval(idleWarningTimerId);
+    idleWarningTimerId = null;
+  }
+  idleWarningSeconds.value = null;
 };
 
-const transcribingElapsedTime = computed(() =>
-  formatInterviewElapsedTime(interviewElapsedSeconds.value)
-);
+const startIdleWarning = (seconds: number) => {
+  clearIdleWarning();
+  idleWarningSeconds.value = Math.max(0, Math.round(seconds));
+  idleWarningTimerId = window.setInterval(() => {
+    if (idleWarningSeconds.value === null || idleWarningSeconds.value <= 1) {
+      clearIdleWarning();
+      return;
+    }
+    idleWarningSeconds.value -= 1;
+  }, 1000);
+};
+
+const interviewElapsedSeconds = ref(0);
+const isInterviewStarted = ref(false);
+let interviewTimerId: number | null = null;
 
 const stopInterviewTimer = () => {
   if (interviewTimerId !== null) {
@@ -153,6 +286,45 @@ const startInterviewTimer = () => {
   interviewTimerId = window.setInterval(() => {
     interviewElapsedSeconds.value += 1;
   }, 1000);
+};
+
+const handleStartInterview = async () => {
+  if (isInterviewStarted.value) return;
+  isInterviewStarted.value = true;
+  startInterviewTimer();
+
+  // 在点击事件中立即请求权限，避免等待 WebSocket 握手后丢失浏览器用户手势。
+  shouldResumeMicrophone.value = true;
+  const microphoneStarted = await startRecording();
+  if (!microphoneStarted) {
+    shouldResumeMicrophone.value = false;
+    isInterviewStarted.value = false;
+    stopInterviewTimer();
+    ElMessage.error("无法开启麦克风，请检查浏览器权限");
+    return;
+  }
+
+  if (interviewDetail.value) {
+    interviewDetail.value.status = "in_progress";
+  }
+
+  openWebSocket();
+
+  // WebSocket 已经连接时直接开始监听；尚未连接时由 onConnected 处理。
+  if (isWebSocketConnected.value) {
+    const listeningStarted = await openMicrophone();
+    if (listeningStarted) shouldResumeMicrophone.value = false;
+  }
+};
+
+const toggleMicrophone = async () => {
+  if (!isInterviewStarted.value) return;
+  if (isMicrophoneEnabled.value) {
+    sendListenState("stop");
+    stopRecording();
+    return;
+  }
+  await openMicrophone();
 };
 
 const metrics = computed(() => {
@@ -203,27 +375,6 @@ const visibleSuggestionCards = computed(() => {
   );
 });
 
-const handleMockNewSuggestion = () => {
-  const nextIndex =
-    suggestionCards.value.reduce(
-      (maxIndex, item) => Math.max(maxIndex, item.index),
-      0
-    ) + 1;
-
-  suggestionCards.value.unshift({
-    index: nextIndex,
-    title: "补充追问：请补充体位性头晕与服药情况",
-    tag: "待追问",
-    tagClass: "warning",
-    status: "待追问",
-    goal: "追问目的：补充更多病史，确定体位与高血压之间的关系",
-    hint: "优先核对发作时间、持续时间、到位后是否可快速缓解等细节",
-    ignoreCountdown: null,
-    ignoreIntervalId: null,
-    ignoreTimeoutId: null
-  });
-};
-
 const clearIgnoreTimer = (card: SuggestionCard) => {
   if (card.ignoreIntervalId !== null) {
     window.clearInterval(card.ignoreIntervalId);
@@ -236,8 +387,8 @@ const clearIgnoreTimer = (card: SuggestionCard) => {
   card.ignoreCountdown = null;
 };
 
-const restoreIgnoredSuggestion = (index: number) => {
-  const card = suggestionCards.value.find(item => item.index === index);
+const restoreIgnoredSuggestion = (itemId: string) => {
+  const card = suggestionCards.value.find(item => item.itemId === itemId);
   if (!card) return;
 
   clearIgnoreTimer(card);
@@ -246,8 +397,289 @@ const restoreIgnoredSuggestion = (index: number) => {
   card.tagClass = "warning";
 };
 
-const handleIgnoreSuggestion = (index: number) => {
-  const card = suggestionCards.value.find(item => item.index === index);
+const setIgnoredSuggestion = (card: SuggestionCard) => {
+  card.status = "已忽略";
+  card.tag = "已忽略";
+  card.tagClass = "muted";
+};
+
+const getInterviewSessionId = () =>
+  interviewDetail.value?.id || (route.params.id as string);
+
+const AUDIO_PARAMS = {
+  format: "opus",
+  sample_rate: 16000,
+  channels: 1,
+  frame_duration: 60
+};
+
+const shouldResumeMicrophone = ref(false);
+const transcriptEntries = ref<TranscriptEntry[]>([]);
+const transcriptScrollRef = ref<{
+  setScrollTop: (scrollTop: number) => void;
+} | null>(null);
+
+const formatTranscriptTime = (startMs: number | null = null) => {
+  if (startMs !== null && Number.isFinite(startMs) && startMs >= 0) {
+    const totalSeconds = Math.floor(startMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return [hours, minutes, seconds]
+      .map(value => String(value).padStart(2, "0"))
+      .join(":");
+  }
+  return new Date().toLocaleTimeString("zh-CN", { hour12: false });
+};
+
+const createTranscriptEntries = (transcript: unknown[]) => {
+  return transcript
+    .flatMap((item, index) => {
+      if (!item || typeof item !== "object") return [];
+
+      const record = item as Record<string, unknown>;
+      const text = typeof record.text === "string" ? record.text : "";
+      if (!text) return [];
+
+      const startMs =
+        typeof record.start_ms === "number" && Number.isFinite(record.start_ms)
+          ? record.start_ms
+          : null;
+      const speaker =
+        typeof record.speaker === "string" && record.speaker !== "unknown"
+          ? record.speaker
+          : "说话人1";
+
+      return [
+        {
+          segId:
+            typeof record.seg_id === "string"
+              ? record.seg_id
+              : `history-${index}`,
+          startMs,
+          role: speaker,
+          time: formatTranscriptTime(startMs),
+          text,
+          tone: "blue" as const
+        }
+      ];
+    })
+    .reverse();
+};
+
+const scrollTranscriptToTop = async () => {
+  await nextTick();
+  transcriptScrollRef.value?.setScrollTop(0);
+};
+
+const appendAsrMessage = (
+  message: Extract<InterviewServerMessage, { type: "asr" }>
+) => {
+  const existingEntry = transcriptEntries.value.find(
+    entry => entry.segId === message.seg_id
+  );
+  const nextEntry = {
+    segId: message.seg_id,
+    startMs: message.start_ms,
+    role: message.speaker === "unknown" ? "说话人1" : message.speaker,
+    time: formatTranscriptTime(message.start_ms),
+    text: message.text,
+    tone: "blue" as const
+  };
+
+  if (existingEntry) {
+    Object.assign(existingEntry, nextEntry);
+  } else {
+    transcriptEntries.value.unshift(nextEntry);
+  }
+  void scrollTranscriptToTop();
+};
+
+const handleTakeoverConflict = async (message: string) => {
+  try {
+    await ElMessageBox.confirm(
+      message || "该访谈已在其他页面打开，是否接管？",
+      "访谈连接冲突",
+      {
+        confirmButtonText: "接管",
+        cancelButtonText: "取消",
+        type: "warning"
+      }
+    );
+    websocket.takeover();
+  } catch {
+    websocket.close();
+    isInterviewStarted.value = false;
+    stopInterviewTimer();
+  }
+};
+
+let isAsrUnavailableDialogOpen = false;
+
+const handleAsrUnavailable = async (message: string) => {
+  if (isAsrUnavailableDialogOpen) return;
+
+  isAsrUnavailableDialogOpen = true;
+  try {
+    await ElMessageBox.confirm(
+      message || "语音识别服务暂时不可用，请检查系统配置。",
+      "语音识别服务不可用",
+      {
+        confirmButtonText: "前往配置",
+        cancelButtonText: "取消",
+        type: "error"
+      }
+    );
+    await router.push("/system/config");
+  } catch {
+    // 用户选择继续留在当前访谈页面。
+  } finally {
+    isAsrUnavailableDialogOpen = false;
+  }
+};
+
+const handleServerMessage = (message: InterviewServerMessage) => {
+  if (message.type === "asr") {
+    appendAsrMessage(message);
+    return;
+  }
+
+  if (message.type === "coaching.update") {
+    if (message.phase === "recomputing") {
+      isCoachingRecomputing.value = true;
+      return;
+    }
+    if (message.phase === "final") {
+      isCoachingRecomputing.value = false;
+      suggestionCards.value = mergeSuggestionCards(message.items);
+    }
+    return;
+  }
+
+  if (message.type === "session.idle_warning") {
+    startIdleWarning(message.suspend_in_s);
+    return;
+  }
+
+  if (message.type === "connection.conflict") {
+    void handleTakeoverConflict(message.message);
+    return;
+  }
+
+  if (message.type === "connection.kicked") {
+    shouldResumeMicrophone.value = false;
+    stopRecording();
+    isInterviewStarted.value = false;
+    stopInterviewTimer();
+    ElMessage.warning(message.reason || "当前访谈已被其他连接接管");
+    return;
+  }
+
+  if (message.type === "audio.low_level") {
+    console.warn("[InterviewPage] 收到低音量提醒", message);
+    ElMessage.warning(message.message || "声音较小，请靠近麦克风");
+    return;
+  }
+
+  if (message.type === "error") {
+    if (message.code === "asr_unavailable") {
+      void handleAsrUnavailable(message.message);
+      return;
+    }
+    ElMessage.error(`${message.code}: ${message.message}`);
+    return;
+  }
+
+  if (
+    message.type === "session.ended" ||
+    message.type === "session.suspended"
+  ) {
+    clearIdleWarning();
+    isCoachingRecomputing.value = false;
+    if (interviewDetail.value) {
+      interviewDetail.value.status =
+        message.type === "session.ended" ? "ended" : "suspended";
+    }
+    shouldResumeMicrophone.value = false;
+    stopRecording();
+    isInterviewStarted.value = false;
+    stopInterviewTimer();
+  }
+};
+
+const websocket = useWebSocket({
+  interviewId: getInterviewSessionId,
+  audioParams: AUDIO_PARAMS,
+  immediate: false,
+  onMessage: handleServerMessage,
+  onConnected: message => {
+    console.info("[InterviewPage] WebSocket 握手成功", message);
+    if (!shouldResumeMicrophone.value) return;
+    void openMicrophone().then(started => {
+      if (started) shouldResumeMicrophone.value = false;
+    });
+  },
+  onDisconnected: event => {
+    console.warn("[InterviewPage] WebSocket 已断开", event.code, event.reason);
+    if (!isMicrophoneEnabled.value) return;
+    shouldResumeMicrophone.value = true;
+    stopRecording();
+  },
+  onError: message => {
+    console.error("[InterviewPage] WebSocket 错误", message);
+  }
+});
+
+const {
+  state: websocketState,
+  open: openWebSocket,
+  sendListenState,
+  sendAudioFrame
+} = websocket;
+const isWebSocketConnected = computed(
+  () => websocketState.value === "connected"
+);
+
+const {
+  isRecording: isMicrophoneEnabled,
+  startRecording,
+  stopRecording
+} = useAudioRecorder({
+  audio: {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  },
+  onAudioData: async audio => {
+    const payload = await audio.arrayBuffer();
+    if (!isMicrophoneEnabled.value) return;
+    const sent = sendAudioFrame(payload);
+    if (!sent) {
+      console.warn("[InterviewPage] 音频片段未发送", {
+        size: audio.size,
+        websocketState: websocketState.value
+      });
+    }
+  }
+});
+
+const openMicrophone = async () => {
+  if (!isWebSocketConnected.value) {
+    ElMessage.warning("WebSocket 尚未连接");
+    return false;
+  }
+  if (!sendListenState("start")) {
+    ElMessage.warning("无法开始监听，请稍后重试");
+    return false;
+  }
+  const started = await startRecording();
+  if (!started) sendListenState("stop");
+  return started;
+};
+
+const handleIgnoreSuggestion = (itemId: string) => {
+  const card = suggestionCards.value.find(item => item.itemId === itemId);
   if (!card || card.status !== "待追问") return;
 
   clearIgnoreTimer(card);
@@ -257,18 +689,36 @@ const handleIgnoreSuggestion = (index: number) => {
       card.ignoreCountdown -= 1;
     }
   }, 1000);
-  card.ignoreTimeoutId = window.setTimeout(() => {
-    card.status = "已忽略";
-    card.tag = "已忽略";
-    card.tagClass = "muted";
+  card.ignoreTimeoutId = window.setTimeout(async () => {
     clearIgnoreTimer(card);
+    setIgnoredSuggestion(card);
+    try {
+      if (!websocket.ignoreCoachingItem(card.itemId)) {
+        await ignoreInterviewItemApi(getInterviewSessionId(), card.itemId);
+      }
+    } catch {
+      restoreIgnoredSuggestion(itemId);
+      ElMessage.error("忽略问题失败，请稍后重试");
+    }
   }, 3000);
 };
 
-const handleUndoIgnore = (index: number) => {
-  const card = suggestionCards.value.find(item => item.index === index);
+const handleUndoIgnore = (itemId: string) => {
+  const card = suggestionCards.value.find(item => item.itemId === itemId);
   if (!card || card.ignoreCountdown === null) return;
-  restoreIgnoredSuggestion(index);
+  restoreIgnoredSuggestion(itemId);
+};
+
+const handleUnignoreSuggestion = async (itemId: string) => {
+  const card = suggestionCards.value.find(item => item.itemId === itemId);
+  if (!card || card.status !== "已忽略") return;
+
+  try {
+    await unignoreInterviewItemApi(getInterviewSessionId(), itemId);
+    restoreIgnoredSuggestion(itemId);
+  } catch {
+    ElMessage.error("取消忽略失败，请稍后重试");
+  }
 };
 
 const setMetric = async (metric: string) => {
@@ -284,59 +734,12 @@ const setMetric = async (metric: string) => {
 
 onBeforeUnmount(() => {
   suggestionCards.value.forEach(card => clearIgnoreTimer(card));
+  clearIdleWarning();
   stopInterviewTimer();
+  if (isMicrophoneEnabled.value) sendListenState("stop");
+  stopRecording();
+  websocket.close();
 });
-
-const transcriptEntries = [
-  {
-    role: "说话人1",
-    time: "08:40:05",
-    text: "王大爷您好，今天来主要是哪里不舒服？",
-    tone: "blue"
-  },
-  {
-    role: "说话人2",
-    time: "08:40:22",
-    text: "李医生，我最近一个月老头晕，有时候站起来眼前发黑，血压也高了。",
-    tone: "green"
-  },
-  {
-    role: "说话人1",
-    time: "08:40:58",
-    text: "头晕大概什么时候开始的？是持续性的还是一阵一阵的？有没有什么诱因？",
-    tone: "blue"
-  },
-  {
-    role: "说话人2",
-    time: "08:41:35",
-    text: "大概半个月前开始的，主要是一站起来或者转头的时候晕，坐着躺着就没事。最近睡眠也不好，家里有些事情操心。",
-    tone: "green"
-  },
-  {
-    role: "说话人1",
-    time: "08:42:10",
-    text: "嗯，休息不好确实会影响血压。您之前有高血压病史对吧？平时吃的什么药？最近量过血压吗？",
-    tone: "blue"
-  },
-  {
-    role: "说话人2",
-    time: "08:42:50",
-    text: "高血压有八年了，一直吃苯磺酸氨氯地平，一天一片。以前血压基本 140/85 左右，最近自己在家量，最高到过 162/96。",
-    tone: "green"
-  },
-  {
-    role: "说话人1",
-    time: "08:43:30",
-    text: "162/96 确实偏高了。药有没有按时吃？最近有没有自行加量或者停过药？",
-    tone: "blue"
-  },
-  {
-    role: "说话人2",
-    time: "08:44:05",
-    text: "药倒是天天吃，没断过。我看血压高了也没敢自己加，想着来看看医生再说。",
-    tone: "green"
-  }
-];
 
 const handleBack = () => {
   if (window.history.length > 1) {
@@ -347,7 +750,9 @@ const handleBack = () => {
 };
 
 const setMode = (mode: string) => {
+  if (mode !== "转录") return;
   activeMode.value = mode;
+  void scrollTranscriptToTop();
 };
 
 const isKeyboardMode = computed(() => activeMode.value === "键盘");
@@ -426,15 +831,37 @@ const handleEndInterview = async () => {
       cancelButtonText: "取消",
       type: "warning"
     });
-    stopInterviewTimer();
-    router.push("/home");
   } catch {
-    // 取消时不做处理
+    return;
   }
+
+  try {
+    await endInterviewApi(getInterviewSessionId());
+  } catch {
+    ElMessage.error("结束访谈失败，请稍后重试");
+    return;
+  }
+
+  stopInterviewTimer();
+  isInterviewStarted.value = false;
+  if (isMicrophoneEnabled.value) sendListenState("stop");
+  stopRecording();
+  websocket.close();
+  router.push("/home");
+};
+
+const getInterviewDetail = async () => {
+  const id = route.params.id as string;
+  if (!id) return;
+  const res = await getInterviewDetailApi(id);
+  interviewDetail.value = res;
+  suggestionCards.value = createSuggestionCards(res);
+  transcriptEntries.value = createTranscriptEntries(res.transcript);
+  void scrollTranscriptToTop();
 };
 
 onMounted(() => {
-  startInterviewTimer();
+  getInterviewDetail();
 });
 </script>
 
@@ -451,7 +878,9 @@ onMounted(() => {
           >
             返回
           </el-button>
-          <h1 class="page-title">{{ baseInterviewTitle }}</h1>
+          <h1 class="page-title">
+            {{ interviewDetail?.base_info?.title || "访谈" }}
+          </h1>
         </div>
       </header>
 
@@ -461,15 +890,27 @@ onMounted(() => {
             <div class="panel-title">
               <component :is="aiLineIcon" class="panel-icon" />
               <span>AI 追问建议与覆盖</span>
+              <span
+                v-if="isCoachingRecomputing"
+                class="panel-status panel-status-thinking"
+              >
+                AI 思考中
+              </span>
+              <span
+                v-if="idleWarningSeconds !== null"
+                class="panel-status panel-status-idle"
+              >
+                即将暂停 {{ idleWarningSeconds }} 秒
+              </span>
             </div>
-            <el-button
+            <!-- <el-button
               class="panel-action"
               text
               :icon="Plus"
               @click="handleMockNewSuggestion"
             >
               模拟新建议
-            </el-button>
+            </el-button> -->
           </div>
 
           <section class="metric-grid">
@@ -499,7 +940,7 @@ onMounted(() => {
             >
               <article
                 v-for="item in visibleSuggestionCards"
-                :key="item.index"
+                :key="`${item.itemId}-${item.status}`"
                 class="suggestion-card"
                 :class="{
                   ignored: item.status === '已忽略',
@@ -507,43 +948,71 @@ onMounted(() => {
                 }"
               >
                 <div class="suggestion-head">
-                  <span class="suggestion-index">{{ item.index }}</span>
-                  <h3 class="suggestion-title">{{ item.title }}</h3>
-                  <div class="suggestion-head-actions">
-                    <span class="suggestion-tag" :class="item.tagClass">
-                      {{ item.tag }}
-                    </span>
-                    <button
-                      v-if="
-                        item.status === '待追问' ||
-                        item.ignoreCountdown !== null
-                      "
-                      type="button"
-                      class="suggestion-ignore-button"
-                      :class="{ countdown: item.ignoreCountdown !== null }"
-                      :aria-label="
-                        item.ignoreCountdown !== null ? '撤销忽略' : '忽略问题'
-                      "
-                      @click="
-                        item.ignoreCountdown !== null
-                          ? handleUndoIgnore(item.index)
-                          : handleIgnoreSuggestion(item.index)
-                      "
-                    >
-                      <component
-                        :is="ignoreIcon"
-                        class="suggestion-ignore-icon"
-                      />
-                      <span>{{
-                        item.ignoreCountdown !== null
-                          ? `${item.ignoreCountdown}s`
-                          : "忽略"
-                      }}</span>
-                    </button>
-                  </div>
+                  <h3 class="suggestion-title">
+                    <span class="suggestion-title-text">{{ item.title }}</span>
+                    <component
+                      :is="newItemIcon"
+                      v-if="item.isNew && item.status === '待追问'"
+                      class="suggestion-new-icon"
+                      aria-label="新增问题"
+                    />
+                  </h3>
+                  <span class="suggestion-tag" :class="item.tagClass">
+                    {{ item.tag }}
+                  </span>
                 </div>
-                <p class="suggestion-goal">{{ item.goal }}</p>
+                <p v-if="item.goal" class="suggestion-goal">
+                  <strong>追问目的：</strong>
+                  <span>{{ item.goal }}</span>
+                </p>
                 <p class="suggestion-hint">{{ item.hint }}</p>
+                <div
+                  v-if="
+                    (item.isNew && item.status === '待追问') ||
+                    item.status === '待追问' ||
+                    item.status === '已忽略' ||
+                    item.ignoreCountdown !== null
+                  "
+                  class="suggestion-head-actions"
+                >
+                  <button
+                    v-if="
+                      item.status === '待追问' ||
+                      item.status === '已忽略' ||
+                      item.ignoreCountdown !== null
+                    "
+                    type="button"
+                    class="suggestion-ignore-button"
+                    :class="{ countdown: item.ignoreCountdown !== null }"
+                    :aria-label="
+                      item.ignoreCountdown !== null
+                        ? '撤销忽略'
+                        : item.status === '已忽略'
+                          ? '取消忽略'
+                          : '忽略问题'
+                    "
+                    @click="
+                      item.ignoreCountdown !== null
+                        ? handleUndoIgnore(item.itemId)
+                        : item.status === '已忽略'
+                          ? handleUnignoreSuggestion(item.itemId)
+                          : handleIgnoreSuggestion(item.itemId)
+                    "
+                  >
+                    <component
+                      :is="ignoreIcon"
+                      v-if="item.status !== '已忽略'"
+                      class="suggestion-ignore-icon"
+                    />
+                    <span>{{
+                      item.ignoreCountdown !== null
+                        ? `${item.ignoreCountdown}s`
+                        : item.status === "已忽略"
+                          ? "取消忽略"
+                          : "忽略"
+                    }}</span>
+                  </button>
+                </div>
               </article>
             </TransitionGroup>
           </el-scrollbar>
@@ -552,25 +1021,75 @@ onMounted(() => {
         <section class="right-panel">
           <div class="session-bar glass-card">
             <div class="session-meta">
-              <span>受访者：王大爷</span>
-              <span>开始于 今天 08:40</span>
-              <span class="word-count">
-                <EditPen class="meta-icon" />
-                1,238 字
-              </span>
+              <div class="session-meta-item session-meta-interviewee">
+                <div class="session-meta-copy">
+                  <span class="session-meta-label">
+                    <User class="session-meta-icon" />
+                    <span>受访者</span>
+                  </span>
+                  <strong>{{
+                    interviewDetail?.base_info?.interviewee || "--"
+                  }}</strong>
+                </div>
+              </div>
+              <div
+                v-if="startedAtDisplay !== '--'"
+                class="session-meta-item session-meta-time"
+              >
+                <div class="session-meta-copy">
+                  <span class="session-meta-label">
+                    <Calendar class="session-meta-icon" />
+                    <span>访谈时间</span>
+                  </span>
+                  <strong>{{ startedAtDisplay }}</strong>
+                </div>
+              </div>
+              <div class="session-meta-item session-meta-goal">
+                <div class="session-meta-copy">
+                  <span class="session-meta-label">
+                    <Aim class="session-meta-icon" />
+                    <span>访谈目标</span>
+                  </span>
+                  <strong>{{ interviewDetail?.goal || "--" }}</strong>
+                </div>
+              </div>
             </div>
 
             <div class="session-actions">
-              <span class="transcribing-badge">
-                <span class="transcribing-dot" />
-                访谈中 {{ transcribingElapsedTime }}
+              <span class="transcribing-badge" :class="interviewStatusClass">
+                <span class="transcribing-main">
+                  <span class="transcribing-dot" />
+                  <span>访谈中</span>
+                </span>
+                <small>{{ interviewStatusText }}</small>
               </span>
               <el-button
+                class="session-action-button session-action-secondary"
+                :icon="VideoPlay"
+                :disabled="isInterviewStarted"
+                @click="handleStartInterview"
+              >
+                <span class="session-action-label">{{
+                  startInterviewButtonText
+                }}</span>
+              </el-button>
+              <el-button
+                class="session-action-button session-action-secondary"
+                :icon="isMicrophoneEnabled ? microphoneIcon : microphoneOffIcon"
+                :disabled="!isInterviewStarted || !isWebSocketConnected"
+                @click="toggleMicrophone"
+              >
+                <span class="session-action-label session-microphone-label">
+                  {{ isMicrophoneEnabled ? "关闭麦克风" : "开启麦克风" }}
+                </span>
+              </el-button>
+              <el-button
                 type="primary"
-                class="end-btn"
+                class="session-action-button session-action-primary"
+                :icon="SwitchButton"
                 @click="handleEndInterview"
               >
-                结束访谈
+                <span class="session-action-label">结束访谈</span>
               </el-button>
             </div>
           </div>
@@ -594,6 +1113,8 @@ onMounted(() => {
                   :key="mode"
                   class="mode-button"
                   :class="{ active: activeMode === mode }"
+                  :disabled="mode !== '转录'"
+                  :title="mode !== '转录' ? `${mode}功能暂未开放` : undefined"
                   @click="setMode(mode)"
                 >
                   {{ mode }}
@@ -603,22 +1124,18 @@ onMounted(() => {
 
             <el-scrollbar
               v-if="!isKeyboardMode && !isHandwritingMode"
+              ref="transcriptScrollRef"
               class="transcript-scroll"
             >
               <div class="transcript-list">
                 <article
-                  v-for="(item, index) in transcriptEntries"
-                  :key="`${item.role}-${item.time}-${index}`"
+                  v-for="item in transcriptEntries"
+                  :key="item.segId"
                   class="transcript-item"
                 >
-                  <div class="speaker-badge" :class="item.tone">
-                    {{ item.role === "说话人1" ? "1" : "2" }}
-                  </div>
-
                   <div class="transcript-content">
                     <div class="transcript-meta">
-                      <strong>{{ item.role }}</strong>
-                      <span>{{ item.time }}</span>
+                      <time>{{ item.time }}</time>
                     </div>
                     <p>{{ item.text }}</p>
                   </div>
@@ -732,7 +1249,7 @@ onMounted(() => {
 
   .page-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     flex-shrink: 0;
     margin-bottom: 20px;
@@ -779,7 +1296,7 @@ onMounted(() => {
   .page-title {
     margin: 0;
     overflow: hidden;
-    font-size: 28px;
+    font-size: 24px;
     font-weight: 600;
     color: #1a1a1a;
     text-overflow: ellipsis;
@@ -834,6 +1351,29 @@ onMounted(() => {
     font-size: 16px;
     font-weight: 700;
     color: #24324a;
+  }
+
+  .panel-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 0 7px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 20px;
+    color: #64748b;
+    background: rgb(241 245 249 / 88%);
+    border-radius: 10px;
+  }
+
+  .panel-status-thinking {
+    color: #d97706;
+    background: rgb(255 247 237 / 92%);
+  }
+
+  .panel-status-idle {
+    color: #b45309;
+    background: rgb(254 249 195 / 94%);
   }
 
   .panel-icon,
@@ -946,15 +1486,18 @@ onMounted(() => {
 
   .suggestion-head {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
   }
 
   .suggestion-head-actions {
     display: inline-flex;
+    margin-top: 10px;
     gap: 12px;
     align-items: center;
+    justify-content: flex-end;
+    min-height: 26px;
   }
 
   /* .suggestion-head-actions::before {
@@ -964,39 +1507,58 @@ onMounted(() => {
   background: rgb(148 163 184 / 35%);
 } */
 
-  .suggestion-index {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    font-size: 14px;
-    font-weight: 700;
-    color: #ef4444;
-    background: rgb(239 68 68 / 10%);
-    border-radius: 999px;
-  }
-
   .suggestion-title {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    min-width: 0;
     margin: 0;
     font-size: 15px;
     font-weight: 700;
+    line-height: 1.5;
     color: #24324a;
+    overflow-wrap: anywhere;
+  }
+
+  .suggestion-title-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    vertical-align: middle;
   }
 
   .suggestion-tag {
     display: inline-flex;
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
     align-items: center;
     justify-content: center;
-    padding: 5px 12px;
-    font-size: 12px;
+    justify-self: end;
+    white-space: nowrap;
+    padding: 3px 8px;
+    font-size: 11px;
     font-weight: 700;
-    border-radius: 20px;
+    border-radius: 14px;
   }
 
   .suggestion-tag.warning {
     color: #d97706;
     background: rgb(245 158 11 / 14%);
+  }
+
+  .suggestion-new-icon {
+    display: inline-block;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    vertical-align: middle;
+    color: #dc2626;
+  }
+
+  .suggestion-new-icon :deep(svg) {
+    display: block;
+    width: 100%;
+    height: 100%;
   }
 
   .suggestion-tag.success {
@@ -1073,11 +1635,6 @@ onMounted(() => {
     border-color: rgb(167 243 208 / 98%);
   }
 
-  .suggestion-card.covered .suggestion-index {
-    color: #0f9d63;
-    background: rgb(16 185 129 / 12%);
-  }
-
   .suggestion-card.covered .suggestion-title {
     color: #0f172a;
   }
@@ -1087,11 +1644,6 @@ onMounted(() => {
     color: #5b7288;
   }
 
-  .suggestion-card.ignored .suggestion-index {
-    color: #64748b;
-    background: rgb(148 163 184 / 14%);
-  }
-
   .suggestion-card.ignored .suggestion-title,
   .suggestion-card.ignored .suggestion-goal,
   .suggestion-card.ignored .suggestion-hint {
@@ -1099,7 +1651,7 @@ onMounted(() => {
   }
 
   .suggestion-goal {
-    margin: 12px 0 8px;
+    margin-top: 12px;
     font-size: 13px;
     color: #64748b;
   }
@@ -1200,35 +1752,90 @@ onMounted(() => {
 
   .session-bar {
     flex-shrink: 0;
-    gap: 16px;
-    padding: 16px;
+    gap: 18px;
+    min-width: 0;
+    padding: 18px 22px;
   }
 
   .session-meta {
     display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
+    flex: 1;
+    gap: 0;
+    align-items: stretch;
     min-width: 0;
-    font-size: 13px;
-    color: #64748b;
   }
 
-  .word-count {
+  .session-meta-item {
+    display: flex;
+    align-items: flex-start;
+    min-width: 0;
+    padding: 2px 18px;
+    border-right: 1px solid rgb(203 213 225 / 72%);
+  }
+
+  .session-meta-item:first-child {
+    padding-left: 0;
+  }
+
+  .session-meta-item:last-child {
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  .session-meta-interviewee,
+  .session-meta-time {
+    flex: 0 0 auto;
+  }
+
+  .session-meta-goal {
+    flex: 1 1 230px;
+  }
+
+  .session-meta-icon {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: #334155;
+  }
+
+  .session-meta-copy {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    align-content: start;
+  }
+
+  .session-meta-label {
     display: inline-flex;
     gap: 6px;
     align-items: center;
-    padding: 6px 12px;
+    height: 17px;
+    font-size: 12px;
+    line-height: 1.25;
+    color: #64748b;
+  }
+
+  .session-meta-copy strong {
+    overflow: hidden;
     font-size: 13px;
     font-weight: 600;
-    color: #64748b;
-    background: #f2f5f9;
-    border-radius: 999px;
+    line-height: 1.35;
+    color: #334155;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .session-meta-goal .session-meta-copy strong {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   .session-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
     flex-shrink: 0;
     margin-left: auto;
@@ -1236,16 +1843,70 @@ onMounted(() => {
 
   .transcribing-badge {
     display: inline-flex;
-    gap: 8px;
+    flex-direction: column;
+    gap: 2px;
     align-items: center;
-    padding: 6px 12px;
+    justify-content: center;
+    min-width: 104px;
+    height: 56px;
+    padding: 0 14px;
     font-size: 13px;
     font-weight: 600;
     color: #334155;
     background: rgb(255 255 255 / 92%);
     border: 1px solid rgb(219 227 240 / 95%);
-    border-radius: 20px;
-    box-shadow: 0 8px 18px rgb(31 47 86 / 8%);
+    border-radius: 8px;
+  }
+
+  .transcribing-main {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+  }
+
+  .transcribing-badge small {
+    font-size: 12px;
+    font-weight: 400;
+    color: #64748b;
+  }
+
+  .transcribing-badge.status-created {
+    color: #722ed1;
+  }
+
+  .transcribing-badge.status-created .transcribing-dot {
+    background: #722ed1;
+    box-shadow: none;
+    animation: none;
+  }
+
+  .transcribing-badge.status-in_progress {
+    color: #409eff;
+  }
+
+  .transcribing-badge.status-in_progress .transcribing-dot {
+    background: #409eff;
+    box-shadow: none;
+  }
+
+  .transcribing-badge.status-suspended {
+    color: #d48806;
+  }
+
+  .transcribing-badge.status-suspended .transcribing-dot {
+    background: #d48806;
+    box-shadow: none;
+    animation: none;
+  }
+
+  .transcribing-badge.status-ended {
+    color: #8c8c8c;
+  }
+
+  .transcribing-badge.status-ended .transcribing-dot {
+    background: #8c8c8c;
+    box-shadow: none;
+    animation: none;
   }
 
   .transcribing-dot {
@@ -1257,9 +1918,45 @@ onMounted(() => {
     animation: transcribingPulse 1.6s ease-in-out infinite;
   }
 
-  .end-btn {
-    height: 36px;
+  .session-action-button.el-button {
+    flex-direction: column;
+    gap: 5px;
+    min-width: 92px;
+    height: 56px;
+    margin-left: 0;
+    padding: 8px 12px;
+    font-weight: 600;
     border-radius: 8px;
+  }
+
+  .session-action-button .el-icon,
+  .session-action-button :deep(svg) {
+    width: 18px;
+    height: 18px;
+  }
+
+  .session-action-secondary.el-button {
+    color: #2563eb;
+    background: rgb(239 246 255 / 94%);
+    border-color: transparent;
+  }
+
+  .session-action-secondary.el-button:hover,
+  .session-action-secondary.el-button:focus-visible {
+    color: #1d4ed8;
+    background: rgb(219 234 254 / 98%);
+    border-color: transparent;
+  }
+
+  .session-action-primary.el-button {
+    background: #2878e8;
+    border-color: #2878e8;
+  }
+
+  .session-action-primary.el-button:hover,
+  .session-action-primary.el-button:focus-visible {
+    background: #1f6ed8;
+    border-color: #1f6ed8;
   }
 
   .transcript-card {
@@ -1305,6 +2002,11 @@ onMounted(() => {
     box-shadow: 0 10px 24px rgb(31 47 86 / 10%);
   }
 
+  .mode-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
   @keyframes transcribingPulse {
     0% {
       transform: scale(0.88);
@@ -1342,7 +2044,7 @@ onMounted(() => {
 
   .transcript-list {
     min-height: 100%;
-    padding: 6px 12px 12px 6px;
+    padding: 6px 12px 0 6px;
   }
 
   .note-editor {
@@ -1564,35 +2266,13 @@ onMounted(() => {
   }
 
   .transcript-item {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
-    gap: 14px;
-    padding: 18px 12px;
+    display: block;
+    padding: 14px 16px;
     border-bottom: 1px solid rgb(221 226 236 / 84%);
   }
 
   .transcript-item:last-child {
     border-bottom: 0;
-  }
-
-  .speaker-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    font-size: 14px;
-    font-weight: 700;
-    color: #fff;
-    border-radius: 999px;
-  }
-
-  .speaker-badge.blue {
-    background: linear-gradient(135deg, #2f6fed 0%, #2458d9 100%);
-  }
-
-  .speaker-badge.green {
-    background: linear-gradient(135deg, #16b981 0%, #0ea76a 100%);
   }
 
   .transcript-content {
@@ -1601,18 +2281,11 @@ onMounted(() => {
 
   .transcript-meta {
     display: flex;
-    gap: 10px;
     align-items: center;
     margin-bottom: 8px;
   }
 
-  .transcript-meta strong {
-    font-size: 14px;
-    font-weight: 700;
-    color: #334155;
-  }
-
-  .transcript-meta span {
+  .transcript-meta time {
     font-size: 13px;
     font-weight: 600;
     color: #94a3b8;
@@ -1621,7 +2294,7 @@ onMounted(() => {
   .transcript-content p {
     margin: 0;
     font-size: 14px;
-    line-height: 1.8;
+    line-height: 1.75;
     color: #334155;
   }
 
@@ -1646,9 +2319,62 @@ onMounted(() => {
   }
 }
 
+@media (max-width: 1400px) {
+  .interview-page .session-bar {
+    gap: 12px;
+    padding: 12px 16px;
+  }
+
+  .interview-page .session-meta-time {
+    display: none;
+  }
+
+  .interview-page .session-meta-item {
+    padding: 2px 10px;
+  }
+
+  .interview-page .session-action-button.el-button {
+    flex-direction: row;
+    gap: 6px;
+    min-width: 80px;
+    height: 40px;
+    padding: 0 10px;
+  }
+
+  .interview-page .session-action-button .el-icon,
+  .interview-page .session-action-button :deep(svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .interview-page .transcribing-badge {
+    min-width: 82px;
+    height: 45px;
+    padding: 0 10px;
+  }
+}
+
 @media (max-width: 1280px) {
   .interview-page .workspace {
     grid-template-columns: 400px minmax(0, 1fr);
+  }
+
+  .interview-page .session-meta-item {
+    padding: 2px 12px;
+  }
+
+  .interview-page .session-action-button.el-button {
+    min-width: 40px;
+    padding: 8px 10px;
+  }
+
+  .interview-page .session-microphone-label {
+    font-size: 0;
+  }
+
+  .interview-page .session-microphone-label::after {
+    font-size: 13px;
+    content: "麦克风";
   }
 }
 
@@ -1692,6 +2418,15 @@ onMounted(() => {
 
   .interview-page .session-actions {
     margin-left: 0;
+    width: 100%;
+  }
+
+  .interview-page .session-meta {
+    width: 100%;
+  }
+
+  .interview-page .session-meta-goal {
+    min-width: 0;
   }
 
   .interview-page .page-title {
@@ -1703,11 +2438,17 @@ onMounted(() => {
   }
 
   .interview-page .suggestion-head {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .interview-page .suggestion-tag {
-    justify-self: start;
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .interview-page .suggestion-head-actions {
+    grid-column: 2 / -1;
+    grid-row: 2;
   }
 }
 
@@ -1756,13 +2497,44 @@ onMounted(() => {
   }
 
   .interview-page .transcript-item {
-    grid-template-columns: 32px minmax(0, 1fr);
-    gap: 10px;
-    padding: 14px 8px;
+    padding: 12px 8px;
   }
 
   .interview-page .session-bar {
     padding: 14px;
+  }
+
+  .interview-page .session-meta-time {
+    display: none;
+  }
+
+  .interview-page .session-meta-item {
+    padding: 2px 12px;
+  }
+
+  .interview-page .session-actions {
+    justify-content: space-between;
+  }
+
+  .interview-page .session-action-button.el-button {
+    flex: 1;
+    min-width: 0;
+    height: 36px;
+  }
+
+  .interview-page .transcribing-badge {
+    width: 76px;
+    min-width: 76px;
+    padding: 0 6px;
+    font-size: 12px;
+  }
+
+  .interview-page .transcribing-badge small {
+    display: none;
+  }
+
+  .interview-page .transcribing-main {
+    gap: 5px;
   }
 
   .interview-page .transcript-head {
@@ -1782,12 +2554,24 @@ onMounted(() => {
 
 @media (max-width: 520px) {
   .interview-page .suggestion-head {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .interview-page .suggestion-head-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
+  .interview-page .session-meta-goal {
+    display: none;
+  }
+
+  .interview-page .session-actions {
+    gap: 6px;
+  }
+
+  .interview-page .session-action-label {
+    display: none;
+  }
+
+  .interview-page .session-action-button.el-button {
+    height: 40px;
+    padding: 0;
   }
 }
 </style>

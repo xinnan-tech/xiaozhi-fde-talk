@@ -104,3 +104,31 @@ def test_extract_directive_keys_match_lang_meta():
     out_zh = build_extract_system("zh_cn", today="2026-08-20", current_values="", transcript="", fields=[])
     assert "English" in out_en
     assert "简体中文" in out_zh
+
+
+def test_extract_real_config_store_uses_llm_output_language_key(extract_client):
+    """真 config store（不 mock）：cache 注入 'en' → endpoint 读 'en' → 指令含 'English'。
+
+    验 key 名拼写：若代码改成 llm.output_lang，cache 注入失效，fallback zh_cn，本测试 fail。
+    """
+    from app.core.config_store import get_config_store
+
+    store = get_config_store()
+    store._cache["llm.output_language"] = "en"  # noqa: SLF001 走真 store（不 mock）
+
+    captured = {}
+
+    async def fake_chat_json(system, user):
+        captured["system"] = system
+        return {"name": "Zhang San", "company": "ABC"}
+
+    try:
+        with patch("app.adapters.llm.factory.get_llm") as mock_get_llm:
+            mock_get_llm.return_value.chat_json = fake_chat_json
+            r = _post_extract(extract_client)
+
+        assert r.status_code == 200, r.text
+        assert "English" in captured["system"], f"system prompt 缺 'English' directive: {captured['system'][:300]}"
+        assert "简体中文" not in captured["system"]
+    finally:
+        store._cache.pop("llm.output_language", None)  # noqa: SLF001 还原

@@ -106,15 +106,19 @@ def test_extract_directive_keys_match_lang_meta():
     assert "简体中文" in out_zh
 
 
-def test_extract_real_config_store_uses_llm_output_language_key(extract_client):
-    """真 config store（不 mock）：cache 注入 'en' → endpoint 读 'en' → 指令含 'English'。
+async def test_extract_real_config_store_uses_llm_output_language_key(extract_client):
+    """真 config store（不 mock）：snapshot → set 'en' → 端点读 'en' → 指令含 'English' → restore。
 
-    验 key 名拼写：若代码改成 llm.output_lang，cache 注入失效，fallback zh_cn，本测试 fail。
+    验 key 名拼写：若代码改成 llm.output_lang，set 注入失效，endpoint 仍 fallback zh_cn，本测试 fail。
+    走 public API（get/set）而非私有 _cache，DB + cache + broadcast 都生效；finally 按 snapshot 还原。
     """
     from app.core.config_store import get_config_store
 
     store = get_config_store()
-    store._cache["llm.output_language"] = "en"  # noqa: SLF001 走真 store（不 mock）
+    key = "llm.output_language"
+
+    # snapshot：读 DB+cache 一致视图；原始 None 视为「未配置」
+    original = await store.get(key)
 
     captured = {}
 
@@ -123,6 +127,8 @@ def test_extract_real_config_store_uses_llm_output_language_key(extract_client):
         return {"name": "Zhang San", "company": "ABC"}
 
     try:
+        await store.set(key, "en")
+
         with patch("app.adapters.llm.factory.get_llm") as mock_get_llm:
             mock_get_llm.return_value.chat_json = fake_chat_json
             r = _post_extract(extract_client)
@@ -131,4 +137,6 @@ def test_extract_real_config_store_uses_llm_output_language_key(extract_client):
         assert "English" in captured["system"], f"system prompt 缺 'English' directive: {captured['system'][:300]}"
         assert "简体中文" not in captured["system"]
     finally:
-        store._cache.pop("llm.output_language", None)  # noqa: SLF001 还原
+        # 还原：None → 写空串（端点 `... or "zh_cn"` 视同未配置）；非 None → 还原原值
+        restore_value = "" if original is None else original
+        await store.set(key, restore_value)

@@ -7,8 +7,8 @@ from app.core.i18n.lang_meta import derived_output_language_enum
 from app.core.i18n.messages import Keys
 
 
-def test_enum_keys_dict_has_three_keys():
-    """OCR 适配上线后多了 ocr.type 枚举；新增 key 顺手同步此断言。"""
+def test_enum_keys_exact_set():
+    """ENUM_KEYS 必须是这组 key；新增枚举（如未来 ocr.model）必须同步更新本断言。"""
     assert set(ENUM_KEYS.keys()) == {"asr.language", "llm.output_language", "ocr.type"}
 
 

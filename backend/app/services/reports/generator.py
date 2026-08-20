@@ -172,26 +172,25 @@ from app.core.i18n.lang_meta import (
 _FALLBACK_BY_LANG: dict[str, str] = derived_fallback_phrases()
 
 
-# 跨 dict 不变量：兜底短语键集合必须等于 _LANG_META 键集合——任一缺都意味着派生源
-# 漂移，import 期 fail-fast 比单测 delayed-feedback 更早暴露。Stage 2 删
-# _REPORT_LANG_INSTRUCTION 后此 assert 保留（约束仍成立：fallback ⊆ _LANG_META）。
+# 跨 dict 不变量：兜底短语键集合必须等于 _LANG_META 键集合——任一缺都意味着派生
+# 源漂移（fallback_phrase 已并入 LangMeta，键集合必须 1:1），import 期 fail-fast
+# 比单测 delayed-feedback 更早暴露。
 assert set(_FALLBACK_BY_LANG) == set(_LANG_META), (
     "兜底短语键集合必须等于 _LANG_META 键集合："
-    f"fallback={set(_FALLBACK_BY_LANG)} vs lang_meta={set(_LANG_META)}; "
-    f"差异={set(_REPORT_LANG_INSTRUCTION) ^ set(_FALLBACK_BY_LANG)}"
+    f"fallback={set(_FALLBACK_BY_LANG)} vs lang_meta={set(_LANG_META)}"
 )
 
 
-def _fill_dangling_labels(md: str, language: str = "zh_cn") -> str:
+def _fill_dangling_labels(md: str, language: str = "en") -> str:
     """悬空标签兜底：LLM 无内容可填时偶尔只留「- 标签：」空行，机械补上说明。
 
     提示词已有「须写未提及」规则，但 LLM 执行不稳定——这里是确定性兜底，
     保证报告里不会出现看起来像生成失败的空章节。
 
-    language 参数决定兜底短语：默认 zh_cn（与改前一致），en/zh_tw 显式切换。
-    未知语种回退到 zh_cn 短语（保守）。
+    language 参数决定兜底短语：默认 en（与 get_lang_meta 未知 lang fallback 一致，
+    避免英文报告被回退注入「本次访谈未提及」中文短语的隐性 bug）。
     """
-    fallback = _FALLBACK_BY_LANG.get((language or "zh_cn").lower(), _FALLBACK_BY_LANG["zh_cn"])
+    fallback = _FALLBACK_BY_LANG.get((language or "en").lower(), _FALLBACK_BY_LANG["en"])
     lines = md.splitlines()
     filled = 0
     for i, ln in enumerate(lines):

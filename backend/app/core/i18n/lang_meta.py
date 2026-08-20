@@ -23,27 +23,40 @@ class LangMeta:
         english_name: 英文写法，用于 LLM 跨语种理解（"Vietnamese" / "Traditional Chinese"）。
         bcp47: BCP-47 标签，用于跨系统 locale 协商（"vi-VN" / "zh-TW"）。
         fallback_lang: LLM 输出语种错或 LLM 调用失败时，pivot 切到这个语种重试。
+        fallback_phrase: 兜底短语——报告「- 标签：」悬空时插入的说明，需与各 prompt
+            base 内嵌 directive 的兜底短语严丝合缝，避免后处理注入错语种短语。
     """
 
     native_name: str
     english_name: str
     bcp47: str
     fallback_lang: str
+    fallback_phrase: str
 
 
 # 头部 10 语种：zh_cn/zh_tw/en 内部核心 + vi/ru/ko/ja/fr/de/es 常见扩展。
 # 长尾语种暂不写——pivot fallback_lang="en" 兜底，长尾出现时再加 dict 一行。
 _LANG_META: dict[str, LangMeta] = {
-    "zh_cn": LangMeta("简体中文", "Simplified Chinese", "zh-CN", "en"),
-    "zh_tw": LangMeta("繁體中文", "Traditional Chinese", "zh-TW", "en"),
-    "en":    LangMeta("English",  "English",             "en-US", "en"),
-    "vi":    LangMeta("Tiếng Việt", "Vietnamese",        "vi-VN", "en"),
-    "ru":    LangMeta("Русский",   "Russian",            "ru-RU", "en"),
-    "ko":    LangMeta("한국어",     "Korean",             "ko-KR", "en"),
-    "ja":    LangMeta("日本語",     "Japanese",           "ja-JP", "en"),
-    "fr":    LangMeta("Français",  "French",             "fr-FR", "en"),
-    "de":    LangMeta("Deutsch",   "German",             "de-DE", "en"),
-    "es":    LangMeta("Español",   "Spanish",            "es-ES", "en"),
+    "zh_cn": LangMeta("简体中文", "Simplified Chinese", "zh-CN", "en",
+                      "本次访谈未提及"),
+    "zh_tw": LangMeta("繁體中文", "Traditional Chinese", "zh-TW", "en",
+                      "本次訪談未提及"),
+    "en":    LangMeta("English",  "English",             "en-US", "en",
+                      "Not mentioned in this interview."),
+    "vi":    LangMeta("Tiếng Việt", "Vietnamese",        "vi-VN", "en",
+                      "Không được đề cập trong cuộc phỏng vấn này."),
+    "ru":    LangMeta("Русский",   "Russian",            "ru-RU", "en",
+                      "Не упомянуто в этом интервью."),
+    "ko":    LangMeta("한국어",     "Korean",             "ko-KR", "en",
+                      "이번 인터뷰에서 언급되지 않음."),
+    "ja":    LangMeta("日本語",     "Japanese",           "ja-JP", "en",
+                      "このインタビューでは言及されていません。"),
+    "fr":    LangMeta("Français",  "French",             "fr-FR", "en",
+                      "Non mentionné lors de cet entretien."),
+    "de":    LangMeta("Deutsch",   "German",             "de-DE", "en",
+                      "In diesem Interview nicht erwähnt."),
+    "es":    LangMeta("Español",   "Spanish",            "es-ES", "en",
+                      "No mencionado en esta entrevista."),
 }
 
 
@@ -62,29 +75,12 @@ def get_lang_meta(lang: str) -> LangMeta:
     return _LANG_META.get(lang.lower(), _LANG_META["en"])
 
 
-# 兜底短语按语种切——与各 prompt base 末尾 directive 内嵌短语严丝合缝。
-# 避免 LLM 输出正确英文报告后被后处理注入中文（之前硬编码「本次访谈未提及」时的隐性 bug）。
-# 派生自 _LANG_META：未来加语种只需改 _LANG_META + 在此加一行短语。
-_FALLBACK_PHRASES: dict[str, str] = {
-    "zh_cn": "本次访谈未提及",
-    "zh_tw": "本次訪談未提及",
-    "en":    "Not mentioned in this interview.",
-    "vi":    "Không được đề cập trong cuộc phỏng vấn này.",
-    "ru":    "Не упомянуто в этом интервью.",
-    "ko":    "이번 인터뷰에서 언급되지 않음.",
-    "ja":    "このインタビューでは言及されていません。",
-    "fr":    "Non mentionné lors de cet entretien.",
-    "de":    "In diesem Interview nicht erwähnt.",
-    "es":    "No mencionado en esta entrevista.",
-}
-
-
 def derived_fallback_phrases() -> dict[str, str]:
     """对外暴露兜底短语 dict——现有 _FALLBACK_BY_LANG 改用此派生。
 
     返回 dict 副本：调用方修改不会污染模块级常量。
     """
-    return dict(_FALLBACK_PHRASES)
+    return {lang: meta.fallback_phrase for lang, meta in _LANG_META.items()}
 
 
 def derived_output_language_enum() -> set[str]:

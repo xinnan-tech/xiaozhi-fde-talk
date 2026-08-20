@@ -3,7 +3,7 @@
 `/extract` 端点是 OCR / 粘贴 / 语音转写三条路径的汇聚点——统一在此按
 `llm.output_language` 把任意原文整理成用户偏好语言的字段值。
 
-base 全英文 + directive 走 i18n messages 模块读取，遵循「单一英文 base +
+base 全英文 + directive 走 i18n.translator.t() 读取，遵循「单一英文 base +
 文案归 i18n 文件」原则。`i18n.extract.directive.{lang}` 跟 `_LANG_META` 键集合同步——
 未知 lang 在此显式回退到 en，再交由 `t()` 的 locale→en-US 兜底链。
 """

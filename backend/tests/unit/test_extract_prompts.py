@@ -1,4 +1,4 @@
-"""extract prompt i18n 改造：单一英文 base + 参数化指令（从 messages 模块读）。"""
+"""extract prompt i18n 改造：单一英文 base + 参数化指令（从 translator 模块读）。"""
 from __future__ import annotations
 
 import re
@@ -23,7 +23,7 @@ def test_directive_en():
 
 
 def test_directive_unknown_lang_falls_back_to_en():
-    """未知 lang → 走 en 兜底（与 get_lang_meta 一致）。"""
+    """未知 lang → 走 en 兜底（与 _LANG_META 一致）。"""
     d = _extract_directive("xx_unknown")
     assert "English" in d
 

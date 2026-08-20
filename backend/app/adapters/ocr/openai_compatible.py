@@ -13,6 +13,7 @@ from typing import Optional
 import httpx
 
 from app.adapters.ocr.base import OCRError, OCRProvider
+from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.core.retry import BackoffPolicy
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ class OpenAICompatibleOCRProvider(OCRProvider):
                 await time.sleep(backoff.delay_for(attempt))
         raise OCRError(f"OCR 调用 {retries + 1} 次仍失败：{last_err}")
 
-    async def recognize(self, image_bytes: bytes, prompt: str = "请提取图片中的所有文字。") -> str:
+    async def recognize(self, image_bytes: bytes, prompt: str = OCR_PROMPT) -> str:
         """调用视觉模型识别名片图片，返回提取的文本。"""
         body = {
             "model": self._model,

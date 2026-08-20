@@ -12,6 +12,7 @@ from app.core.config_store import get_config_store
 from app.core.i18n import Keys, current_locale, t
 from app.core.i18n.errors import I18nError
 from app.core.i18n.extract_prompts import build_extract_system
+from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
 from app.services.coaching.engine import TERMINAL_SESSION_STATUSES
@@ -439,7 +440,7 @@ async def recognize_image(
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "OCR 未配置，请到「⚙️ 后端配置」填写 ocr.base_url / ocr.api_key / ocr.model")
         text = await ocr.recognize(
             image_bytes,
-            prompt="这是一张名片，请提取图中所有文字，保持原有格式，直接返回提取的文字内容。",
+            prompt=OCR_PROMPT,
         )
     except Exception as e:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"OCR 识别失败：{e}") from e

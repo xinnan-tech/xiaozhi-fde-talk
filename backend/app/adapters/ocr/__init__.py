@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from app.core.i18n.ocr_prompts import OCR_PROMPT
+
 
 class OCRError(Exception):
     pass
@@ -20,5 +22,5 @@ class OCRProvider(ABC):
         """是否已配置可用（base_url/api_key/model 齐全）。"""
 
     @abstractmethod
-    async def recognize(self, image_bytes: bytes, prompt: str = "请提取图片中的所有文字。") -> str:
+    async def recognize(self, image_bytes: bytes, prompt: str = OCR_PROMPT) -> str:
         """调用视觉模型识别图片中的文字，返回原始文本。"""

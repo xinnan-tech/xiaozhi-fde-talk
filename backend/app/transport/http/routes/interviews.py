@@ -388,7 +388,7 @@ async def extract_fields(
         today=today,
         current_values=current_values_str,
         transcript=req.transcript,
-        fields=list(req.fields),
+        fields=req.fields,
     )
     user_prompt = (
         f"【待提取字段（仅限以下 key，禁止创建新字段）】\n" + "\n".join(field_lines) + "\n\n"

@@ -7,4 +7,9 @@ OCR 输出语种由图片本身决定（不是用户偏好），所以不需要 
 """
 from __future__ import annotations
 
-OCR_PROMPT = "Extract all text from this image. Preserve the original layout and formatting. Return only the extracted text."
+OCR_PROMPT = (
+    "Extract all text from this image EXACTLY as it appears. "
+    "Do NOT translate. Do NOT convert between Simplified and Traditional Chinese. "
+    "Preserve the original layout and formatting. "
+    "Return only the extracted text."
+)

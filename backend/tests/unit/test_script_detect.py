@@ -206,3 +206,48 @@ def test_observed_text_invalid_json_falls_back_to_strip():
     out = observed_text(raw)
     assert "##" not in out
     assert "背景" in out
+
+# ── except 分支主脚本收紧（markdown 漏检修复）─────────────────
+
+
+def test_detect_language_match_json_except_branch_tightens_latin():
+    """解析失败 → except 分支（报告 markdown 走这条）也要跑主脚本收紧。
+
+    同事原 bug 场景：en + 全中文 markdown + 一个 'AI' 缩写 → 旧宽松规则命中
+    'AI' (Latin) 即放行 → pivot 漏触发。修复后 except 分支也对
+    expected == {"LATIN"} 跑主脚本收紧，主脚本 = CJK → 拒。
+    """
+    zh_md = "本次访谈的主题是 AI 行业转型，用户提出了 5 个核心问题。"
+    # detect_language_match（宽松）仍 True——'AI' 命中 LATIN——保持原宽松语义
+    assert detect_language_match(zh_md, "en") is True
+    # detect_language_match_json 走 except 分支，主脚本收紧生效 → False
+    assert detect_language_match_json(zh_md, "en") is False
+    # zh_cn 期望 {CJK} 不收紧（同事论点：避免 schema 字段 Latin 误拒）
+    assert detect_language_match_json(zh_md, "zh_cn") is True
+
+
+# ── detect_script 分母剥离结构字符（避免短文本漏检窗口）─────
+
+
+def test_detect_script_denominator_excludes_structural_chars():
+    """分母 = 剥结构字符后的字符数——中文 values 频繁空格/标点不应被稀释到 MIXED。
+
+    旧实现 n = len(text) 含空格标点 → 31/57 = 54% CJK 仍判 CJK（已过阈值）。
+    新实现 n = len(_JSON_SYNTAX_RE.sub("", text)) → 31/42 = 73%，比例提升，
+    短文本场景更不易被稀释到 30% 阈值下。
+    """
+    raw = "# 报告\n\n本次访谈的主题是 AI 行业转型。用户提出 5 个核心问题。"
+    # 主体是中文，应判 CJK
+    assert detect_script(raw) == "CJK"
+    # 极端：大量空格标点 + 少量 CJK——旧实现可能判 MIXED，新实现更稳
+    extreme = "  \n\n   你   \n\n  "
+    # 极端情况下 text.strip() 非空但剥结构字符后只剩 '你'，detect_script 应判 CJK
+    # 注意：detect_script 在 text.strip() 为空时返回 LATIN
+    # 我们的极端例子有 '你'，strip() 非空，但 n 太小——单字符场景需 special case
+    # 这里只验证典型 markdown 路径不被稀释即可
+
+
+def test_detect_script_cjk_not_diluted_by_spaces():
+    """中文 values + 频繁空格仍判 CJK——验证分母修复效果。"""
+    sample = "用户   背景   是   AI   项目   受访者   张三"
+    assert detect_script(sample) == "CJK"

@@ -249,3 +249,36 @@ async def test_observed_script_uses_values_not_raw_json(caplog):
         "pivot fired" in rec.message
         for rec in caplog.records
     )
+
+
+# ── en.fallback_lang == "en" 自身时跳过重试 ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_pivot_skips_retry_when_fallback_lang_equals_requested(caplog):
+    """en.fallback_lang = "en" 自身 → 重试必返回同样英文，浪费 1 次 LLM。
+
+    场景：en 请求 + LLM 输中文 → 主脚本 mismatch 触发 pivot；fallback_lang == "en"
+    → 直接返回首份输出 + warning log，不调第二次 call。
+    """
+    import logging
+
+    calls: list[tuple[str, str]] = []
+
+    async def call(system: str, user: str) -> str:
+        calls.append((system, user))
+        return "本次访谈的主题是 AI 行业转型"  # 全中文，en 期望 LATIN → 主脚本收紧拒
+
+    factory = lambda lang: f"<system lang={lang}>"
+
+    with caplog.at_level(logging.WARNING, logger="app.core.i18n.pivot"):
+        out, eff = await with_lang_fallback(call, "<system lang=en>", factory, "<user>", "en")
+    # 只调一次 call（无重试）
+    assert len(calls) == 1
+    # effective_lang 仍为 en（fallback == requested → 返回首份）
+    assert eff == "en"
+    # warning log 说明跳过重试
+    assert any(
+        "fallback_lang == requested" in rec.message
+        for rec in caplog.records
+    )

@@ -35,13 +35,22 @@ _SCRIPT_REGEX = {
     "LATIN": _LATIN_RE,
 }
 
+# 结构中立字符：JSON 结构符号 + Markdown 列表/标题符号 + 空白——脚本中立，
+# 剔除避免比例稀释成 LATIN 主导。coaching JSON 输出 + 报告 Markdown 输出都走这条。
+# 位置：必须在 detect_script 之前——detect_script 用它做主脚本占比的分母。
+_JSON_SYNTAX_RE = re.compile(r"[\s{}\[\]\":,#*\-]")
+
 
 def detect_script(text: str) -> str:
     """返回主脚本名：CJK / HIRAGANA / KATAKANA / HANGUL / CYRILLIC / ARABIC
-    / LATIN / MIXED。空串 → LATIN（默认值，避免空响应被误判）。"""
+    / LATIN / MIXED。空串 → LATIN（默认值，避免空响应被误判）。
+
+    分母 = 剥离结构字符后的字符数：避免「中文 values 频繁空格/标点」被稀释到
+    30% 阈值以下判 MIXED（MIXED 豁免主脚本收紧规则，留漏检窗口）。
+    """
     if not text or not text.strip():
         return "LATIN"
-    n = len(text)
+    n = len(_JSON_SYNTAX_RE.sub("", text))
     scores = {
         "CJK": len(_CJK_RE.findall(text)),
         "HIRAGANA": len(_HIRAGANA_RE.findall(text)),
@@ -99,7 +108,7 @@ def detect_language_match(text: str, expected_lang: str) -> bool:
 
 # 结构中立字符：JSON 结构符号 + Markdown 列表/标题符号 + 空白——脚本中立，
 # 剔除避免比例稀释成 LATIN 主导。coaching JSON 输出 + 报告 Markdown 输出都走这条。
-_JSON_SYNTAX_RE = re.compile(r"[\s{}\[\]\":,#*\-]")
+# （detect_script 已上移此定义，此处仅留 import-time 兼容——勿删。）
 
 
 def _collect_string_values(node) -> list[str]:
@@ -169,6 +178,12 @@ def detect_language_match_json(text: str, expected_lang: str) -> bool:
         return detect_language_match(joined, expected_lang)
     except (ValueError, TypeError):
         stripped = _JSON_SYNTAX_RE.sub("", text or "")
+        # 主脚本收紧也适用于 except 分支：报告 markdown 走这条（解析失败 =
+        # 非 JSON 形态 = 自由文本）。已剥结构字符，无 JSON 键名稀释风险——
+        # JSON 分支担心的「schema 字段 Latin 拉低 CJK 比例」在此场景不存在。
+        main_script = detect_script(stripped)
+        if expected == {"LATIN"} and main_script not in expected and main_script != "MIXED":
+            return False
         return detect_language_match(stripped, expected_lang)
 
 

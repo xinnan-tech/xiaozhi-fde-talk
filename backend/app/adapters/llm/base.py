@@ -27,5 +27,12 @@ class LLMProvider(ABC):
         """辅导重算用：强制 json_object，返回解析后的 dict。"""
 
     @abstractmethod
-    async def chat_text(self, system: str, user: str, retries: int = 2) -> str:
-        """报告生成用：纯文本返回（Markdown）。"""
+    async def chat_text(
+        self, system: str, user: str, retries: int = 2, json_mode: bool = False,
+    ) -> str:
+        """报告生成用：纯文本返回（Markdown / JSON 字符串）。
+
+        json_mode=True：调用方需要 LLM 强制 JSON 输出（如 pivot 解析场景），
+        实现层应带 response_format=json_object + temperature 偏 0 + 截断 budget
+        三件套，保证 raw text 是合法 JSON 字符串。
+        """

@@ -78,6 +78,7 @@
   "diag.ocr.timeout": "OCR 调用超时",
   "diag.ocr.bad_image": "读取测试图片失败：{detail}",
   "diag.ocr.ok": "OCR 连通正常（服务可用）",
+
   "startup.admin_password_missing": "APP_ADMIN_PASSWORD 未设置，请在 .env 或环境变量中配置后重启",
   "startup.database_migration_fail": "alembic upgrade head 失败：\n{stdout}\n{stderr}",
   "settings.prod_no_sqlite": "生产环境禁止使用 SQLite，必须使用 MySQL/PostgreSQL",

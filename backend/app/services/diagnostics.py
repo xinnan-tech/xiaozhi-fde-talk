@@ -28,6 +28,7 @@ from app.adapters.llm.factory import get_llm
 from app.adapters.ocr.base import OCRError
 from app.adapters.ocr.factory import get_ocr
 from app.core.config_store import get_config_store
+from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.core.i18n import Keys, t
 from app.core.i18n.context import current_locale
 from app.core.i18n.errors import I18nError
@@ -498,7 +499,7 @@ async def diagnose_ocr(timeout_s: float = 20.0) -> dict[str, Any]:
     t0 = time.monotonic()
     try:
         text = await asyncio.wait_for(
-            provider.recognize(test_image_bytes, prompt="这张图片里有什么文字？"),
+            provider.recognize(test_image_bytes, prompt=OCR_PROMPT),
             timeout=timeout_s,
         )
         latency = int((time.monotonic() - t0) * 1000)

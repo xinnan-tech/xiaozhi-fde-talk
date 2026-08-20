@@ -243,3 +243,78 @@ async def test_audio_low_level_frame_carries_i18n_params():
     assert len(frames) == 1
     assert frames[0]["i18n_key"] == "ws.audio.low_level"
     assert frames[0]["i18n_params"] == {}
+
+
+async def test_bad_handshake_invalid_json_closes_with_4000(monkeypatch):
+    """PR2: 客户端首条消息非 JSON → bad_handshake + 关闭码 4000（与文档契约一致）。
+
+    防退化：曾因 _fail 没传 close_code 导致只发帧不关闭，服务端连接悬空。
+    """
+    import app.transport.websocket.handler as h_mod
+
+    ws = MagicMock()
+    ws.scope = {"subprotocols": ["bearer.t"]}
+    ws.accept = AsyncMock()
+    ws.receive_text = AsyncMock(return_value="not-json{")
+    ws.send_json = AsyncMock()
+    ws.send = AsyncMock()
+    ws.close = AsyncMock()
+    user = MagicMock()
+    user.user_id = "u1"
+    monkeypatch.setattr(h_mod, "extract_auth", lambda t: user)
+
+    h = WSHandler(ws, "s1")
+    await h.run()
+
+    # 1. 发了一帧 bad_handshake
+    sent_frames = []
+    for c in ws.send_json.call_args_list:
+        if not c.args:
+            continue
+        arg = c.args[0]
+        if isinstance(arg, str) and arg.lstrip().startswith("{"):
+            sent_frames.append(json.loads(arg))
+        elif isinstance(arg, dict):
+            sent_frames.append(arg)
+    error_frames = [f for f in sent_frames if f.get("type") == "error"]
+    assert len(error_frames) == 1
+    assert error_frames[0]["code"] == "bad_handshake"
+
+    # 2. 必须以关闭码 4000 关闭（PR2 修复点）
+    ws.close.assert_awaited_once()
+    assert ws.close.call_args.kwargs["code"] == 4000
+
+
+async def test_bad_handshake_wrong_type_closes_with_4000(monkeypatch):
+    """PR2: 客户端首条消息合法 JSON 但 type != "hello" → bad_handshake + 关闭码 4000。"""
+    import app.transport.websocket.handler as h_mod
+
+    ws = MagicMock()
+    ws.scope = {"subprotocols": ["bearer.t"]}
+    ws.accept = AsyncMock()
+    ws.receive_text = AsyncMock(return_value=json.dumps({"type": "listen"}))
+    ws.send_json = AsyncMock()
+    ws.send = AsyncMock()
+    ws.close = AsyncMock()
+    user = MagicMock()
+    user.user_id = "u1"
+    monkeypatch.setattr(h_mod, "extract_auth", lambda t: user)
+
+    h = WSHandler(ws, "s1")
+    await h.run()
+
+    sent_frames = []
+    for c in ws.send_json.call_args_list:
+        if not c.args:
+            continue
+        arg = c.args[0]
+        if isinstance(arg, str) and arg.lstrip().startswith("{"):
+            sent_frames.append(json.loads(arg))
+        elif isinstance(arg, dict):
+            sent_frames.append(arg)
+    error_frames = [f for f in sent_frames if f.get("type") == "error"]
+    assert len(error_frames) == 1
+    assert error_frames[0]["code"] == "bad_handshake"
+
+    ws.close.assert_awaited_once()
+    assert ws.close.call_args.kwargs["code"] == 4000

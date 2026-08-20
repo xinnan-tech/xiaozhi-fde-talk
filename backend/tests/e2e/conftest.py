@@ -166,6 +166,22 @@ def restore_runtime_windows(api):
     return _factory
 
 
+@pytest.fixture
+def restore_idle_window(api):
+    """临时把 idle_timeout_s / idle_check_interval_s 缩到测试能等的秒数。
+
+    生产 idle_timeout 默认 1800s（30 分钟）——原 hardcoded 的 120s 是当初的旧默认
+    值，已漂移到 30min 后这条用例靠它跑不动。临时改 10s/3s 让"在线无活动"
+    在秒级触发 session.suspended；exit finally 一律还原。
+    """
+    def _factory(idle_s: str, check_s: str):
+        return _ConfigRestore(api, "session", {
+            "idle_timeout_s": idle_s,
+            "idle_check_interval_s": check_s,
+        })
+    return _factory
+
+
 async def _call_get(api, group: str) -> dict:
     """GET /admin/config/{group}：读当前配置原值（string），与 str 输入相容。"""
     async with await api._client() as c:

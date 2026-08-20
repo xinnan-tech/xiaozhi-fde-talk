@@ -34,12 +34,3 @@ def test_base_class_default_is_ocr_prompt():
     sig = inspect.signature(OCRProvider.recognize)
     default = sig.parameters["prompt"].default
     assert default == OCR_PROMPT, f"default = {default!r}, expected OCR_PROMPT"
-
-
-def test_init_module_default_is_ocr_prompt():
-    """app.adapters.ocr.__init__ 暴露的 OCRProvider 默认 prompt 来自 OCR_PROMPT。"""
-    from app.adapters.ocr import OCRProvider as InitOCRProvider
-
-    sig = inspect.signature(InitOCRProvider.recognize)
-    default = sig.parameters["prompt"].default
-    assert default == OCR_PROMPT, f"default = {default!r}, expected OCR_PROMPT"

@@ -155,6 +155,7 @@ dist
 .claude
 
 # Frontend (Vite / pnpm / VS)
+.pnpm-store/
 *.local
 report.html
 vite.config.*.timestamp*

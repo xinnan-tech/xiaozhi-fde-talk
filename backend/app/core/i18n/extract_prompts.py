@@ -5,7 +5,7 @@
 
 base 全英文 + directive 走 i18n.translator.t() 读取，遵循「单一英文 base +
 文案归 i18n 文件」原则。`i18n.extract.directive.{lang}` 跟 `_LANG_META` 键集合同步——
-未知 lang 在此显式回退到 en，再交由 `t()` 的 locale→en-US 兜底链。
+未知 lang 在此显式回退到 en（写死 locale="en-US" 读 en_US.json 单源）。
 """
 from __future__ import annotations
 

@@ -97,6 +97,8 @@ htmlcov/
 backend/models/*
 !backend/models/funasr-runtime-resources/
 !backend/models/funasr-runtime-resources/**
+# Docker 容器在仓库根解压的 funasr 资源副本（容器自动产生，不入库）
+/funasr-runtime-resources/
 
 # XiaoZhi FDE Talk (backend) - 导出文件
 exports/

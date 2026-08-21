@@ -108,13 +108,11 @@ export const getInterviewWebSocketUrl = (
   interviewId: string,
   wsBaseUrl?: string
 ) => {
-  // 开发环境走 Vite 代理
-  // 线上环境可以通过 VITE_WS_BASE_URL 指向网关地址
-  const baseUrl = wsBaseUrl || import.meta.env.VITE_WS_BASE_URL;
   const path = `/ws/v1/interview/${encodeURIComponent(interviewId)}`;
 
-  if (baseUrl) {
-    const url = new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
+  // 显式 wsBaseUrl 走自定义网关；其余一律走运行时宿主（dev vite proxy / prod 反代）
+  if (wsBaseUrl) {
+    const url = new URL(path, wsBaseUrl.endsWith("/") ? wsBaseUrl : `${wsBaseUrl}/`);
     if (url.protocol === "http:") url.protocol = "ws:";
     if (url.protocol === "https:") url.protocol = "wss:";
     return url.toString();

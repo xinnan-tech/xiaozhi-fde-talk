@@ -312,7 +312,7 @@ const handleStartInterview = async () => {
 
   // 在点击事件中立即请求权限，避免等待 WebSocket 握手后丢失浏览器用户手势。
   shouldResumeMicrophone.value = true;
-  const microphoneStarted = await startRecording();
+  const microphoneStarted = await acquireStream();
   if (!microphoneStarted) {
     shouldResumeMicrophone.value = false;
     isInterviewStarted.value = false;
@@ -668,6 +668,7 @@ const isWebSocketConnected = computed(
 
 const {
   isRecording: isMicrophoneEnabled,
+  acquireStream,
   startRecording,
   stopRecording
 } = useAudioRecorder({

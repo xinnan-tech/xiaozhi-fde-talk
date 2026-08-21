@@ -12,9 +12,8 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
   const isRecording = ref(false);
   const error = ref<Error | DOMException | null>(null);
 
-  const startRecording = async () => {
+  const acquireStream = async () => {
     if (mediaStream.value) return true;
-
     if (
       typeof navigator === "undefined" ||
       !navigator.mediaDevices?.getUserMedia
@@ -32,7 +31,28 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
         audio: options.audio ?? true,
         video: false
       });
+      error.value = null;
+      return true;
+    } catch (cause) {
+      mediaStream.value?.getTracks().forEach(track => track.stop());
+      mediaStream.value = null;
+      const recorderError =
+        cause instanceof Error ||
+        (typeof DOMException !== "undefined" && cause instanceof DOMException)
+          ? cause
+          : new Error("无法开启麦克风");
+      error.value = recorderError;
+      console.error("[useAudioRecorder] 麦克风开启失败", recorderError);
+      return false;
+    }
+  };
 
+  const startRecording = async () => {
+    if (mediaRecorder.value) return true;
+
+    if (!(await acquireStream())) return false;
+
+    try {
       if (typeof MediaRecorder === "undefined") {
         throw new Error("当前浏览器不支持 MediaRecorder");
       }
@@ -100,6 +120,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
     mediaStream,
     isRecording,
     error,
+    acquireStream,
     startRecording,
     stopRecording
   };

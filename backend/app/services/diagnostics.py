@@ -25,7 +25,10 @@ import httpx
 
 from app.adapters.asr.funasr_server import FunASRServerProvider
 from app.adapters.llm.factory import get_llm
+from app.adapters.ocr.base import OCRError
+from app.adapters.ocr.factory import get_ocr
 from app.core.config_store import get_config_store
+from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.core.i18n import Keys, t
 from app.core.i18n.context import current_locale
 from app.core.i18n.errors import I18nError
@@ -428,17 +431,102 @@ async def diagnose_llm(timeout_s: float = 15.0) -> dict[str, Any]:
         return _extract_llm_error(e) | {"latency_ms": int((time.monotonic() - t0) * 1000)}
 
 
+# ---------- OCR 自检 ----------
+
+def _extract_ocr_error(exc: Exception) -> dict[str, Any]:
+    """OCR 调用异常 → 结构化结果（走 i18n）。"""
+    msg = str(exc).lower()
+    if isinstance(exc, OCRError) or "ocr" in msg:
+        if "未配置" in str(exc) or "api_key" in msg or "base_url" in msg:
+            return _result("config_missing",
+                           key=Keys.DIAG_OCR_CONFIG_MISSING,
+                           key_params={"missing": str(exc)[:200]})
+        if "连接被拒绝" in str(exc) or "connect call failed" in msg or "timeout" in msg \
+                or "timed out" in msg or "name or service" in msg:
+            return _result("unreachable",
+                           key=Keys.DIAG_OCR_UNREACHABLE,
+                           key_params={"detail": str(exc)[:200]})
+        return _result("server",
+                       key=Keys.DIAG_OCR_INVOKE_FAIL_TYPED,
+                       key_params={"type": type(exc).__name__, "detail": str(exc)[:200]})
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        body = exc.response.text or ""
+        if status in (401, 403):
+            return _result("auth",
+                           key=Keys.DIAG_OCR_AUTH_FAIL,
+                           key_params={"status": status})
+        if status == 429:
+            return _result("quota",
+                           key=Keys.DIAG_OCR_QUOTA,
+                           key_params={"status": status})
+        return _result("server",
+                       key=Keys.DIAG_OCR_SERVICE_FAIL,
+                       key_params={"status": status, "snippet": body[:200]})
+    if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException, ConnectionError, OSError)):
+        return _result("unreachable",
+                       key=Keys.DIAG_OCR_UNREACHABLE,
+                       key_params={"detail": f"{type(exc).__name__}: {exc}"[:200]})
+    return _result("server",
+                   key=Keys.DIAG_OCR_INVOKE_FAIL_TYPED,
+                   key_params={"type": type(exc).__name__, "detail": str(exc)[:200]})
+
+
+async def diagnose_ocr(timeout_s: float = 20.0) -> dict[str, Any]:
+    """用内置名片测试图调用 OCR，期望非空文本回复（i18n 消息）。"""
+    cfg = get_config_store()
+    base_url = cfg.get_sync("ocr.base_url") or ""
+    api_key = cfg.get_sync("ocr.api_key") or ""
+    model = cfg.get_sync("ocr.model") or ""
+    missing = [k for k, v in [("ocr.base_url", base_url),
+                              ("ocr.api_key", api_key),
+                              ("ocr.model", model)] if not v]
+    if missing:
+        return _result("config_missing",
+                       key=Keys.DIAG_OCR_CONFIG_MISSING,
+                       key_params={"missing": ", ".join(missing)})
+
+    # 用内嵌名片测试图（tests/fixtures/ocr_test_card.png）
+    _OCR_TEST_IMG = _FIXTURE_DIR / "ocr_test_card.png"
+    try:
+        test_image_bytes = _OCR_TEST_IMG.read_bytes()
+    except Exception as e:
+        return _result("server",
+                       key=Keys.DIAG_OCR_BAD_IMAGE,
+                       key_params={"detail": str(e)[:200]})
+
+    provider = get_ocr()
+    t0 = time.monotonic()
+    try:
+        text = await asyncio.wait_for(
+            provider.recognize(test_image_bytes, prompt=OCR_PROMPT),
+            timeout=timeout_s,
+        )
+        latency = int((time.monotonic() - t0) * 1000)
+        # 灰色图可能返回空，这是预期的——只检查连通性和异常
+        return {"ok": True, "code": "ok",
+                "message": _localized(Keys.DIAG_OCR_OK),
+                "latency_ms": latency,
+                "detail": {"model": model, "reply": (text or "(空/灰色图片)")[:160]}}
+    except asyncio.TimeoutError:
+        return _result("unreachable",
+                       key=Keys.DIAG_OCR_TIMEOUT,
+                       key_params={})
+    except Exception as e:
+        return _extract_ocr_error(e) | {"latency_ms": int((time.monotonic() - t0) * 1000)}
+
+
 # ---------- 合并 ----------
 
 async def diagnose_all() -> dict[str, Any]:
-    """并发跑 ASR + LLM，返回双方结果 + 总评。"""
-    asr_res, llm_res = await asyncio.gather(
-        diagnose_asr(), diagnose_llm(), return_exceptions=True,
+    """并发跑 ASR + LLM + OCR，返回三方结果 + 总评。"""
+    asr_res, llm_res, ocr_res = await asyncio.gather(
+        diagnose_asr(), diagnose_llm(), diagnose_ocr(), return_exceptions=True,
     )
 
     def _safe(r):
         return r if isinstance(r, dict) else {"ok": False, "error": repr(r)}
 
-    asr_res, llm_res = _safe(asr_res), _safe(llm_res)
-    overall = asr_res.get("ok") and llm_res.get("ok")
-    return {"ok": overall, "asr": asr_res, "llm": llm_res}
+    asr_res, llm_res, ocr_res = _safe(asr_res), _safe(llm_res), _safe(ocr_res)
+    overall = asr_res.get("ok") and llm_res.get("ok") and ocr_res.get("ok")
+    return {"ok": overall, "asr": asr_res, "llm": llm_res, "ocr": ocr_res}

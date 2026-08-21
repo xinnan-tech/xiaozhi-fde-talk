@@ -6,12 +6,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import time
 from typing import Awaitable, Callable, Optional
 
 from app.adapters.llm.base import LLMError, LLMProvider
 from app.adapters.llm.factory import get_llm
+from app.core.i18n.messages import Keys
+from app.core.i18n.pivot import with_lang_fallback
 from app.core.outbound_send import safe_send
 from app.domain.coaching import CoachingItem, ItemStatus
 from app.domain.session import SessionStatus
@@ -148,7 +152,12 @@ class CoachingEngine:
             await self._safe_send(_coaching_update("recomputing", version, []))
             try:
                 system, user = build_first_batch(self.template, self.state.session, self._read_output_language())
-                parsed = await self._llm_with_timeout(system, user)
+                parsed = await self._llm_pivot_then_parse_json(
+                    system,
+                    lambda l: build_first_batch(self.template, self.state.session, l)[0],
+                    user,
+                    self._read_output_language(),
+                )
                 items = self._apply(validate_llm_output(parsed))
                 for i, it in enumerate(items):
                     it.priority = i + 1  # 输出顺序即建议发问顺序
@@ -307,7 +316,12 @@ class CoachingEngine:
             try:
                 system = build_system(self.template, self.state.session.goal, self._read_output_language())
                 user = build_user(self.state)
-                parsed = await self._llm_with_timeout(system, user)
+                parsed = await self._llm_pivot_then_parse_json(
+                    system,
+                    lambda l: build_system(self.template, self.state.session.goal, l),
+                    user,
+                    self._read_output_language(),
+                )
                 self.state.items = self._apply(validate_llm_output(parsed))
                 self._transcript_len_at_last = len(self.state.transcript)
                 await self._persist()
@@ -343,7 +357,12 @@ class CoachingEngine:
             try:
                 system = build_system(self.template, self.state.session.goal, self._read_output_language())
                 user = build_user(self.state)
-                parsed = await self._llm_with_timeout(system, user)
+                parsed = await self._llm_pivot_then_parse_json(
+                    system,
+                    lambda l: build_system(self.template, self.state.session.goal, l),
+                    user,
+                    self._read_output_language(),
+                )
                 self.state.items = self._apply(validate_llm_output(parsed))
                 await self._persist()
                 await self._safe_send(_coaching_update("final", version, self.state.items))
@@ -361,11 +380,43 @@ class CoachingEngine:
                 self._in_progress = False
                 self._last_ts = time.time()
 
-    async def _llm_with_timeout(self, system: str, user: str) -> dict:
-        return await asyncio.wait_for(
-            self._get_llm().chat_json(system, user),
-            timeout=self._llm_timeout_s,
-        )
+    async def _llm_pivot_then_parse_json(
+        self,
+        system: str,
+        system_factory: Callable[[str], str],
+        user: str,
+        lang: str,
+    ) -> dict:
+        """pivot-aware chat_text 调用 → JSON dict。
+
+        system 是主路 system（调用方已构建好——保证 spy 能看到首次构建）。
+        system_factory 仅在 pivot 时按 fallback_lang 重建 system。
+
+        走 chat_text(..., json_mode=True)：raw text 用于 detect_script / 解析。
+        chat_json 的 fence+parse 逻辑在这里镜像复刻（_extract_json_dict）。
+        """
+        async def _call(s: str, u: str) -> str:
+            return await asyncio.wait_for(
+                self._get_llm().chat_text(s, u, json_mode=True),
+                timeout=self._llm_timeout_s,
+            )
+        text, _ = await with_lang_fallback(_call, system, system_factory, user, lang)
+        return self._extract_json_dict(text)
+
+    def _extract_json_dict(self, text: str) -> dict:
+        """Extract first {...} block and parse — mirrors chat_json fence+parse logic."""
+        fence = re.search(r"\{.*\}", text, re.DOTALL)
+        if fence is None:
+            raise LLMError(
+                Keys.LLM_NO_JSON_BLOCK, http_status=502, snippet=text[:200],
+            )
+        try:
+            return json.loads(fence.group(0))
+        except json.JSONDecodeError as e:
+            raise LLMError(
+                Keys.LLM_INVALID_JSON, http_status=502,
+                err=str(e), json_str=text[:200],
+            ) from e
 
     def _get_llm(self) -> LLMProvider:
         """现取 LLM 单例：admin 改 base_url 后 factory.invalidate 已 aclose 旧 provider，

@@ -34,12 +34,15 @@ ALL_B_KEYS: list[str] = [
     "session.idle_check_interval_s",
     "session.liveness_window_s",
     "session.max_concurrent",
+    "ocr.type", "ocr.base_url", "ocr.api_key", "ocr.secret_key", "ocr.model",
 ]
 
 # 敏感字段（GET 返 null，PUT 空 = 不动）。只列 ALL_B_KEYS 内的键：
 # 白名单外的键本来就不可写，列进去只会让 GET 组输出凭空多一个 null 字段。
 SENSITIVE_KEYS: frozenset[str] = frozenset({
     "llm.api_key",
+    "ocr.api_key",
+    "ocr.secret_key",
     "system.jwt_secret",
 })
 
@@ -61,12 +64,18 @@ NUMERIC_KEYS: dict[str, type] = {
 
 # 枚举 key 的合法清单：写入前校验。坏值若落库，admin 配置页会把脏值
 # 显示给用户；运行时 llm.output_language 错值会让 LLM 报错或行为异常。
+# LLM 输出语种从 app.core.i18n.lang_meta.derived_output_language_enum() 派生——
+# 加语种只需改 _LANG_META 一处。
+from app.core.i18n.lang_meta import derived_output_language_enum
+
 ENUM_KEYS: dict[str, set[str]] = {
     # FunASR 实际支持 {zh, en, ja, ko, yue, auto}，但我们只把常用的 3 个
     # 暴露给管理员——粤语场景明确支持（用户需求），ja/ko 当前无需求。
     "asr.language": {"zh", "yue", "en"},
     # LLM 输出语种：跟 ASR 是独立维度（详见 plan Task 2.5 注释）。
-    "llm.output_language": {"zh_cn", "zh_tw", "en"},
+    "llm.output_language": derived_output_language_enum(),
+    # OCR 模型类型：openai 兼容（qwen-vl、gpt-4o）或百度
+    "ocr.type": {"openai", "baidu"},
 }
 
 
@@ -127,6 +136,12 @@ DEFAULTS: dict[str, str] = {
     "session.liveness_window_s": "60.0",
     # 全局同时活跃访谈上限（= FunASR 房间容量）。suspended 不占名额。
     "session.max_concurrent": "10",
+    # OCR（默认使用百度 OCR，api_key 为 access_token）
+    "ocr.type": "baidu",
+    "ocr.base_url": "https://aip.baidubce.com",
+    "ocr.api_key": "",
+    "ocr.secret_key": "",
+    "ocr.model": "general_basic",
 }
 
 
@@ -336,6 +351,17 @@ async def get_session_runtime_config() -> dict[str, float]:
         "idle_timeout_s": float(await s.get("session.idle_timeout_s") or "1800.0"),
         "idle_check_interval_s": float(await s.get("session.idle_check_interval_s") or "30.0"),
         "liveness_window_s": float(await s.get("session.liveness_window_s") or "60.0"),
+    }
+
+
+async def get_ocr_config() -> dict[str, str]:
+    s = get_config_store()
+    return {
+        "type": await s.get("ocr.type") or "baidu",
+        "base_url": await s.get("ocr.base_url") or "",
+        "api_key": await s.get("ocr.api_key") or "",
+        "secret_key": await s.get("ocr.secret_key") or "",
+        "model": await s.get("ocr.model") or "",
     }
 
 

@@ -90,6 +90,17 @@ class Keys(StrEnum):
     DIAG_ASR_NO_RESULT = "diag.asr.no_result"
     DIAG_ASR_OK = "diag.asr.ok"
 
+    # ---- Diagnostics (OCR) ----
+    DIAG_OCR_CONFIG_MISSING = "diag.ocr.config_missing"
+    DIAG_OCR_UNREACHABLE = "diag.ocr.unreachable"
+    DIAG_OCR_AUTH_FAIL = "diag.ocr.auth_fail"
+    DIAG_OCR_QUOTA = "diag.ocr.quota"
+    DIAG_OCR_SERVICE_FAIL = "diag.ocr.service_fail"
+    DIAG_OCR_INVOKE_FAIL_TYPED = "diag.ocr.invoke_fail_typed"
+    DIAG_OCR_TIMEOUT = "diag.ocr.timeout"
+    DIAG_OCR_BAD_IMAGE = "diag.ocr.bad_image"
+    DIAG_OCR_OK = "diag.ocr.ok"
+
     # ---- Startup / settings / secrets ----
     STARTUP_ADMIN_PASSWORD_MISSING = "startup.admin_password_missing"
     STARTUP_DATABASE_MIGRATION_FAIL = "startup.database_migration_fail"

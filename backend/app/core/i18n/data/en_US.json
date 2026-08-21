@@ -69,6 +69,15 @@
   "diag.asr.dead": "ASR connected but returned no results (service stalled?)",
   "diag.asr.no_result": "ASR connected but no text recognized (ws_url may point to an empty model or sample too short)",
   "diag.asr.ok": "ASR connected and recognized text",
+  "diag.ocr.config_missing": "OCR not configured (missing: {missing}), please fill in at Config",
+  "diag.ocr.unreachable": "Cannot connect to OCR service: {detail}",
+  "diag.ocr.auth_fail": "OCR authentication failed (HTTP {status}): wrong key/permission",
+  "diag.ocr.quota": "OCR rate limited (HTTP {status})",
+  "diag.ocr.service_fail": "OCR service error (HTTP {status}): {snippet}",
+  "diag.ocr.invoke_fail_typed": "OCR call error: {type}: {detail}",
+  "diag.ocr.timeout": "OCR call timed out",
+  "diag.ocr.bad_image": "Failed to read test image: {detail}",
+  "diag.ocr.ok": "OCR connection normal (service available)",
 
   "startup.admin_password_missing": "APP_ADMIN_PASSWORD is not set, configure it in .env or env var and restart",
   "startup.database_migration_fail": "alembic upgrade head failed:\n{stdout}\n{stderr}",
@@ -78,5 +87,16 @@
   "password.too_short_min": "Password too short: requires ≥ {min} chars, got {actual}",
   "password.too_long": "Password exceeds bcrypt limit: UTF-8 bytes {byte_len} > {max}",
   "password.too_weak": "Password is in the weak-password blacklist ({count} entries), please choose another",
-  "config.invalid_enum_value": "Invalid value for {field}: {value} (allowed: {allowed})"
+  "config.invalid_enum_value": "Invalid value for {field}: {value} (allowed: {allowed})",
+
+  "i18n.extract.directive.zh_cn": "Write all field values in 简体中文 (Simplified Chinese). Translate the source text to 简体中文 as needed.",
+  "i18n.extract.directive.zh_tw": "Write all field values in 繁體中文 (Traditional Chinese). Translate the source text to 繁體中文 as needed.",
+  "i18n.extract.directive.en":    "Write all field values in English (English). Translate the source text to English as needed.",
+  "i18n.extract.directive.vi":    "Write all field values in Tiếng Việt (Vietnamese). Translate the source text to Tiếng Việt as needed.",
+  "i18n.extract.directive.ru":    "Write all field values in Русский (Russian). Translate the source text to Русский as needed.",
+  "i18n.extract.directive.ko":    "Write all field values in 한국어 (Korean). Translate the source text to 한국어 as needed.",
+  "i18n.extract.directive.ja":    "Write all field values in 日本語 (Japanese). Translate the source text to 日本語 as needed.",
+  "i18n.extract.directive.fr":    "Write all field values in Français (French). Translate the source text to Français as needed.",
+  "i18n.extract.directive.de":    "Write all field values in Deutsch (German). Translate the source text to Deutsch as needed.",
+  "i18n.extract.directive.es":    "Write all field values in Español (Spanish). Translate the source text to Español as needed."
 }

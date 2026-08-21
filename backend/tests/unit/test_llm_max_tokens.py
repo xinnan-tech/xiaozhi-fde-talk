@@ -51,3 +51,27 @@ async def test_chat_text_body_has_no_max_tokens():
     _capture_post(provider, captured)
     await provider.chat_text("sys", "usr")
     assert "max_tokens" not in captured
+
+
+@pytest.mark.asyncio
+async def test_chat_text_json_mode_true_inherits_three_piece_set():
+    """chat_text(..., json_mode=True) 带三件套——pivot 路径需要 raw text + 三件套。"""
+    provider = _make_provider()
+    captured: dict = {}
+    _capture_post(provider, captured)
+    await provider.chat_text("sys", "usr", json_mode=True)
+    assert captured["max_tokens"] == 1500
+    assert captured["response_format"] == {"type": "json_object"}
+    assert captured["temperature"] == 0.3
+
+
+@pytest.mark.asyncio
+async def test_chat_text_json_mode_false_default_unchanged():
+    """json_mode 默认 False——chat_text 行为不变（报告 Markdown 长文路径）。"""
+    provider = _make_provider()
+    captured: dict = {}
+    _capture_post(provider, captured)
+    await provider.chat_text("sys", "usr")
+    assert "max_tokens" not in captured
+    assert "response_format" not in captured
+    assert captured["temperature"] == 0.4

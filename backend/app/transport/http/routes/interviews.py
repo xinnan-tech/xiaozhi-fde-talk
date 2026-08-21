@@ -8,8 +8,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
+from app.core.config_store import get_config_store
 from app.core.i18n import Keys, current_locale, t
 from app.core.i18n.errors import I18nError
+from app.core.i18n.extract_prompts import build_extract_system
+from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
 from app.services.coaching.engine import TERMINAL_SESSION_STATUSES
@@ -19,7 +22,11 @@ from app.services.sessions.runtime import registry
 from app.transport.http.dependencies import get_current_user
 from app.transport.http.schemas import (
     CreateInterviewRequest,
+    ExtractRequest,
+    ExtractResponse,
     InterviewStatisticsResponse,
+    OCRRequest,
+    OCRResponse,
     UpdateInterviewRequest,
 )
 
@@ -338,3 +345,104 @@ async def unskip_item(
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     await manager.set_item_status(session_id, item_id, "unskip")
     return {"ok": True}
+
+
+@router.post("/extract", response_model=ExtractResponse)
+async def extract_fields(
+    req: ExtractRequest,
+    _: CurrentUser = Depends(get_current_user),
+):
+    """接收转写文本 + 目标字段列表 → LLM 提取 → 返回字段值字典。"""
+    from app.adapters.llm.base import LLMError
+    from app.adapters.llm.factory import get_llm
+
+    if not req.transcript.strip():
+        return ExtractResponse(values={k: "" for k in req.fields})
+
+    # 构建字段说明（包含类型和格式）
+    field_lines = []
+    for k in req.fields:
+        label = req.field_labels.get(k, k)
+        ftype = req.field_types.get(k, 'text')
+        hint = ""
+        if ftype == 'datetime':
+            hint = '（格式：YYYY-MM-DDTHH:MM，如 2026-08-25T15:00）'
+        elif ftype == 'duration':
+            hint = '（只填数字分钟，如 45）'
+        field_lines.append(f"- {k}：{label}{hint}")
+
+    from datetime import date
+    today = date.today().isoformat()  # e.g. "2026-08-19"
+
+    # 格式化已填内容供提示词用
+    if req.current_values:
+        current_lines = [f"- {k}：{v}" for k, v in req.current_values.items() if v]
+        current_values_str = "\n".join(current_lines) if current_lines else "（全部为空）"
+    else:
+        current_values_str = "（全部为空）"
+
+    llm = get_llm()
+    output_language = (await get_config_store().get("llm.output_language")) or "zh_cn"
+    system_prompt = build_extract_system(
+        output_language,
+        today=today,
+        current_values=current_values_str,
+        transcript=req.transcript,
+        fields=req.fields,
+    )
+    user_prompt = (
+        f"【待提取字段（仅限以下 key，禁止创建新字段）】\n" + "\n".join(field_lines) + "\n\n"
+        "请返回所有字段的完整 JSON 对象（包含已填内容+本次补充）："
+    )
+    try:
+        result = await llm.chat_json(system_prompt, user_prompt)
+        logger.info(f"[extract] LLM 原始返回: {result}")
+        # 合并：current_values 兜底，LLM 结果优先级
+        values = {}
+        for k in req.fields:
+            llm_val = result.get(k)
+            if llm_val not in (None, ""):
+                values[k] = str(llm_val)
+            else:
+                values[k] = req.current_values.get(k, "")
+        logger.info(f"[extract] 合并后 values: {values}")
+    except LLMError:
+        # LLM 失败时保留当前值
+        values = dict(req.current_values)
+
+    return ExtractResponse(values=values)
+
+
+@router.post("/ocr", response_model=OCRResponse)
+async def recognize_image(
+    req: OCRRequest,
+    _: CurrentUser = Depends(get_current_user),
+):
+    """接收 base64 编码的图片，用后端视觉模型提取文字。
+
+    前端「拍名片」先用 canvas 拍图 → 转 base64 → 送本接口 → 返回文字，
+    再调 /extract 填字段。
+    """
+    import base64 as _b64
+
+    try:
+        image_bytes = _b64.b64decode(req.image_base64)
+    except Exception:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "图片 base64 解码失败")
+
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "图片超过 10MB")
+
+    try:
+        from app.adapters.ocr.factory import get_ocr
+        ocr = get_ocr()
+        if not ocr.configured:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "OCR 未配置，请到「⚙️ 后端配置」填写 ocr.base_url / ocr.api_key / ocr.model")
+        text = await ocr.recognize(
+            image_bytes,
+            prompt=OCR_PROMPT,
+        )
+    except Exception as e:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"OCR 识别失败：{e}") from e
+
+    return OCRResponse(text=text or "")

@@ -126,9 +126,10 @@ async def test_engine_recompute_requires_llm(make_state):
 
 
 async def test_engine_llm_timeout(make_state):
+    """chat_text 调 chat_text(..., json_mode=True) + wait_for 超时 → TimeoutError 透传。"""
     engine = CoachingEngine(make_state(), lambda m: None)
     engine._llm = AsyncMock()
-    engine._llm.chat_json = AsyncMock(return_value={"items": []})
+    engine._llm.chat_text = AsyncMock(return_value='{"items": []}')
     engine._get_llm = lambda: engine._llm
 
     async def raise_timeout(_future, *, timeout=None):  # pylint: disable=unused-argument
@@ -136,15 +137,19 @@ async def test_engine_llm_timeout(make_state):
 
     with patch("asyncio.wait_for", side_effect=raise_timeout):
         try:
-            await engine._llm_with_timeout("sys", "user")
+            await engine._llm_pivot_then_parse_json("sys", lambda _l: "sys", "user", "en")
             assert False, "should raise TimeoutError"
         except asyncio.TimeoutError:
             pass
 
 
 async def test_engine_llm_success(make_state):
+    """chat_text 返回 JSON 字符串 → _llm_pivot_then_parse_json 解析为 dict。"""
     engine = CoachingEngine(make_state(), lambda m: None)
     engine._llm = AsyncMock()
-    engine._llm.chat_json = AsyncMock(return_value={"items": []})
+    engine._llm.chat_text = AsyncMock(return_value='{"items": []}')
     engine._get_llm = lambda: engine._llm
-    assert await engine._llm_with_timeout("sys", "user") == {"items": []}
+    parsed = await engine._llm_pivot_then_parse_json(
+        "sys", lambda _l: "sys", "user", "en",
+    )
+    assert parsed == {"items": []}

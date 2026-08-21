@@ -1,6 +1,7 @@
 """engine.first_generate：首评生成——幂等、锁内复查、失败保种子、顺序化 priority。"""
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock
 
 from app.adapters.llm.base import LLMError
@@ -11,9 +12,10 @@ _PAYLOAD = {"items": [
     {"id": "objective", "text": "定制版目标问题", "status": "todo"},
     {"id": None, "text": "新定制问题", "status": "todo"},
 ]}
+_PAYLOAD_TEXT = json.dumps(_PAYLOAD, ensure_ascii=False)
 
 
-def _engine(make_state, payload=_PAYLOAD):
+def _engine(make_state, payload=_PAYLOAD, payload_text=_PAYLOAD_TEXT):
     sent = []
 
     async def send(msg):
@@ -21,6 +23,9 @@ def _engine(make_state, payload=_PAYLOAD):
 
     engine = CoachingEngine(make_state(), send)
     engine._llm = AsyncMock()
+    # Stage 4 pivot：production 经 chat_text 取原文 → JSON parse 在 engine 侧做。
+    engine._llm.chat_text.return_value = payload_text
+    # 兼容 chat_json 旧 mock（一些测试 fixture 仍用 chat_json.assert_*）。
     engine._llm.chat_json.return_value = payload
     # _llm_with_timeout 经 _get_llm() 现取工厂单例、不读 self._llm（P2-3），
     # 须按既有测试惯例（test_engine.py:102 等 6 处）把入口指回 mock，否则打到真实 LLM
@@ -44,7 +49,7 @@ async def test_first_generate_skips_when_flag_set(make_state):
     engine, sent = _engine(make_state)
     engine.state.session.first_batch_generated = True
     await engine.first_generate()
-    engine._llm.chat_json.assert_not_awaited()
+    engine._llm.chat_text.assert_not_awaited()
     assert sent == []
 
 
@@ -52,13 +57,13 @@ async def test_first_generate_skips_when_transcript_started(make_state, make_seg
     engine, sent = _engine(make_state)
     engine.state.transcript.append(make_seg("s1", "已经聊上了"))
     await engine.first_generate()
-    engine._llm.chat_json.assert_not_awaited()
+    engine._llm.chat_text.assert_not_awaited()
     assert sent == []
 
 
 async def test_first_generate_llm_error_keeps_seed(make_state):
     engine, sent = _engine(make_state)
-    engine._llm.chat_json.side_effect = LLMError("provider down")
+    engine._llm.chat_text.side_effect = LLMError("provider down")
     await engine.first_generate()
     assert engine.state.session.first_batch_generated is False
     assert len(engine.state.items) == 6            # 模板种子原样
@@ -70,7 +75,7 @@ async def test_first_generate_skips_terminal_status(make_state):
     engine, sent = _engine(make_state)
     engine.state.session.status = SessionStatus.ENDED
     await engine.first_generate()
-    engine._llm.chat_json.assert_not_awaited()
+    engine._llm.chat_text.assert_not_awaited()
     assert sent == []
 
 
@@ -88,7 +93,7 @@ async def test_first_compute_no_kick_when_generated(make_state, wait_for_tasks):
     engine.state.session.first_batch_generated = True
     await engine.first_compute()
     await wait_for_tasks()
-    engine._llm.chat_json.assert_not_awaited()
+    engine._llm.chat_text.assert_not_awaited()
     assert len(sent) == 1
 
 

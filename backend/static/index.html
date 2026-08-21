@@ -117,12 +117,37 @@
     </div>
 
     <!-- 创建/编辑视图 -->
-    <div id="viewCreate" style="display:none;">
-      <div class="row" style="justify-content: space-between;">
-        <h2 style="margin:0;" id="createTitle" data-i18n="create.title_new">新建访谈</h2>
-        <button class="outline" onclick="navigate('list')" data-i18n="create.back">← 返回列表</button>
+    <div id="viewCreate" style="display:none; position:relative;">
+      <div class="row" style="justify-content: space-between; align-items:center;">
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+          <h2 style="margin:0;" id="createTitle">新建访谈</h2>
+          <button id="btnRecord" onclick="recordToggle()"
+            style="background:#2563eb; font-size:13px; padding:6px 16px; user-select:none;">
+            🎤 录音
+          </button>
+          <button onclick="captureBusinessCard()"
+            style="background:#16a34a; font-size:13px; padding:6px 16px; user-select:none;">
+            📷 拍名片
+          </button>
+          <input id="pasteTextInput" type="text" placeholder="粘贴文字…" style="flex:1; min-width:120px; font-size:13px; padding:4px 8px; border:1px solid #ccc; border-radius:4px;">
+          <button onclick="doPasteExtract(document.getElementById('pasteTextInput').value)"
+            style="background:#7c3aed; font-size:13px; padding:6px 12px; user-select:none;">
+            📋 粘贴提取
+          </button>
+        </div>
+        <button class="outline" onclick="navigate('list')">← 返回列表</button>
       </div>
-      <div class="muted" data-i18n="create.help">填写本次访谈的基本信息；目标越具体，辅导清单越准。</div>
+      <!-- 录音遮罩层：覆盖下方表单区域，停止按钮浮在上方 -->
+      <div id="recOverlay" style="display:none; position:absolute; top:52px; left:0; right:0; bottom:0; background:rgba(0,0,0,0.82); border-radius:0 0 8px 8px; z-index:20;">
+        <div style="padding:14px 16px;">
+          <div class="row" style="margin-bottom:10px; gap:8px;">
+            <button onclick="recordStop()" class="red" style="font-size:13px; padding:6px 16px; z-index:30; position:relative;">⏹ 停止录音</button>
+            <span id="recDuration" style="font-size:13px; color:#ddd; line-height:30px;">00:00</span>
+          </div>
+          <div id="recTranscript" style="font-size:13px; color:#e2e8f0; line-height:1.6; min-height:40px; max-height:100px; overflow-y:auto;"></div>
+        </div>
+      </div>
+      <div class="muted">填写本次访谈的基本信息；目标越具体，辅导清单越准。</div>
       <div class="form-row">
         <label data-i18n="create.field.template">访谈模板</label>
         <select id="fTemplate" onchange="loadCreateForm(this.value)"></select>
@@ -206,6 +231,7 @@
         <button id="btnDiagAll" onclick="runDiag('all')" data-i18n="config.diag.run_all">运行全部</button>
         <button class="outline" onclick="runDiag('asr')" data-i18n="config.diag.run_asr">仅 ASR</button>
         <button class="outline" onclick="runDiag('llm')" data-i18n="config.diag.run_llm">仅 LLM</button>
+        <button class="outline" onclick="runDiag('ocr')" data-i18n="config.diag.run_ocr">仅 OCR</button>
         <span class="muted" id="diagStatus"></span>
       </div>
       <div id="diagResults" style="margin-top: 10px;"></div>
@@ -590,6 +616,7 @@ async function openCreate() {
   document.getElementById('fTemplate').disabled = false;
   document.getElementById('fTitle').value = '';
   document.getElementById('fGoal').value = '';
+  document.getElementById('recOverlay').style.display = 'none';
   const r = await fetch(`${ORIGIN}/api/v1/templates`, { headers: _apiHeaders({ 'Authorization': 'Bearer ' + token }) });
   if (!r.ok) { document.getElementById('createStatus').textContent = t('msg.template_load_failed', { status: r.status }); return; }
   const tpls = (await r.json()).items || [];
@@ -598,6 +625,7 @@ async function openCreate() {
   if (tpls.length) {
     await loadCreateForm(tpls[0].id);
     applyInterviewDefaults();   // 模板就绪后填默认值（用户可继续改）
+    formReady = true;           // 表单就绪，粘贴功能开放
   }
 }
 
@@ -1555,9 +1583,9 @@ async function runDiag(kind) {
     }
     const data = JSON.parse(raw);
     let html = '';
-    const labelFor = (kind) => kind === 'asr' ? t('diag.label.asr') : t('diag.label.llm');
+    const labelFor = (kind) => t('diag.label.' + kind);
     if (kind === 'all') {
-      html = diagCardHTML(labelFor('asr'), data.asr) + diagCardHTML(labelFor('llm'), data.llm);
+      html = diagCardHTML(labelFor('asr'), data.asr) + diagCardHTML(labelFor('llm'), data.llm) + (data.ocr ? diagCardHTML(labelFor('ocr'), data.ocr) : '');
       statusEl.textContent = data.ok ? t('msg.test_all_ok') : t('msg.test_all_fail');
     } else {
       html = diagCardHTML(labelFor(kind), data);
@@ -1572,9 +1600,9 @@ async function runDiag(kind) {
 }
 
 // ===== 后端配置 Tab =====
-const CONFIG_GROUPS = ['llm', 'asr', 'coach', 'auth', 'session'];
+const CONFIG_GROUPS = ['llm', 'asr', 'coach', 'auth', 'session', 'ocr'];
 // 字段名（去掉分组前缀）→ 敏感
-const CONFIG_SENSITIVE = new Set(['api_key', 'demo_password']);
+const CONFIG_SENSITIVE = new Set(['api_key', 'secret_key', 'demo_password']);
 // 字段类型提示（按字段名）
 const CONFIG_NUMERIC = new Set(['sample_rate', 'jwt_expire_minutes', 'max_concurrent', 'max_pending_segments']);
 const CONFIG_FLOAT = new Set(['pause_s', 'min_interval_s', 'llm_timeout_s', 'grace_period_s']);
@@ -1698,6 +1726,373 @@ async function saveConfigGroup(group) {
     status.textContent = '❌ ' + (await r.text());
   }
 }
+
+// ===== 语音填充（创建访谈表单自动填表）=====
+let _recWs = null;       // ASR WebSocket 连接
+let _recMr = null;       // MediaRecorder
+let _recTranscripts = []; // 本次录音的转写文本片段
+let _recStartTime = null;
+let _recDurationTimer = null;
+let formReady = false;    // loadCreateForm + applyInterviewDefaults 完成后才开放粘贴
+
+function getRecMime() {
+  for (const m of ["audio/webm;codecs=opus", "audio/webm"]) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return "";
+}
+
+function recordToggle() {
+  if (_recWs || _recMr) {
+    recordStop();
+  } else {
+    recordStart();
+  }
+}
+
+async function recordStart() {
+  _recTranscripts = [];
+  _recStopped = false;
+  _recStartTime = Date.now();
+
+  // 显示遮罩层
+  const overlay = document.getElementById("recOverlay");
+  const transcriptBox = document.getElementById("recTranscript");
+  const btn = document.getElementById("btnRecord");
+  if (overlay) { overlay.style.display = ''; }
+  if (transcriptBox) transcriptBox.textContent = '正在连接…';
+  if (btn) { btn.textContent = '🔴 录音中…'; btn.style.background = '#dc2626'; btn.disabled = true; }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+  } catch (err) {
+    if (transcriptBox) transcriptBox.textContent = '❌ 麦克风不可用：' + err.message;
+    cleanupRec();
+    return;
+  }
+
+  // 先建 WS，等 onopen 再 start MediaRecorder，避免音频帧被丢掉
+  _recWs = new WebSocket(`${WS_BASE}/ws/v1/asr`);
+
+  _recWs.onopen = () => {
+    if (transcriptBox) transcriptBox.textContent = '🎙️ 录音中，请说话…';
+    _recMr = new MediaRecorder(stream, { mimeType: getRecMime() });
+    _recMr.ondataavailable = e => {
+      if (!e.data || e.data.size === 0 || !_recWs || _recWs.readyState !== WebSocket.OPEN) return;
+      _recWs.send(e.data);
+    };
+    _recMr.start(200);
+  };
+  _recWs.onmessage = ev => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "asr") {
+      _recTranscripts.push(msg.text);
+      if (transcriptBox) transcriptBox.textContent = _recTranscripts.join(' ');
+    } else if (msg.type === "stopped") {
+      recordStop();
+    }
+  };
+  _recWs.onclose = () => { if (_recWs) recordStop(); };
+  _recWs.onerror = () => { if (_recWs) _recWs.close(); };
+
+  // 计时器
+  _recDurationTimer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - _recStartTime) / 1000);
+    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    const d = document.getElementById("recDuration");
+    if (d) d.textContent = `${m}:${s}`;
+  }, 1000);
+}
+
+let _recStopped = false;
+function recordStop() {
+  if (_recStopped) return;
+  _recStopped = true;
+  if (_recDurationTimer) { clearInterval(_recDurationTimer); _recDurationTimer = null; }
+  if (_recMr && _recMr.state !== "inactive") _recMr.stop();
+  if (_recWs && _recWs.readyState === WebSocket.OPEN) _recWs.close();
+  setTimeout(() => doExtract(), 800);
+}
+
+function cleanupRec() {
+  if (_recDurationTimer) { clearInterval(_recDurationTimer); _recDurationTimer = null; }
+  if (_recMr) {
+    try { _recMr.stop(); } catch {}
+    _recMr.stream.getTracks().forEach(t => t.stop());
+    _recMr = null;
+  }
+  if (_recWs) { _recWs.close(); _recWs = null; }
+  const overlay = document.getElementById("recOverlay");
+  if (overlay) overlay.style.display = 'none';
+  const btn = document.getElementById("btnRecord");
+  if (btn) { btn.textContent = '🎤 开始录音'; btn.style.background = '#2563eb'; btn.disabled = false; }
+}
+
+async function doExtract() {
+  const text = _recTranscripts.join(' ').trim();
+  const transcriptBox = document.getElementById("recTranscript");
+  if (transcriptBox) transcriptBox.textContent = '🔄 识别中…';
+  const templateId = document.getElementById("fTemplate")?.value;
+
+  if (!text) {
+    if (transcriptBox) transcriptBox.textContent = '未识别到语音，请重试';
+    cleanupRec();
+    return;
+  }
+
+  const fieldKeys = [];
+  const fieldLabels = {};
+  const fieldTypes = {};
+  document.querySelectorAll('#fBaseFields input[id^="fbase_"], #fBaseFields select[id^="fbase_"]').forEach(el => {
+    const k = el.id.replace('fbase_', '');
+    if (k) fieldKeys.push(k);
+  });
+  const fields = (currentTemplate?.session?.base_fields) || [];
+  fields.forEach(f => {
+    fieldLabels[f.key] = f.label || f.key;
+    fieldTypes[f.key] = f.type || 'text';
+  });
+  fieldKeys.push('title');
+  fieldLabels['title'] = '访谈名称';
+  fieldKeys.push('goal');
+  fieldLabels['goal'] = '本次访谈目标';
+
+  // 收集当前已填值
+  const currentValues = {};
+  document.querySelectorAll('#fBaseFields input[id^="fbase_"], #fBaseFields select[id^="fbase_"]').forEach(el => {
+    const k = el.id.replace('fbase_', '');
+    if (k && el.value) currentValues[k] = el.value;
+  });
+  const titleEl = document.getElementById("fTitle");
+  if (titleEl?.value) currentValues['title'] = titleEl.value;
+  const goalEl = document.getElementById("fGoal");
+  if (goalEl?.value) currentValues['goal'] = goalEl.value;
+
+  try {
+    const r = await fetch(`${ORIGIN}/api/v1/interviews/extract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ transcript: text, template_id: templateId, fields: fieldKeys, field_labels: fieldLabels, field_types: fieldTypes, current_values: currentValues }),
+    });
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    const values = j.values || {};
+
+    for (const [k, v] of Object.entries(values)) {
+      if (!v) continue;
+      if (k === 'title') {
+        const el = document.getElementById("fTitle");
+        if (el) el.value = v;
+      } else if (k === 'goal') {
+        const el = document.getElementById("fGoal");
+        if (el) el.value = v;
+      } else {
+        const el = document.getElementById("fbase_" + k);
+        if (el) el.value = v;
+      }
+    }
+    if (transcriptBox) transcriptBox.textContent = '✅ 已提取：' + text;
+  } catch (e) {
+    if (transcriptBox) transcriptBox.textContent = '❌ 提取失败：' + e.message;
+  }
+  _recTranscripts = [];
+  setTimeout(() => cleanupRec(), 2000);
+}
+
+// ===== 粘贴提取 =====
+
+function showPasteHint(msg, isError) {
+  const old = document.getElementById('pasteHint');
+  if (old) old.remove();
+  const hint = document.createElement('div');
+  hint.id = 'pasteHint';
+  hint.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); background:' + (isError ? '#dc2626' : '#1e40af') + '; color:#fff; padding:10px 18px; border-radius:8px; font-size:13px; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,.3);';
+  hint.textContent = msg;
+  document.body.appendChild(hint);
+  setTimeout(() => hint.remove(), 3000);
+}
+
+async function doPasteExtract(text) {
+  if (!text) return;
+  if (!token) { showPasteHint('❌ 请先登录', true); return; }
+  if (!formReady) { showPasteHint('⏳ 表单加载中，请稍后重试', true); return; }
+
+  const templateId = document.getElementById("fTemplate")?.value;
+  const fieldKeys = [];
+  const fieldLabels = {};
+  document.querySelectorAll('#fBaseFields input[id^="fbase_"], #fBaseFields select[id^="fbase_"]').forEach(el => {
+    const k = el.id.replace('fbase_', '');
+    if (k) fieldKeys.push(k);
+  });
+  // 从 currentTemplate 读 label
+  const fields = (currentTemplate?.session?.base_fields) || [];
+  fields.forEach(f => { fieldLabels[f.key] = f.label || f.key; });
+  fieldKeys.push('title');
+  fieldLabels['title'] = '访谈名称';
+  fieldKeys.push('goal');
+  fieldLabels['goal'] = '本次访谈目标';
+
+  // 收集字段类型
+  const fieldTypes = {};
+  fields.forEach(f => { fieldTypes[f.key] = f.type || 'text'; });
+
+  // 收集当前已填值（不覆盖原则）
+  const currentValues = {};
+  document.querySelectorAll('#fBaseFields input[id^="fbase_"], #fBaseFields select[id^="fbase_"]').forEach(el => {
+    const k = el.id.replace('fbase_', '');
+    if (k && el.value) currentValues[k] = el.value;
+  });
+  const titleEl = document.getElementById("fTitle");
+  if (titleEl?.value) currentValues['title'] = titleEl.value;
+  const goalEl = document.getElementById("fGoal");
+  if (goalEl?.value) currentValues['goal'] = goalEl.value;
+
+  showPasteHint('🔍 正在提取…');
+  try {
+    const r = await fetch(`${ORIGIN}/api/v1/interviews/extract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ transcript: text, template_id: templateId, fields: fieldKeys, field_labels: fieldLabels, field_types: fieldTypes, current_values: currentValues }),
+    });
+    const j = await r.json();
+    if (!r.ok) { showPasteHint('❌ ' + (j.detail || r.status), true); return; }
+    const values = j.values || {};
+    let filled = 0;
+    for (const [k, v] of Object.entries(values)) {
+      if (!v) continue;
+      let finalVal = v;
+      // duration：匹配到最接近的 select option，没有则不填
+      if (k === 'duration') {
+        const opts = document.querySelectorAll('#fbase_duration option');
+        let best = null, bestDiff = Infinity;
+        for (const opt of opts) {
+          const diff = Math.abs(parseInt(opt.value) - parseInt(v));
+          if (diff < bestDiff) { bestDiff = diff; best = opt.value; }
+        }
+        finalVal = best || '';
+      }
+      if (k === 'title') {
+        const el = document.getElementById("fTitle");
+        if (el) { el.value = finalVal; filled++; }
+      } else if (k === 'goal') {
+        const el = document.getElementById("fGoal");
+        if (el) { el.value = finalVal; filled++; }
+      } else {
+        const el = document.getElementById("fbase_" + k);
+        if (el) { el.value = finalVal; filled++; }
+      }
+    }
+    showPasteHint(filled > 0 ? `✅ 已填入 ${filled} 个字段` : '⚠️ 未提取到新字段');
+  } catch (e) {
+    showPasteHint('❌ 网络错误：' + e.message, true);
+  }
+}
+
+// ===== 拍照名片 OCR =====
+let _cameraStream = null;
+let _cameraVideo = null;
+let _cameraCanvas = null;
+
+async function captureBusinessCard() {
+  try {
+    _cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    _cameraVideo = document.createElement('video');
+    _cameraVideo.srcObject = _cameraStream;
+    _cameraVideo.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:#000;object-fit:contain;';
+    _cameraVideo.autoplay = true;
+    document.body.appendChild(_cameraVideo);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = '✕ 取消';
+    cancelBtn.dataset.camctrl = '1';
+    cancelBtn.style.cssText = 'position:fixed;top:20px;left:20px;z-index:10000;background:#555;color:#fff;padding:8px 16px;border:none;border-radius:4px;font-size:14px;';
+    cancelBtn.onclick = closeCamera;
+    document.body.appendChild(cancelBtn);
+
+    const snapBtn = document.createElement('button');
+    snapBtn.textContent = '📷 拍照';
+    snapBtn.dataset.camctrl = '1';
+    snapBtn.style.cssText = 'position:fixed;bottom:40px;left:50%;transform:translateX(-50%);z-index:10000;background:#2563eb;color:#fff;padding:12px 32px;border:none;border-radius:8px;font-size:16px;';
+    snapBtn.onclick = takeCardPhoto;
+    document.body.appendChild(snapBtn);
+  } catch (e) {
+    showPasteHint('❌ 摄像头不可用：' + e.message, true);
+  }
+}
+
+function closeCamera() {
+  if (_cameraStream) { _cameraStream.getTracks().forEach(t => t.stop()); _cameraStream = null; }
+  if (_cameraVideo) { _cameraVideo.remove(); _cameraVideo = null; }
+  document.querySelectorAll('[data-camctrl]').forEach(el => el.remove());
+}
+
+function takeCardPhoto() {
+  if (!_cameraVideo || !_cameraStream) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = _cameraVideo.videoWidth;
+  canvas.height = _cameraVideo.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(_cameraVideo, 0, 0);
+  // 图像预处理：灰度 + 对比度增强
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imgData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i+1], b = data[i+2];
+    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    const contrast = 1.5;
+    const diff = gray - 128;
+    const out = Math.min(255, Math.max(0, 128 + diff * contrast));
+    data[i] = data[i+1] = data[i+2] = out;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  closeCamera();
+  showPasteHint('📷 识别中…');
+  // 优先调后端 OCR（视觉模型）；未配置则降级到 Tesseract.js
+  canvas.toBlob(blob => {
+    if (!blob) { showPasteHint('❌ 图片处理失败', true); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = reader.result.split(',')[1];
+      callBackendOCR(b64)
+        .then(text => { doPasteExtract(text); })
+        .catch(() => { fallbackTesseract(canvas); });
+    };
+    reader.readAsDataURL(blob);
+  }, 'image/jpeg', 0.9);
+}
+
+async function callBackendOCR(b64) {
+  const r = await fetch(`${ORIGIN}/api/v1/interviews/ocr`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ image_base64: b64 }),
+  });
+  if (r.status === 503) throw new Error('ocr_not_configured');
+  if (!r.ok) {
+    const err = await r.text().catch(() => '');
+    throw new Error(err || `HTTP ${r.status}`);
+  }
+  const data = await r.json();
+  if (!data.text) { showPasteHint('⚠️ 未识别到文字', true); return ''; }
+  return data.text;
+}
+
+function fallbackTesseract(canvas) {
+  showPasteHint('📷 后端 OCR 未配置，使用本地识别…');
+  Tesseract.recognize(canvas, 'eng+chi_sim', { logger: () => {} })
+    .then(result => {
+      const text = result.data.text.trim();
+      if (!text) { showPasteHint('⚠️ 未识别到文字', true); return; }
+      showPasteHint('🔍 正在提取字段…');
+      doPasteExtract(text);
+    })
+    .catch(e => showPasteHint('❌ OCR 失败：' + e.message, true));
+}
+
 </script>
 </body>
 </html>

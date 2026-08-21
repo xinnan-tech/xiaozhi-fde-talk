@@ -79,7 +79,8 @@ async def test_recompute_and_utterance_serialize(make_state):
     rt._send_fn = AsyncMock()
     rt._flush_interval_s = 10.0  # 抑制 lingering 去抖任务
     rt.engine._llm = AsyncMock()
-    rt.engine._llm.chat_json = AsyncMock(return_value={"items": []})
+    # Stage 4 pivot：production 经 chat_text 取原文 → JSON parse 在 engine 侧做。
+    rt.engine._llm.chat_text = AsyncMock(return_value='{"items": []}')
     rt.engine._get_llm = lambda: rt.engine._llm
     log = []
 

@@ -82,6 +82,7 @@
   "config.diag.run_all": "运行全部",
   "config.diag.run_asr": "仅 ASR",
   "config.diag.run_llm": "仅 LLM",
+  "config.diag.run_ocr": "仅 OCR",
   "config.save_hint": "修改后点击「保存」立即生效（LLM/ASR 客户端会自动重载）。",
   "config.sensitive_hint": "敏感字段显示为 **********，留空 = 保留原值。",
   "config.opt.zh": "普通话",
@@ -198,6 +199,7 @@
 
   "diag.label.asr": "ASR 语音识别",
   "diag.label.llm": "LLM 大语言模型",
+  "diag.label.ocr": "OCR 文字识别",
   "diag.label.ok": "✅ 正常",
   "diag.label.config_missing": "⚠️ 配置缺失",
   "diag.label.unreachable": "🔌 连不上",

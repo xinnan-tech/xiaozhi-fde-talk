@@ -48,8 +48,13 @@ def test_trailing_spaces_treated_as_empty():
     assert out.count("Not mentioned in this interview.") == 2
 
 
-def test_unknown_language_falls_back_to_zh_cn():
-    """未知语种应回退到 zh_cn 短语，不抛错。"""
+def test_unknown_language_falls_back_to_en():
+    """未知语种应回退到 en 短语（消除英文报告被注入中文的隐性 bug）。
+
+    Stage 5：兜底回退从 zh_cn 改 en——与 get_lang_meta 未知 lang fallback 一致。
+    """
     md = "- 机会点："
     out = _fill_dangling_labels(md, language="klingon")
-    assert "- 机会点： 本次访谈未提及" in out
+    assert "- 机会点： Not mentioned in this interview." in out
+    # 不再被注入中文短语
+    assert "本次访谈未提及" not in out

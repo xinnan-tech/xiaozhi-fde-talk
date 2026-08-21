@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useNav } from "@/layout/hooks/useNav";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import botPng from "@/assets/images/bot.png";
 import botSmilePng from "@/assets/images/bot-smile.png";
 
 const { isCollapse } = useNav();
+const { t } = useI18n();
 const dialogStore = useDialogStoreHook();
 
 const botCardRef = ref();
@@ -37,7 +39,12 @@ const handleMouseLeave = () => {
       :src="isHovered ? botSmilePng : botPng"
       alt="bot"
     />
-    <el-tooltip v-else content="创建访谈" placement="right" effect="light">
+    <el-tooltip
+      v-else
+      :content="t('sidebar.assistant.create')"
+      placement="right"
+      effect="light"
+    >
       <img
         class="bot-avatar-small"
         :src="isHovered ? botSmilePng : botPng"
@@ -47,20 +54,28 @@ const handleMouseLeave = () => {
     </el-tooltip>
     <div class="bot-card-content">
       <div v-if="!isCollapse" class="bot-info">
-        <div class="bot-name">小智AI助手</div>
-        <div class="bot-status">您好！我可以帮您：</div>
-        <ul class="bot-features">
-          <li>生成访谈编号</li>
-          <li>一句话建访谈</li>
-          <li>开启即出提示</li>
-          <li>结束即得文档</li>
-        </ul>
+        <div class="bot-name">{{ t("sidebar.assistant.name") }}</div>
+        <div class="bot-status">{{ t("sidebar.assistant.status") }}</div>
+        <div class="bot-features">
+          <div class="bot-feature-item">
+            {{ t("sidebar.assistant.feature_id") }}
+          </div>
+          <div class="bot-feature-item">
+            {{ t("sidebar.assistant.feature_quick_create") }}
+          </div>
+          <div class="bot-feature-item">
+            {{ t("sidebar.assistant.feature_prompt") }}
+          </div>
+          <div class="bot-feature-item">
+            {{ t("sidebar.assistant.feature_report") }}
+          </div>
+        </div>
         <el-button
           class="create-btn"
           type="primary"
           @click.stop="handleCreateInterview"
         >
-          创建访谈
+          {{ t("sidebar.assistant.create") }}
         </el-button>
       </div>
     </div>
@@ -150,16 +165,31 @@ const handleMouseLeave = () => {
     }
 
     .bot-features {
-      margin: 8px 0 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      align-self: center;
+      width: max-content;
+      max-width: 100%;
+      padding: 0;
+      margin-top: 8px;
       font-size: 12px;
-      list-style-type: disc;
 
-      li {
+      .bot-feature-item {
+        display: flex;
+        align-items: flex-start;
+        width: max-content;
+        max-width: 100%;
         margin-bottom: 2px;
         color: #999;
+        text-align: left;
+        white-space: nowrap;
 
-        &::marker {
+        &::before {
+          margin-right: 4px;
           color: #409eff;
+          content: "•";
+          text-align: center;
         }
       }
     }

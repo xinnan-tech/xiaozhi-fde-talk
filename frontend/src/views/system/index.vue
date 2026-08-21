@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { computed, nextTick, reactive, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
@@ -43,7 +44,7 @@ type CheckStatus = "normal" | "running" | "error";
 /** 自检结果 */
 type SelfCheckResult = {
   key: Exclude<CheckTarget, "all">;
-  title: string;
+  titleKey: string;
   description: string;
   detail: string;
   duration: string;
@@ -53,6 +54,7 @@ type SelfCheckResult = {
 };
 
 const userStore = useUserStoreHook();
+const { t } = useI18n();
 
 const icons = {
   llm: useRenderIcon("tabler:robot"),
@@ -218,7 +220,7 @@ const saveConfig = async (group: ConfigGroup) => {
     singleConfig
   );
   if (res.ok) {
-    ElMessage.success(`已保存，下一次请求生效`);
+    ElMessage.success(t("system.save_success"));
     await initCofig();
   } else {
     ElMessage.error(`保存 ${group.title} 配置失败：${getErrorMessage(res)}`);
@@ -238,7 +240,7 @@ const getErrorMessage = (error: unknown) => {
   if (typeof error === "object" && error !== null && "message" in error) {
     return String(error.message);
   }
-  return "诊断接口请求失败";
+  return t("system.diagnostics.request_failed");
 };
 
 const getOrCreateResult = (key: SelfCheckResult["key"]) => {
@@ -247,8 +249,9 @@ const getOrCreateResult = (key: SelfCheckResult["key"]) => {
 
   const result: SelfCheckResult = {
     key,
-    title: key === "asr" ? "ASR 语音识别" : "LLM 大语言模型",
-    description: "正在检测",
+    titleKey:
+      key === "asr" ? "system.diagnostics.asr" : "system.diagnostics.llm",
+    description: t("system.diagnostics.running"),
     detail: "",
     duration: "-",
     status: "running"
@@ -264,11 +267,13 @@ const updateAsrResult = (
   const target = getOrCreateResult("asr");
 
   target.status = result.ok ? "normal" : "error";
-  target.description = result.message || "ASR 连通 + 转写成功";
-  target.detail = `转写：${result.detail?.utterances?.join("、") || "无返回内容"}`;
+  target.description = result.message || t("system.diagnostics.asr_success");
+  target.detail = t("system.diagnostics.transcription", {
+    text: result.detail?.utterances?.join("、") || t("system.no_result")
+  });
   target.sample =
     result.detail?.sample === "real"
-      ? "真实音频"
+      ? t("system.diagnostics.real_audio")
       : result.detail?.sample || "-";
   target.duration = `${result.latency_ms} ms`;
 };
@@ -280,8 +285,10 @@ const updateLlmResult = (
   const target = getOrCreateResult("llm");
 
   target.status = result.ok ? "normal" : "error";
-  target.description = result.message || "LLM 连接 + 返回完成";
-  target.detail = `LLM 回复：${result.detail?.reply || "无返回内容"}`;
+  target.description = result.message || t("system.diagnostics.llm_success");
+  target.detail = t("system.diagnostics.llm_reply", {
+    text: result.detail?.reply || t("system.no_result")
+  });
   target.duration = `${result.latency_ms} ms`;
   target.model = result.detail?.model || "-";
 };
@@ -293,7 +300,7 @@ const setRunningState = (target: CheckTarget, status: CheckStatus) => {
   keys.forEach(key => {
     const result = getOrCreateResult(key);
     result.status = status;
-    result.description = "正在检测";
+    result.description = t("system.diagnostics.running");
     result.detail = "";
     result.duration = "";
     result.model = undefined;
@@ -329,14 +336,14 @@ const runSelfCheck = async (target: CheckTarget) => {
         (target === "all" || result.key === target) && result.status === "error"
     );
     if (hasError) {
-      ElMessage.warning("自检完成，但部分服务异常");
+      ElMessage.warning(t("system.diagnostics.partial_failure"));
     }
   } catch (error) {
     const message = getErrorMessage(error);
     selfCheckResults.forEach(result => {
       if (target === "all" || result.key === target) {
         result.status = "error";
-        result.description = "诊断接口请求失败";
+        result.description = t("system.diagnostics.request_failed");
         result.detail = message;
         result.duration = "-";
       }
@@ -370,10 +377,9 @@ watch(
   <div class="system">
     <header class="system-header">
       <div class="header-left">
-        <h1 class="header-title">后端配置</h1>
+        <h1 class="header-title">{{ t("system.title") }}</h1>
         <p class="header-subtitle">
-          修改后点击【保存】立即生效（LLM/ASR 客户端会自动重载）。敏感字段显示为
-          ************，留空 = 保留原值。
+          {{ t("system.save_hint") }}{{ t("system.sensitive_hint") }}
         </p>
       </div>
       <el-button
@@ -382,7 +388,7 @@ watch(
         :icon="icons.activity"
         @click="openSelfCheck"
       >
-        运行自检
+        {{ t("system.run_check") }}
       </el-button>
     </header>
 
@@ -390,7 +396,7 @@ watch(
       <aside v-if="configGroups.length > 0" class="config-groups">
         <el-scrollbar class="groups-scroll">
           <div class="groups-header">
-            <span>配置分组</span>
+            <span>{{ t("system.group_title") }}</span>
           </div>
           <div class="groups-list">
             <div
@@ -449,14 +455,18 @@ watch(
             </div>
             <div class="card-actions">
               <el-button class="reset-button" @click="resetConfig(group.key)">
-                重载
+                {{ t("system.reload") }}
               </el-button>
               <el-button
                 type="primary"
                 class="save-button"
                 @click="saveConfig(group)"
               >
-                保存 {{ group.title }}
+                {{
+                  t("system.save_group", {
+                    group: group.title
+                  })
+                }}
               </el-button>
             </div>
           </section>
@@ -479,11 +489,10 @@ watch(
           <div class="self-check-heading">
             <div class="self-check-title-row">
               <component :is="icons.activity" class="self-check-icon" />
-              <h2>运行自检</h2>
+              <h2>{{ t("system.run_check") }}</h2>
             </div>
             <p>
-              点这里测试整套服务是否正常：ASR 连通 + 转写，LLM 连通 + 回复。
-              部署后建议先跑一遍，发现问题不用等到真正访谈时才发现。
+              {{ t("system.diagnostics.help") }}
             </p>
           </div>
           <el-button
@@ -491,7 +500,7 @@ watch(
             circle
             class="self-check-close-button"
             :icon="icons.close"
-            title="关闭"
+            :title="t('system.close')"
             @click="selfCheckVisible = false"
           />
         </div>
@@ -502,7 +511,7 @@ watch(
             :loading="selfCheckRunning && selfCheckTarget === 'all'"
             @click="runSelfCheck('all')"
           >
-            运行全部
+            {{ t("system.run_all") }}
           </el-button>
           <el-button
             plain
@@ -510,7 +519,7 @@ watch(
             :loading="selfCheckRunning && selfCheckTarget === 'asr'"
             @click="runSelfCheck('asr')"
           >
-            仅 ASR
+            {{ t("system.asr_only") }}
           </el-button>
           <el-button
             plain
@@ -518,14 +527,14 @@ watch(
             :loading="selfCheckRunning && selfCheckTarget === 'llm'"
             @click="runSelfCheck('llm')"
           >
-            仅 LLM
+            {{ t("system.llm_only") }}
           </el-button>
         </div>
 
         <div class="self-check-results">
           <el-empty
             v-if="!selfCheckResults.length"
-            description="暂无检测结果"
+            :description="t('system.no_result')"
             :image-size="88"
           />
           <template v-else>
@@ -536,7 +545,7 @@ watch(
               class="self-check-card"
             >
               <div class="self-check-card-heading">
-                <h3>{{ result.title }}</h3>
+                <h3>{{ t(result.titleKey) }}</h3>
                 <el-tag
                   size="small"
                   :type="
@@ -552,10 +561,10 @@ watch(
                   </el-icon>
                   {{
                     result.status === "running"
-                      ? "检测中"
+                      ? t("system.diagnostics.running")
                       : result.status === "error"
-                        ? "异常"
-                        : "正常"
+                        ? t("system.diagnostics.error")
+                        : t("system.diagnostics.normal")
                   }}
                 </el-tag>
                 <span class="self-check-duration">{{ result.duration }}</span>
@@ -568,9 +577,11 @@ watch(
               </div>
               <strong>{{ result.description }}</strong>
               <p>{{ result.detail }}</p>
-              <p v-if="result.sample">样本：{{ result.sample }}</p>
+              <p v-if="result.sample">
+                {{ t("system.diagnostics.sample") }}：{{ result.sample }}
+              </p>
               <p v-if="result.model" class="self-check-model">
-                模型：{{ result.model }}
+                {{ t("system.diagnostics.model") }}：{{ result.model }}
               </p>
             </el-card>
           </template>

@@ -8,6 +8,7 @@ export default {
   meta: {
     icon: "tabler:message-chatbot-filled",
     title: "访谈主页",
+    titleKey: "menu.home",
     rank: 0
   },
   children: [
@@ -16,7 +17,8 @@ export default {
       name: "Home",
       component: () => import("@/views/home/index.vue"),
       meta: {
-        title: "访谈主页"
+        title: "访谈主页",
+        titleKey: "menu.home"
       }
     }
   ]

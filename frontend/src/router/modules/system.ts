@@ -8,6 +8,7 @@ export default {
   meta: {
     icon: "tabler:settings-filled",
     title: "系统配置",
+    titleKey: "menu.system",
     rank: 2
   },
   children: [
@@ -16,7 +17,8 @@ export default {
       name: "SystemConfig",
       component: () => import("@/views/system/index.vue"),
       meta: {
-        title: "系统配置"
+        title: "系统配置",
+        titleKey: "menu.system"
         // keepAlive: true // 开启缓存
       }
     }

@@ -33,6 +33,7 @@ export type menuType = {
   meta?: {
     icon?: string;
     title?: string;
+    titleKey?: string;
     rank?: number;
     showParent?: boolean;
     extraIcon?: string;

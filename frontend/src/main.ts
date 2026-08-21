@@ -6,6 +6,7 @@ import { MotionPlugin } from "@vueuse/motion";
 import { createApp, type Directive } from "vue";
 import { useElementPlus } from "@/plugins/elementPlus";
 import { injectResponsiveStorage } from "@/utils/responsive";
+import { i18n } from "@/i18n";
 
 // 引入重置样式
 import "./style/reset.scss";
@@ -18,6 +19,7 @@ import "element-plus/dist/index.css";
 import "./assets/iconfont/iconfont.css";
 
 const app = createApp(App);
+app.use(i18n);
 
 // 自定义指令
 import * as directives from "@/directives";

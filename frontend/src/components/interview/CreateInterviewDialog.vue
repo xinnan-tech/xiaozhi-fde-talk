@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, reactive, ref, watch, markRaw } from "vue";
+import { computed, nextTick, reactive, ref, watch, markRaw } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
+import { useI18n } from "vue-i18n";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import {
   getInterviewsTemplatesApi,
@@ -21,6 +22,8 @@ const emit = defineEmits<{
   (event: "update:modelValue", value: boolean): void;
   (event: "submit", value: CreateInterviewForm): void;
 }>();
+
+const { t } = useI18n();
 
 const userIcon = markRaw(useRenderIcon("tabler:user"));
 const calendarIcon = markRaw(useRenderIcon("tabler:calendar"));
@@ -47,32 +50,56 @@ const createDefaultForm = (): CreateInterviewForm => ({
 });
 const form = reactive<CreateInterviewForm>(createDefaultForm());
 
-const rules: FormRules = {
+const rules = computed<FormRules>(() => ({
   "base_info.title": [
-    { required: true, message: "请输入访谈名称", trigger: "blur" }
+    {
+      required: true,
+      message: t("create.dialog.name_required"),
+      trigger: "blur"
+    }
   ],
   "base_info.interviewee": [
-    { required: true, message: "请输入访谈人姓名", trigger: "blur" }
+    {
+      required: true,
+      message: t("create.dialog.interviewee_required"),
+      trigger: "blur"
+    }
   ],
   "base_info.start_time": [
-    { required: true, message: "请选择访谈时间", trigger: "change" }
+    {
+      required: true,
+      message: t("create.dialog.start_time_required"),
+      trigger: "change"
+    }
   ],
   "base_info.duration": [
-    { required: true, message: "请选择访谈时长", trigger: "change" }
+    {
+      required: true,
+      message: t("create.dialog.duration_required"),
+      trigger: "change"
+    }
   ],
   template_id: [
-    { required: true, message: "请选择访谈模板", trigger: "change" }
+    {
+      required: true,
+      message: t("create.dialog.template_required"),
+      trigger: "change"
+    }
   ],
   "base_info.project": [
-    { required: true, message: "请输入项目或对象", trigger: "blur" }
+    {
+      required: true,
+      message: t("create.dialog.project_required"),
+      trigger: "blur"
+    }
   ],
   goal: [
     {
       trigger: "blur",
       validator: (_rule, value, callback) => {
         if (!value?.trim()) {
-          goalError.value = "请输入访谈目标";
-          callback(new Error("请输入访谈目标"));
+          goalError.value = t("create.dialog.goal_required");
+          callback(new Error(t("create.dialog.goal_required")));
           return;
         }
         goalError.value = "";
@@ -80,34 +107,41 @@ const rules: FormRules = {
       }
     }
   ]
-};
+}));
 
-const inputMethods = [
+const inputMethods = computed(() => [
   {
     key: "voice",
-    title: "开始录音描述",
-    description: "通过语音输入访谈目标",
+    title: t("create.dialog.voice_title"),
+    description: t("create.dialog.voice_description"),
     icon: microphoneIcon,
     color: "#4a90e2",
     background: "rgba(74, 144, 226, 0.12)"
   },
   {
     key: "camera",
-    title: "拍照识别",
-    description: "拍照图片识别文字内容",
+    title: t("create.dialog.camera_title"),
+    description: t("create.dialog.camera_description"),
     icon: cameraIcon,
     color: "#52c41a",
     background: "rgba(82, 196, 26, 0.12)"
   },
   {
     key: "clipboard",
-    title: "从粘贴板提取",
-    description: "自动提取剪贴板内容",
+    title: t("create.dialog.clipboard_title"),
+    description: t("create.dialog.clipboard_description"),
     icon: clipboardIcon,
     color: "#722ed1",
     background: "rgba(114, 46, 209, 0.12)"
   }
-];
+]);
+
+const durationOptions = computed(() => [
+  { label: t("create.dialog.duration_30"), value: "30" },
+  { label: t("create.dialog.duration_45"), value: "45" },
+  { label: t("create.dialog.duration_60"), value: "60" },
+  { label: t("create.dialog.duration_120"), value: "120" }
+]);
 
 const resetForm = async () => {
   formRef.value?.resetFields();
@@ -206,7 +240,9 @@ watch(
     @closed="formRef?.clearValidate()"
   >
     <template #header>
-      <div class="text-[18px] font-semibold text-[#1f2329]">创建新访谈</div>
+      <div class="text-[18px] font-semibold text-[#1f2329]">
+        {{ $t("create.dialog.title") }}
+      </div>
     </template>
 
     <el-form
@@ -219,30 +255,39 @@ watch(
     >
       <section class="form-section">
         <div class="section-title">
-          <h3>基本信息</h3>
+          <h3>{{ $t("create.dialog.basic_info") }}</h3>
         </div>
         <div class="form-grid">
           <div class="secondary-fields-row">
-            <el-form-item label="访谈名称" prop="base_info.title">
+            <el-form-item
+              :label="$t('create.dialog.interview_name')"
+              prop="base_info.title"
+            >
               <el-input
                 v-model="form.base_info.title"
-                placeholder="请输入访谈名称"
+                :placeholder="$t('create.dialog.name_placeholder')"
               />
             </el-form-item>
 
-            <el-form-item label="项目/对象" prop="base_info.project">
+            <el-form-item
+              :label="$t('create.dialog.project')"
+              prop="base_info.project"
+            >
               <el-input
                 v-model="form.base_info.project"
-                placeholder="请输入项目或对象"
+                :placeholder="$t('create.dialog.project_placeholder')"
               />
             </el-form-item>
           </div>
 
           <div class="basic-fields-row">
-            <el-form-item label="访谈人" prop="base_info.interviewee">
+            <el-form-item
+              :label="$t('create.dialog.interviewee')"
+              prop="base_info.interviewee"
+            >
               <el-input
                 v-model="form.base_info.interviewee"
-                placeholder="请输入受访者姓名"
+                :placeholder="$t('create.dialog.interviewee_placeholder')"
               >
                 <template #suffix>
                   <component :is="userIcon" />
@@ -250,13 +295,16 @@ watch(
               </el-input>
             </el-form-item>
 
-            <el-form-item label="访谈时间" prop="base_info.start_time">
+            <el-form-item
+              :label="$t('create.dialog.start_time')"
+              prop="base_info.start_time"
+            >
               <el-date-picker
                 v-model="form.base_info.start_time"
                 type="datetime"
                 value-format="YYYY-MM-DD HH:mm:ss"
-                format="YYYY-MM-DD HH:mm"
-                placeholder="选择日期和时间"
+                format="YYYY-MM-DD HH:mm:ss"
+                :placeholder="$t('create.dialog.start_time_placeholder')"
                 class="field-control"
               >
                 <template #suffix>
@@ -265,27 +313,32 @@ watch(
               </el-date-picker>
             </el-form-item>
 
-            <el-form-item label="访谈时长" prop="base_info.duration">
+            <el-form-item
+              :label="$t('create.dialog.duration')"
+              prop="base_info.duration"
+            >
               <el-select
                 v-model="form.base_info.duration"
-                placeholder="请选择访谈时长"
+                :placeholder="$t('create.dialog.duration_placeholder')"
               >
-                <el-option label="30 分钟" value="30" />
-                <el-option label="45 分钟" value="45" />
-                <el-option label="1 小时" value="60" />
-                <el-option label="2 小时" value="120" />
+                <el-option
+                  v-for="option in durationOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
               </el-select>
             </el-form-item>
           </div>
 
           <el-form-item
-            label="访谈模板"
+            :label="$t('create.dialog.template')"
             prop="template_id"
             class="template-field"
           >
             <el-select
               v-model="form.template_id"
-              placeholder="请选择访谈模板"
+              :placeholder="$t('create.dialog.template_placeholder')"
               :loading="interviewTemplatesLoading"
               :disabled="interviewTemplatesLoading"
             >
@@ -299,7 +352,7 @@ watch(
           </el-form-item>
 
           <el-form-item
-            label="访谈目标"
+            :label="$t('create.dialog.goal')"
             prop="goal"
             class="goal-field"
             :show-message="false"
@@ -311,7 +364,7 @@ watch(
                 :rows="3"
                 maxlength="100"
                 show-word-limit
-                placeholder="请输入本次访谈的目标"
+                :placeholder="$t('create.dialog.goal_placeholder')"
                 @input="goalError = ''"
               />
               <p class="goal-error" :class="{ visible: !!goalError }">
@@ -324,7 +377,7 @@ watch(
 
       <section class="form-section quick-input-section">
         <div class="section-title">
-          <h3>便捷录入</h3>
+          <h3>{{ $t("create.dialog.quick_input") }}</h3>
         </div>
         <div class="input-method-list">
           <button
@@ -357,14 +410,14 @@ watch(
         plain
         :disabled="submitting"
         @click="handleClose"
-        >取消</el-button
+        >{{ $t("create.dialog.cancel") }}</el-button
       >
       <el-button
         style="border-radius: 8px"
         type="primary"
         :loading="submitting"
         @click="handleSubmit"
-        >创建访谈</el-button
+        >{{ $t("create.dialog.submit") }}</el-button
       >
     </template>
   </el-dialog>

@@ -1,6 +1,7 @@
 import { getPluginsList } from "./build/plugins";
 import { include, exclude } from "./build/optimize";
 import { type UserConfigExport, type ConfigEnv, loadEnv } from "vite";
+import VueI18nPlugin from "@intlify/unplugin-vue-i18n/vite";
 import {
   root,
   alias,
@@ -48,7 +49,12 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
         clientFiles: ["./index.html", "./src/{views,components}/*"]
       }
     },
-    plugins: getPluginsList(VITE_COMPRESSION),
+    plugins: [
+      VueI18nPlugin({
+        include: pathResolve("./src/locales/**", import.meta.url)
+      }),
+      ...getPluginsList(VITE_COMPRESSION)
+    ],
     // https://cn.vitejs.dev/config/dep-optimization-options.html#dep-optimization-options
     optimizeDeps: {
       include,

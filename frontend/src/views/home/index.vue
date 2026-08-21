@@ -3,11 +3,13 @@ import { useDebounceFn } from "@vueuse/core";
 import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { useInterviewStoreHook } from "@/store/modules/interview";
 import ReSegmented from "@/components/ReSegmented";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
+import { isSupportedLocale, setLocale, type SupportedLocale } from "@/i18n";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   type InterviewItem,
@@ -21,6 +23,7 @@ defineOptions({
 });
 
 const router = useRouter();
+const { locale, t } = useI18n();
 const userStore = useUserStoreHook();
 const dialogStore = useDialogStoreHook();
 const interviewStore = useInterviewStoreHook();
@@ -38,58 +41,65 @@ const checkboxIcon = useRenderIcon("tabler:checkbox");
 const messageIcon = useRenderIcon("tabler:message");
 const businessmanIcon = useRenderIcon("flat-color-icons:businessman");
 const noteIcon = useRenderIcon("majesticons:note-text");
+const languageIcon = useRenderIcon("flowbite:language-outline");
+
+const localeOptions: Array<{ value: SupportedLocale; label: string }> = [
+  { value: "zh-CN", label: "简体中文" },
+  { value: "zh-TW", label: "繁體中文" },
+  { value: "en-US", label: "English" }
+];
 
 const statisticsLoading = ref(false);
 const listLoading = ref(false);
 const searchKeyword = ref("");
 const debouncedSearchKeyword = ref("");
 const tabValue = ref(0);
-const tabOptions = [
-  { label: "全部", value: "all" },
-  { label: "待开始", value: "created" },
-  { label: "进行中", value: "in_progress" },
-  { label: "已暂停", value: "suspended" },
-  { label: "已结束", value: "ended" }
-];
+const tabOptions = computed(() => [
+  { label: t("home.tab.all"), value: "all" },
+  { label: t("home.tab.created"), value: "created" },
+  { label: t("home.tab.in_progress"), value: "in_progress" },
+  { label: t("home.tab.suspended"), value: "suspended" },
+  { label: t("home.tab.ended"), value: "ended" }
+]);
 const interviewStatusLabels: Record<string, string> = {
-  created: "待开始",
-  in_progress: "进行中",
-  suspended: "已暂停",
-  ended: "已结束"
+  created: "home.status.created",
+  in_progress: "home.status.in_progress",
+  suspended: "home.status.suspended",
+  ended: "home.status.ended"
 };
 const statusList = ref([
   {
     key: "in_progress",
-    title: "进行中",
+    titleKey: "home.stats.in_progress",
     count: 0,
-    unit: "个访谈",
+    unitKey: "home.stats.interview_unit",
     color: "#409eff",
     bgColor: "rgba(74, 144, 226, 0.15)",
     icon: chatbotIcon
   },
   {
     key: "week_finish",
-    title: "本周完成",
+    titleKey: "home.stats.week_finish",
     count: 0,
-    unit: "个访谈",
+    unitKey: "home.stats.interview_unit",
     color: "#52c41a",
     bgColor: "rgba(82, 196, 26, 0.15)",
     icon: checkIcon
   },
   {
     key: "assist_discovery",
-    title: "辅助发现",
+    titleKey: "home.stats.assist_discovery",
     count: 0,
-    unit: "个问题",
+    unitKey: "home.stats.question_unit",
     color: "#faad14",
     bgColor: "rgba(250, 173, 20, 0.15)",
     icon: bellIcon
   },
   {
     key: "interview_coverage",
-    title: "访谈覆盖",
+    titleKey: "home.stats.interview_coverage",
     count: 0,
-    unit: "个访谈",
+    unitKey: "home.stats.interview_unit",
     color: "#722ed1",
     bgColor: "rgba(114, 46, 209, 0.15)",
     icon: folderIcon
@@ -102,7 +112,7 @@ const isLoggedIn = computed(() => Boolean(userStore.accessToken));
 
 const filteredInterviewList = computed(() => {
   const keyword = debouncedSearchKeyword.value.trim().toLowerCase();
-  const selectedStatus = tabOptions[tabValue.value].value;
+  const selectedStatus = tabOptions.value[tabValue.value].value;
 
   return interviewList.value.filter(item => {
     const matchTab = selectedStatus === "all" || item.status === selectedStatus;
@@ -115,7 +125,7 @@ const filteredInterviewList = computed(() => {
       return true;
     }
 
-    return item.base_info.title.toLowerCase().includes(keyword);
+    return item.base_info?.title?.toLowerCase().includes(keyword);
   });
 });
 
@@ -134,13 +144,22 @@ const clearSearch = () => {
   debouncedSearchKeyword.value = "";
 };
 
+const handleLocaleChange = async (value: string | number | object) => {
+  const nextLocale = String(value);
+  if (!isSupportedLocale(nextLocale) || locale.value === nextLocale) return;
+
+  setLocale(nextLocale);
+  if (isLoggedIn.value) await getInterviewList();
+};
+
 const openCreateDialog = () => {
   dialogStore.openCreateInterview();
 };
 
 const openInterviewPage = (item: (typeof interviewList.value)[number]) => {
   router.push({
-    path: item.status !== "ended" ? `/interview/${item.id}` : "/report"
+    path:
+      item.status !== "ended" ? `/interview/${item.id}` : `/report/${item.id}`
   });
 };
 
@@ -158,12 +177,18 @@ const formatRecentTime = (value: string | null) => {
   const hour = 60 * minute;
   const day = 24 * hour;
 
-  if (diff < minute) return "刚刚";
-  if (diff < hour) return `${Math.floor(diff / minute)}分钟前`;
-  if (diff < day) return `${Math.floor(diff / hour)}小时前`;
-  if (diff < 30 * day) return `${Math.floor(diff / day)}天前`;
+  if (diff < minute) return t("home.time.just_now");
+  if (diff < hour) {
+    return t("home.time.minutes_ago", { count: Math.floor(diff / minute) });
+  }
+  if (diff < day) {
+    return t("home.time.hours_ago", { count: Math.floor(diff / hour) });
+  }
+  if (diff < 30 * day) {
+    return t("home.time.days_ago", { count: Math.floor(diff / day) });
+  }
 
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(locale.value, {
     year: "numeric",
     month: "numeric",
     day: "numeric"
@@ -175,13 +200,13 @@ const clickUserAvatar = async () => {
     dialogStore.openLogin();
   } else {
     try {
-      await ElMessageBox.confirm("确定退出登录吗？", "", {
-        confirmButtonText: "确定",
-        cancelButtonText: "取消",
+      await ElMessageBox.confirm(t("home.logout_confirm"), "", {
+        confirmButtonText: t("home.confirm"),
+        cancelButtonText: t("home.cancel"),
         type: "primary"
       });
       logOut();
-      ElMessage.success("退出成功");
+      ElMessage.success(t("home.logout_success"));
     } catch (error) {}
   }
 };
@@ -256,8 +281,8 @@ watch(
   <div class="home">
     <header class="home-header">
       <div class="header-left">
-        <h1 class="header-title">访谈工作台</h1>
-        <p class="header-subtitle">会问一个问题，就是够专业</p>
+        <h1 class="header-title">{{ $t("home.title") }}</h1>
+        <p class="header-subtitle">{{ $t("home.subtitle") }}</p>
       </div>
       <div class="header-right">
         <div class="search-box">
@@ -265,7 +290,7 @@ watch(
             :value="searchKeyword"
             type="text"
             class="search-input"
-            placeholder="搜索访谈..."
+            :placeholder="$t('home.search_placeholder')"
             autocomplete="off"
             @input="handleSearchInput"
           />
@@ -273,8 +298,8 @@ watch(
             v-if="searchKeyword"
             type="button"
             class="clear-search-btn"
-            aria-label="清空搜索内容"
-            title="清空搜索内容"
+            :aria-label="$t('home.clear_search')"
+            :title="$t('home.clear_search')"
             @click="clearSearch"
           >
             <component :is="clearIcon" />
@@ -287,10 +312,10 @@ watch(
           :icon="plusIcon"
           @click="openCreateDialog"
         >
-          新建访谈
+          {{ $t("home.create_interview") }}
         </el-button>
         <el-tooltip
-          :content="isLoggedIn ? '在线中' : '离线中'"
+          :content="$t(isLoggedIn ? 'home.online' : 'home.offline')"
           placement="bottom"
           effect="light"
         >
@@ -302,11 +327,39 @@ watch(
             <component :is="businessmanIcon" class="w-8 h-8" />
           </div>
         </el-tooltip>
+        <el-dropdown
+          class="locale-dropdown"
+          trigger="hover"
+          placement="bottom-end"
+          @command="handleLocaleChange"
+        >
+          <button
+            type="button"
+            class="locale-trigger"
+            :aria-label="$t('home.switch_language')"
+            :title="$t('home.switch_language')"
+          >
+            <component :is="languageIcon" class="locale-icon" />
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu class="locale-menu">
+              <el-dropdown-item
+                v-for="item in localeOptions"
+                :key="item.value"
+                :command="item.value"
+                :class="{ 'is-active': locale === item.value }"
+              >
+                <span>{{ item.label }}</span>
+                <span v-if="locale === item.value" class="locale-check">✓</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </header>
 
     <div class="status-bar">
-      <div v-for="item in statusList" :key="item.title" class="status-card">
+      <div v-for="item in statusList" :key="item.key" class="status-card">
         <div class="status-icon-box" :style="{ background: item.bgColor }">
           <component
             :is="item.icon"
@@ -325,13 +378,13 @@ watch(
           </template>
           <template #default>
             <div class="status-info">
-              <div class="status-title">{{ item.title }}</div>
+              <div class="status-title">{{ $t(item.titleKey) }}</div>
               <div class="flex items-baseline">
                 <div class="mr-1 text-[22px] text-[#1a1a1a] font-semibold">
                   {{ item.count }}
                 </div>
                 <div class="text-[12px] text-[#999]">
-                  {{ item.unit }}
+                  {{ $t(item.unitKey) }}
                 </div>
               </div>
             </div>
@@ -425,17 +478,21 @@ watch(
                 <div class="card-icon-box">
                   <component :is="item.icon" class="card-icon" />
                 </div>
-                <h3 class="card-title">{{ item.base_info.title }}</h3>
+                <h3 class="card-title">
+                  {{ item.base_info?.title || "--" }}
+                </h3>
                 <div class="card-status" :class="`status-${item.status}`">
                   <span class="status-text">
-                    {{ interviewStatusLabels[item.status] ?? item.status }}
+                    {{ $t(interviewStatusLabels[item.status] ?? item.status) }}
                   </span>
                 </div>
               </div>
               <div class="card-body">
                 <div class="card-column">
                   <div class="column-row">
-                    <span class="row-label">受访者</span>
+                    <span class="row-label">{{
+                      $t("home.field.interviewee")
+                    }}</span>
                   </div>
                   <div class="column-row">
                     <span class="row-value">{{
@@ -445,7 +502,7 @@ watch(
                 </div>
                 <div class="card-column">
                   <div class="column-row">
-                    <span class="row-label">类型</span>
+                    <span class="row-label">{{ $t("home.field.type") }}</span>
                   </div>
                   <div class="column-row">
                     <span class="row-value">{{ item.type || "--" }}</span>
@@ -453,7 +510,7 @@ watch(
                 </div>
                 <div class="card-column">
                   <div class="column-row">
-                    <span class="row-label">最近访谈</span>
+                    <span class="row-label">{{ $t("home.field.recent") }}</span>
                   </div>
                   <div class="column-row">
                     <span class="row-value">{{
@@ -469,7 +526,9 @@ watch(
                       :is="clockIcon"
                       class="pill-icon text-[#409eff]"
                     />
-                    <span class="pill-text">待访谈</span>
+                    <span class="pill-text">{{
+                      $t("home.metric.pending")
+                    }}</span>
                     <span class="pill-count">{{ item.pending_count }}</span>
                   </div>
                   <div class="pill-column">
@@ -477,7 +536,9 @@ watch(
                       :is="checkboxIcon"
                       class="pill-icon text-[#52c41a]"
                     />
-                    <span class="pill-text">已覆盖</span>
+                    <span class="pill-text">{{
+                      $t("home.metric.covered")
+                    }}</span>
                     <span class="pill-count">{{ item.covered_count }}</span>
                   </div>
                   <div class="pill-column">
@@ -485,7 +546,7 @@ watch(
                       :is="messageIcon"
                       class="pill-icon text-[#409eff]"
                     />
-                    <span class="pill-text">已提问</span>
+                    <span class="pill-text">{{ $t("home.metric.asked") }}</span>
                     <span class="pill-count">{{ item.asked_count }}</span>
                   </div>
                 </div>
@@ -511,7 +572,7 @@ watch(
   .home-header {
     display: flex;
     flex-wrap: wrap;
-    gap: 16px;
+    gap: 28px;
     align-items: center;
     justify-content: space-between;
     padding: 8px 16px 20px;
@@ -645,6 +706,64 @@ watch(
     &:hover {
       box-shadow: 0 0 8px rgba(0, 0, 0, 0.08);
     }
+  }
+
+  .locale-dropdown {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .locale-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    color: #666;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    outline: none;
+    transition:
+      box-shadow 0.2s,
+      color 0.2s,
+      background-color 0.2s;
+
+    &:hover,
+    &:focus-visible {
+      color: #409eff;
+    }
+  }
+
+  .locale-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  :deep(.locale-menu) {
+    min-width: 132px;
+    padding: 6px;
+    border-radius: 8px;
+  }
+
+  :deep(.locale-menu .el-dropdown-menu__item) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-right: 12px;
+    border-radius: 6px;
+  }
+
+  :deep(.locale-menu .el-dropdown-menu__item.is-active) {
+    color: var(--el-color-primary);
+    background-color: var(--el-color-primary-light-9);
+  }
+
+  .locale-check {
+    font-size: 14px;
+    font-weight: 600;
   }
 
   /* 与 .interview-list 使用同一套内容区断点，保持重排一致 */
@@ -960,7 +1079,8 @@ watch(
 
   .row-label {
     flex-shrink: 0;
-    width: 56px;
+    width: auto;
+    white-space: nowrap;
     color: #999;
   }
 

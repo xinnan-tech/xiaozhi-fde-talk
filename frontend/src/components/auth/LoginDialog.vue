@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { type FormInstance, type FormRules } from "element-plus";
+import { useI18n } from "vue-i18n";
 import { message } from "@/utils/message";
 import { useUserStoreHook } from "@/store/modules/user";
 import User from "~icons/ep/user";
@@ -18,22 +19,23 @@ const emit = defineEmits<{
   (event: "update:modelValue", value: boolean): void;
 }>();
 
-const loginRules = reactive<FormRules<RuleForm>>({
+const { t } = useI18n();
+const loginRules = computed<FormRules<RuleForm>>(() => ({
   username: [
     {
       required: true,
-      message: "请输入用户名",
+      message: t("auth.username_required"),
       trigger: "blur"
     }
   ],
   password: [
     {
       required: true,
-      message: "请输入密码",
+      message: t("auth.password_required"),
       trigger: "blur"
     }
   ]
-});
+}));
 const ruleFormRef = ref<FormInstance>();
 const ruleForm = reactive<RuleForm>({
   username: "admin",
@@ -54,13 +56,13 @@ const clickLogin = async (formEl: FormInstance | undefined) => {
       password: ruleForm.password
     });
     if (!result?.access_token) {
-      message("登录失败，请检查用户名和密码", { type: "error" });
+      message(t("auth.login_invalid"), { type: "error" });
       return;
     }
-    message("登录成功", { type: "success" });
+    message(t("auth.login_success"), { type: "success" });
     emit("update:modelValue", false);
   } catch {
-    message("登录失败，请稍后重试", {
+    message(t("auth.login_failed"), {
       type: "error"
     });
   } finally {
@@ -90,9 +92,11 @@ const onKeydown = (event: KeyboardEvent) => {
       <div class="flex justify-between -translate-y-7">
         <div class="flex flex-col justify-center">
           <div class="mb-2 text-[28px] font-semibold text-[#1a1a1a]">
-            欢迎登录
+            {{ $t("auth.login_title") }}
           </div>
-          <div class="text-[14px] text-[#666]">登录之后即可使用访谈工作台</div>
+          <div class="text-[14px] text-[#666]">
+            {{ $t("auth.login_subtitle") }}
+          </div>
         </div>
         <img
           src="@/assets/images/login-chat-icon.png"
@@ -105,7 +109,7 @@ const onKeydown = (event: KeyboardEvent) => {
           <el-input
             v-model="ruleForm.username"
             class="login-input"
-            placeholder="请输入用户名"
+            :placeholder="$t('auth.username_placeholder')"
             :prefix-icon="User"
           />
         </el-form-item>
@@ -115,7 +119,7 @@ const onKeydown = (event: KeyboardEvent) => {
             v-model="ruleForm.password"
             class="login-input"
             type="password"
-            placeholder="请输入密码"
+            :placeholder="$t('auth.password_placeholder')"
             show-password
             :prefix-icon="Lock"
             @keydown="onKeydown"
@@ -127,7 +131,7 @@ const onKeydown = (event: KeyboardEvent) => {
             class="w-full login-btn"
             :loading="loading"
             @click="clickLogin(ruleFormRef)"
-            >登录</el-button
+            >{{ $t("auth.login") }}</el-button
           >
         </el-form-item>
       </el-form>

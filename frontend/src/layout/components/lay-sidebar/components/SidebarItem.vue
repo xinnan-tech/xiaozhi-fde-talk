@@ -7,6 +7,7 @@ import { useNav } from "@/layout/hooks/useNav";
 import SidebarLinkItem from "./SidebarLinkItem.vue";
 import SidebarExtraIcon from "./SidebarExtraIcon.vue";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
+import { useI18n } from "vue-i18n";
 import {
   type PropType,
   type CSSProperties,
@@ -22,6 +23,7 @@ import ArrowLeft from "~icons/ep/arrow-left-bold";
 import ArrowRight from "~icons/ep/arrow-right-bold";
 
 const attrs = useAttrs();
+const { t } = useI18n();
 const { layout, isCollapse, tooltipEffect, getDivStyle } = useNav();
 
 const props = defineProps({
@@ -117,6 +119,10 @@ function resolvePath(routePath) {
     return posix.resolve(props.basePath, routePath);
   }
 }
+
+function getMenuTitle(item: menuType) {
+  return item.meta?.titleKey ? t(item.meta.titleKey) : item.meta?.title;
+}
 </script>
 
 <template>
@@ -164,7 +170,7 @@ function resolvePath(routePath) {
         truncated
         class="w-full! px-3! min-w-[54px]! text-center! text-inherit!"
       >
-        {{ onlyOneChild.meta.title }}
+        {{ getMenuTitle(onlyOneChild) }}
       </el-text>
 
       <template #title>
@@ -176,7 +182,7 @@ function resolvePath(routePath) {
             }"
             class="w-full! text-inherit!"
           >
-            {{ onlyOneChild.meta.title }}
+            {{ getMenuTitle(onlyOneChild) }}
           </ReText>
           <SidebarExtraIcon :extraIcon="onlyOneChild.meta.extraIcon" />
         </div>
@@ -215,7 +221,7 @@ function resolvePath(routePath) {
         }"
         :class="textClass"
       >
-        {{ item.meta.title }}
+        {{ getMenuTitle(item) }}
       </ReText>
       <SidebarExtraIcon v-if="!isCollapse" :extraIcon="item.meta.extraIcon" />
     </template>

@@ -1,17 +1,33 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import MarkdownIt from "markdown-it";
+import { ElMessage, ElMessageBox } from "element-plus";
 import ReSegmented from "@/components/ReSegmented";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
-import reportContent from "./report-content.md?raw";
+import {
+  deleteInterviewApi,
+  exportInterviewReportApi,
+  getInterviewDetailApi,
+  getInterviewReportApi,
+  InterviewDetailItem,
+  type InterviewDetailType
+} from "@/api/interview";
 
 defineOptions({
   name: "Report"
 });
 
+const route = useRoute();
+const router = useRouter();
+const { locale, t } = useI18n();
+
 const shareIcon = useRenderIcon("quill:share");
 const moreIcon = useRenderIcon("quill:meatballs-h");
-const locationIcon = useRenderIcon("boxicons:location");
+const downloadIcon = useRenderIcon("ep:download");
+const deleteIcon = useRenderIcon("ep:delete");
+const refreshIcon = useRenderIcon("ep:refresh");
 
 // 初始化 markdown-it
 const md = new MarkdownIt({
@@ -21,143 +37,241 @@ const md = new MarkdownIt({
 });
 
 // 渲染 markdown 内容
-const renderedReport = computed(() => {
-  return md.render(reportContent);
-});
+const reportMarkdown = ref("");
+const reportLoading = ref(true);
+const reportError = ref(false);
 
-interface Question {
-  num: string;
-  warm: boolean;
-  title: string;
-  purpose: string;
-  note: string;
-  status: "已覆盖" | "待追问";
-}
+const renderedReport = computed(() => md.render(reportMarkdown.value));
+const canExportReport = computed(
+  () =>
+    !reportLoading.value && !reportError.value && Boolean(reportMarkdown.value)
+);
 
-const tabOptions = [
-  { key: "report", label: "访谈报告" },
-  { key: "transcript", label: "转录" },
-  { key: "note", label: "笔记" }
-];
+const tabOptions = computed(() => [
+  { key: "report", label: t("report.tab.report") },
+  { key: "transcript", label: t("report.tab.transcript") },
+  { key: "note", label: t("report.tab.note"), disabled: true }
+]);
 
 const tabValue = ref(0);
-const activeTab = computed(() => tabOptions[tabValue.value].key);
+const interviewDetail = ref<InterviewDetailType>();
+const suggestions = ref<InterviewDetailItem[]>([]);
 
-// 转录数据
-const transcriptEntries = [
+const stats = computed(() => [
+  { value: "--", unit: "%", label: t("report.stats.coverage") },
   {
-    role: "说话人1",
-    time: "08:40:05",
-    text: "王大爷您好，今天来主要是哪里不舒服？",
-    tone: "blue"
+    value: "--",
+    unit: t("report.stats.characters_unit"),
+    label: t("report.stats.transcript")
   },
   {
-    role: "说话人2",
-    time: "08:40:22",
-    text: "李医生，我最近一个月老头晕，有时候站起来眼前发黑，血压也高了。",
-    tone: "green"
-  },
-  {
-    role: "说话人1",
-    time: "08:40:58",
-    text: "头晕大概什么时候开始的？是持续性的还是一阵一阵的？有没有什么诱因？",
-    tone: "blue"
-  },
-  {
-    role: "说话人2",
-    time: "08:41:35",
-    text: "大概半个月前开始的，主要是一站起来或者转头的时候晕，坐着躺着就没事。最近睡眠也不好，家里有些事情操心。",
-    tone: "green"
-  },
-  {
-    role: "说话人1",
-    time: "08:42:10",
-    text: "嗯，休息不好确实会影响血压。您之前有高血压病史对吧？平时吃的什么药？最近量过血压吗？",
-    tone: "blue"
-  },
-  {
-    role: "说话人2",
-    time: "08:42:50",
-    text: "高血压有八年了，一直吃苯磺酸氨氯地平，一天一片。以前血压基本 140/85 左右，最近自己在家量，最高到过 162/96。",
-    tone: "green"
-  },
-  {
-    role: "说话人1",
-    time: "08:43:30",
-    text: "162/96 确实偏高了。药有没有按时吃？最近有没有自行加量或者停过药？",
-    tone: "blue"
-  },
-  {
-    role: "说话人2",
-    time: "08:44:05",
-    text: "药倒是天天吃，没断过。我看血压高了也没敢自己加，想着来看看医生再说。",
-    tone: "green"
-  }
-];
-const stats = [
-  { value: "92%", label: "问题覆盖" },
-  { value: "323字", label: "转录文本" },
-  { value: "38轮", label: "对话" }
-];
-
-const questions = ref<Question[]>([
-  {
-    num: "1",
-    warm: false,
-    title: "决策人是谁，谁拍板？",
-    purpose: "追问目的：明确实际决策链与影响人",
-    note: "对方已明确总监拍板",
-    status: "已覆盖"
-  },
-  {
-    num: "2",
-    warm: false,
-    title: "预算 / 时间线 / 其他约束",
-    purpose: "追问目的：评估可行性与排期",
-    note: "已给出预算 5 万，年中前",
-    status: "已覆盖"
-  },
-  {
-    num: "3",
-    warm: false,
-    title: "现在怎么解决 / 有没有竞品",
-    purpose: "追问目的：了解替代方案与满意度",
-    note: "已说明 Excel + 群聊，试用两个竞品",
-    status: "已覆盖"
-  },
-  {
-    num: "4",
-    warm: true,
-    title: "怎么衡量成功没做成（可量化指标）",
-    purpose: "追问目的：明确成功标准，便于后续验证",
-    note: "尚未覆盖",
-    status: "待追问"
-  },
-  {
-    num: "5",
-    warm: true,
-    title: "对方桌上流程是什么（动机 / 目标）",
-    purpose: "追问目的：挖掘决策层最本质的真实目标",
-    note: "尚未覆盖",
-    status: "待追问"
+    value: "--",
+    unit: t("report.stats.turns_unit"),
+    label: t("report.stats.conversations")
   }
 ]);
+
+const activeTab = computed(() => tabOptions.value[tabValue.value].key);
+
+const transcriptList = computed(() => {
+  return [...(interviewDetail.value?.transcript ?? [])].reverse().map(item => ({
+    ...item,
+    time: formatTranscriptTime(item.start_ms)
+  }));
+});
+
+/** 格式化访谈记录时间 */
+const formatTranscriptTime = (startMs: number | null = null) => {
+  if (startMs !== null && Number.isFinite(startMs) && startMs >= 0) {
+    const totalSeconds = Math.floor(startMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return [hours, minutes, seconds]
+      .map(value => String(value).padStart(2, "0"))
+      .join(":");
+  }
+  return new Date().toLocaleTimeString(locale.value, { hour12: false });
+};
+
+/** 状态标签 */
+const suggestionStatusLabel = (status: InterviewDetailItem["status"]) => {
+  switch (status) {
+    case "todo":
+      return t("report.status.todo");
+    case "new":
+      return t("report.status.new");
+    case "ignored":
+      return t("report.status.ignored");
+    case "done":
+      return t("report.status.done");
+    case "skipped":
+      return t("report.status.skipped");
+    default:
+      return status;
+  }
+};
+
+/** 获取访谈报告 */
+const getInterviewReport = async () => {
+  const id = route.params.id as string;
+  if (!id) {
+    reportLoading.value = false;
+    reportError.value = true;
+    return;
+  }
+
+  reportLoading.value = true;
+  reportError.value = false;
+
+  try {
+    const res = await getInterviewReportApi(id);
+    reportMarkdown.value = res?.content_md ?? "";
+    reportError.value = !reportMarkdown.value;
+  } catch {
+    reportError.value = true;
+  } finally {
+    reportLoading.value = false;
+  }
+};
+
+/** 获取访谈详情 */
+const getInterviewDetail = async () => {
+  const id = route.params.id as string;
+  if (!id) return;
+  const res = await getInterviewDetailApi(id);
+  interviewDetail.value = res;
+  suggestions.value = res?.items.map(item => item);
+};
+
+const getInterviewId = () => route.params.id as string;
+
+/** 导出访谈报告 */
+const handleExportReport = async (
+  format: "md" | "html" | "word",
+  extension: "md" | "html" | "docx"
+) => {
+  const id = getInterviewId();
+  if (!id || !canExportReport.value) return;
+
+  try {
+    const report = await exportInterviewReportApi(id, format);
+    const title =
+      interviewDetail.value?.base_info?.title || t("report.default_title");
+    const filename = `${title.replace(/[\\/:*?"<>|]/g, "_")}.${extension}`;
+    const url = URL.createObjectURL(report);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    ElMessage.error(
+      t("report.export_failed", { extension: extension.toUpperCase() })
+    );
+  }
+};
+
+/** 删除访谈 */
+const handleDeleteInterview = async () => {
+  const id = getInterviewId();
+  if (!id) return;
+
+  try {
+    await ElMessageBox.confirm(
+      t("confirm.delete_one", {
+        name: interviewDetail.value?.base_info?.title || ""
+      }),
+      t("report.delete_title"),
+      {
+        confirmButtonText: t("report.delete_confirm"),
+        cancelButtonText: t("home.cancel"),
+        type: "warning"
+      }
+    );
+    await deleteInterviewApi(id);
+    ElMessage.success(t("report.delete_success"));
+    await router.push("/home");
+  } catch (error) {
+    if (error !== "cancel" && error !== "close") {
+      ElMessage.error(t("report.delete_failed"));
+    }
+  }
+};
+
+onMounted(async () => {
+  await getInterviewDetail();
+  await getInterviewReport();
+});
 </script>
 
 <template>
   <div class="record-page">
     <header class="record-header">
       <div class="header-left">
-        <h1 class="header-title">智能潜水艇系统访谈</h1>
-        <p class="header-subtitle">林晓 · 2026年8月9日 14:30 · 60分钟</p>
+        <h1 class="header-title">{{ interviewDetail?.base_info?.title }}</h1>
+        <p class="header-subtitle">
+          {{ interviewDetail?.base_info?.interviewee }} ·
+          {{ interviewDetail?.base_info?.start_time }} ·
+          {{ interviewDetail?.base_info?.duration }}{{ t("report.minutes") }}
+        </p>
       </div>
       <div class="header-actions">
-        <button type="button" aria-label="分享">
+        <button
+          style="cursor: not-allowed"
+          type="button"
+          :aria-label="t('report.share')"
+          :title="t('report.share')"
+        >
           <component :is="shareIcon" />
         </button>
-        <button type="button" aria-label="更多">
-          <component :is="moreIcon" />
-        </button>
+        <div class="more-action">
+          <button
+            type="button"
+            :aria-label="t('report.more')"
+            :title="t('report.more')"
+          >
+            <component :is="moreIcon" />
+          </button>
+          <div class="more-menu" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              :disabled="!canExportReport"
+              @click="handleExportReport('md', 'md')"
+            >
+              <component :is="downloadIcon" />
+              <span>{{ t("report.export", { extension: "md" }) }}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              :disabled="!canExportReport"
+              @click="handleExportReport('html', 'html')"
+            >
+              <component :is="downloadIcon" />
+              <span>{{ t("report.export", { extension: "html" }) }}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              :disabled="!canExportReport"
+              @click="handleExportReport('word', 'docx')"
+            >
+              <component :is="downloadIcon" />
+              <span>{{ t("report.export", { extension: "docx" }) }}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="danger"
+              @click="handleDeleteInterview"
+            >
+              <component :is="deleteIcon" />
+              <span>{{ t("report.delete") }}</span>
+            </button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -170,33 +284,35 @@ const questions = ref<Question[]>([
         <aside class="insight-card">
           <div class="stats">
             <div v-for="stat in stats" :key="stat.label">
-              <strong>{{ stat.value }}</strong>
+              <strong>{{ stat.value }}{{ stat.unit }}</strong>
               <span>{{ stat.label }}</span>
             </div>
           </div>
 
-          <h2>核心问题</h2>
+          <h2>{{ t("report.core_questions") }}</h2>
 
           <el-scrollbar class="insight-scroll">
-            <div class="question-list">
+            <div class="suggestion-list">
               <div
-                v-for="question in questions"
-                :key="question.num"
-                class="question"
+                v-for="suggestion in suggestions"
+                :key="suggestion.id"
+                class="suggestion"
               >
-                <div class="num" :class="{ warm: question.warm }">
-                  {{ question.num }}
-                </div>
-                <div class="q-copy">
-                  <div class="q-title">{{ question.title }}</div>
-                  <p>{{ question.purpose }}</p>
-                  <span
-                    ><component :is="locationIcon" />{{ question.note }}</span
+                <div class="suggestion-copy">
+                  <div
+                    class="suggestion-title"
+                    :class="{ 'not-mb': !suggestion.reason }"
                   >
+                    {{ suggestion.text }}
+                  </div>
+                  <p v-if="suggestion.reason" class="suggestion-goal">
+                    <strong>{{ t("report.follow_up_goal") }}</strong>
+                    <span>{{ suggestion.reason }}</span>
+                  </p>
                 </div>
-                <em :class="{ pending: question.status === '待追问' }">
-                  {{ question.status }}
-                </em>
+                <div class="suggestion-tag" :class="suggestion.status">
+                  {{ suggestionStatusLabel(suggestion.status) }}
+                </div>
               </div>
             </div>
           </el-scrollbar>
@@ -204,32 +320,53 @@ const questions = ref<Question[]>([
 
         <article class="report-card">
           <el-scrollbar class="report-scroll">
-            <!-- 访谈报告 -->
-            <div
-              v-if="activeTab === 'report'"
-              class="report-content"
-              v-html="renderedReport"
-            />
-            <!-- 转录 -->
+            <!-- Report -->
+            <template v-if="activeTab === 'report'">
+              <div
+                v-if="reportLoading"
+                class="report-loading"
+                aria-live="polite"
+              >
+                <div class="loading-spinner" aria-hidden="true">
+                  <span>{{ t("report.ai") }}</span>
+                </div>
+                <div class="loading-copy">
+                  <h2>{{ t("report.loading_title") }}</h2>
+                  <p>{{ t("report.loading_description") }}</p>
+                </div>
+              </div>
+              <div v-else-if="reportError" class="report-error">
+                <div class="error-mark">!</div>
+                <h2>{{ t("report.error_title") }}</h2>
+                <p>{{ t("report.error_description") }}</p>
+                <el-button
+                  type="primary"
+                  class="report-retry-button"
+                  :icon="refreshIcon"
+                  :title="t('report.reload')"
+                  @click="getInterviewReport"
+                >
+                  {{ t("report.reload") }}
+                </el-button>
+              </div>
+              <div v-else class="report-content" v-html="renderedReport" />
+            </template>
+            <!-- Transcript -->
             <div v-else-if="activeTab === 'transcript'" class="transcript-list">
               <article
-                v-for="(item, index) in transcriptEntries"
-                :key="`${item.role}-${item.time}-${index}`"
+                v-for="item in transcriptList"
+                :key="item.seg_id"
                 class="transcript-item"
               >
-                <div class="speaker-badge" :class="item.tone">
-                  {{ item.role === "说话人1" ? "1" : "2" }}
-                </div>
                 <div class="transcript-content">
                   <div class="transcript-meta">
-                    <strong>{{ item.role }}</strong>
-                    <span>{{ item.time }}</span>
+                    <time>{{ item.time }}</time>
                   </div>
                   <p>{{ item.text }}</p>
                 </div>
               </article>
             </div>
-            <!-- 笔记 -->
+            <!-- Notes -->
             <div v-else class="note-image" />
           </el-scrollbar>
         </article>
@@ -292,6 +429,10 @@ const questions = ref<Question[]>([
     align-items: center;
   }
 
+  .more-action {
+    position: relative;
+  }
+
   .header-actions button {
     display: grid;
     place-items: center;
@@ -304,6 +445,78 @@ const questions = ref<Question[]>([
     box-shadow:
       0 8px 20px rgb(107 126 154 / 12%),
       inset 0 1px 0 rgb(255 255 255 / 90%);
+  }
+
+  .more-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 10;
+    display: grid;
+    width: 156px;
+    padding: 6px;
+    visibility: hidden;
+    background: rgb(255 255 255 / 96%);
+    border: 1px solid rgb(223 231 240 / 90%);
+    border-radius: 10px;
+    box-shadow: 0 10px 24px rgb(31 47 86 / 16%);
+    opacity: 0;
+    transform: translateY(-4px);
+    transition:
+      opacity 0.16s ease,
+      transform 0.16s ease,
+      visibility 0.16s ease;
+  }
+
+  .more-action:hover .more-menu,
+  .more-action:focus-within .more-menu {
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .more-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    height: 36px;
+    padding: 0 10px;
+    font-size: 13px;
+    color: #334155;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    box-shadow: none;
+  }
+
+  .more-menu button:hover,
+  .more-menu button:focus-visible {
+    background: #f1f5f9;
+    outline: none;
+  }
+
+  .more-menu button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .more-menu button:disabled:hover {
+    background: transparent;
+  }
+
+  .more-menu button :deep(svg) {
+    width: 16px;
+    margin-right: 8px;
+  }
+
+  .more-menu button.danger {
+    color: #e05252;
+  }
+
+  .more-menu button.danger:hover,
+  .more-menu button.danger:focus-visible {
+    background: #fff1f1;
   }
 
   .header-actions img {
@@ -350,6 +563,15 @@ const questions = ref<Question[]>([
   .tab-bar :deep(.pure-segmented-item:hover) {
     background: rgb(255 255 255 / 35%);
     border-radius: 18px;
+  }
+
+  .tab-bar :deep(.pure-segmented-item-disabled) {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .tab-bar :deep(.pure-segmented-item-disabled:hover) {
+    background: transparent;
   }
 
   .tab-bar :deep(.pure-segmented-item:hover > div) {
@@ -409,6 +631,97 @@ const questions = ref<Question[]>([
 
   .report-content {
     padding: 0 16px;
+  }
+
+  .report-loading,
+  .report-error {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 360px;
+    padding: 32px 24px;
+    text-align: center;
+  }
+
+  .loading-spinner {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 58px;
+    height: 58px;
+    margin-bottom: 18px;
+    border: 3px solid rgb(53 108 255 / 16%);
+    border-top-color: #356cff;
+    border-radius: 50%;
+    animation: loading-spin 1s linear infinite;
+  }
+
+  .loading-spinner span {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #fff;
+    background: #356cff;
+    border-radius: 50%;
+    box-shadow: 0 10px 24px rgb(53 108 255 / 28%);
+    animation: loading-spin 1s linear infinite reverse;
+  }
+
+  .loading-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .loading-copy h2,
+  .report-error h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 800;
+    color: #23376c;
+  }
+
+  .loading-copy p,
+  .report-error p {
+    margin: 10px 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #8995aa;
+  }
+
+  .report-error .error-mark {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    margin-bottom: 16px;
+    font-size: 24px;
+    font-weight: 800;
+    color: #e2786f;
+    background: rgb(239 121 108 / 12%);
+    border: 1px solid rgb(239 121 108 / 24%);
+    border-radius: 50%;
+  }
+
+  .report-retry-button {
+    margin-top: 20px;
+    border-radius: 8px;
+  }
+
+  @keyframes loading-spin {
+    from {
+      transform: rotate(0deg);
+    }
+
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .report-content :deep(h1) {
@@ -500,19 +813,40 @@ const questions = ref<Question[]>([
 
   /* 转录列表样式 */
   .transcript-list {
-    padding: 8px 12px 12px 6px;
+    padding: 0 12px;
   }
 
   .transcript-item {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
-    gap: 14px;
-    padding: 18px 12px;
+    display: block;
+    padding: 14px 16px;
     border-bottom: 1px solid rgb(221 226 236 / 84%);
   }
 
   .transcript-item:last-child {
     border-bottom: 0;
+  }
+
+  .transcript-content {
+    min-width: 0;
+  }
+
+  .transcript-meta {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .transcript-meta time {
+    font-size: 13px;
+    font-weight: 600;
+    color: #94a3b8;
+  }
+
+  .transcript-content p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.75;
+    color: #334155;
   }
 
   .speaker-badge {
@@ -615,19 +949,18 @@ const questions = ref<Question[]>([
     color: #1f315e;
   }
 
-  .question-list {
+  .suggestion-list {
     padding: 0 16px 10px;
     display: grid;
     gap: 10px;
   }
 
-  .question {
+  .suggestion {
     position: relative;
-    display: grid;
-    grid-template-columns: 30px 1fr auto;
+    display: flex;
+    justify-content: space-between;
     gap: 8px;
-    min-height: 91px;
-    padding: 13px 10px 11px;
+    padding: 12px 14px;
     background: rgb(255 255 255 / 46%);
     border: 1px solid rgb(218 228 243 / 90%);
     border-radius: 16px;
@@ -650,46 +983,61 @@ const questions = ref<Question[]>([
     background: #ffe9e7;
   }
 
-  .q-title {
-    margin: 1px 0 7px;
+  .suggestion-title {
+    margin-bottom: 8px;
     font-size: 14px;
-    font-weight: 850;
-    line-height: 1.15;
-    color: #253865;
+    font-weight: 700;
+    line-height: 1.5;
+    color: #24324a;
+    overflow-wrap: anywhere;
+
+    &.not-mb {
+      margin-bottom: 0;
+    }
   }
 
-  .q-copy p {
-    margin: 0 0 8px;
+  .suggestion-copy p {
     font-size: 12px;
-    font-weight: 650;
-    line-height: 1.1;
     color: #a0aabe;
   }
 
-  .q-copy span {
-    display: flex;
-    gap: 4px;
-    align-items: center;
+  .suggestion-copy span {
     font-size: 12px;
-    font-weight: 650;
-    line-height: 1;
     color: #8e9ab0;
   }
 
-  .q-copy img {
-    width: 13px;
-  }
-
-  .question em {
-    align-self: start;
-    font-size: 12px;
-    font-style: normal;
+  .suggestion-tag {
+    align-self: flex-start;
+    white-space: nowrap;
+    padding: 3px 8px;
+    font-size: 11px;
     font-weight: 700;
-    color: #6f7a90;
+    border-radius: 14px;
   }
 
-  .question em.pending {
-    color: #e27272;
+  .suggestion-tag.todo {
+    color: #d97706;
+    background: rgb(245 158 11 / 14%);
+  }
+
+  .suggestion-tag.new {
+    color: #dc2626;
+    background: rgb(224 38 38 / 14%);
+  }
+
+  .suggestion-tag.done {
+    color: #0f9d63;
+    background: rgb(16 185 129 / 14%);
+  }
+
+  .suggestion-tag.ignored {
+    color: #64748b;
+    background: rgb(148 163 184 / 16%);
+  }
+
+  .suggestion-tag.skipped {
+    color: #64748b;
+    background: rgb(148 163 184 / 16%);
   }
 }
 

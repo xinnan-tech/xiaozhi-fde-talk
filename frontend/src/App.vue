@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
+import zhTw from "element-plus/es/locale/lang/zh-tw";
+import en from "element-plus/es/locale/lang/en";
 import { ElConfigProvider, ElMessage } from "element-plus";
+import { useI18n } from "vue-i18n";
 import { addPathMatch } from "@/router/utils";
 import { usePermissionStoreHook } from "@/store/modules/permission";
 import { useDialogStoreHook } from "@/store/modules/dialog";
@@ -12,7 +15,17 @@ import CreateInterviewDialog from "@/components/interview/CreateInterviewDialog.
 import LoginDialog from "@/components/auth/LoginDialog.vue";
 import { saveInterviewApi, type CreateInterviewForm } from "@/api/interview";
 
-const currentLocale = zhCn;
+const { locale, t } = useI18n();
+const currentLocale = computed(() => {
+  switch (locale.value) {
+    case "zh-TW":
+      return zhTw;
+    case "en-US":
+      return en;
+    default:
+      return zhCn;
+  }
+});
 const dialogStore = useDialogStoreHook();
 const interviewStore = useInterviewStoreHook();
 const { createInterviewVisible, loginVisible } = storeToRefs(dialogStore);
@@ -25,12 +38,12 @@ const handleCreateInterview = async (form: CreateInterviewForm) => {
   try {
     await saveInterviewApi(form);
     dialogStore.closeCreateInterview();
-    ElMessage.success("访谈创建成功");
+    ElMessage.success(t("app.interview_create_success"));
     interviewStore.markInterviewCreated();
   } catch (error: any) {
     const detail = error?.response?.data?.detail;
     ElMessage.error(
-      typeof detail === "string" ? detail : "访谈创建失败，请稍后重试"
+      typeof detail === "string" ? detail : t("app.interview_create_failed")
     );
   } finally {
     creatingInterview.value = false;

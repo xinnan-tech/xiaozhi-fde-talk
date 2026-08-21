@@ -88,6 +88,16 @@ export const saveInterviewApi = (data: CreateInterviewForm) => {
   });
 };
 
+export type TranscriptItem = {
+  corrected_text: string;
+  end_ms: number;
+  final: true;
+  seg_id: string;
+  speaker: string;
+  start_ms: number;
+  text: string;
+};
+
 export type InterviewDetailItem = {
   id: string;
   text: string;
@@ -120,7 +130,12 @@ export type InterviewDetailType = {
   skipped_ids: string[];
   ignored_ids: string[];
   coverage: Record<string, unknown>;
-  transcript: unknown[];
+  transcript: TranscriptItem[];
+};
+
+export type InterviewReportType = {
+  status: "ready" | string;
+  content_md: string;
 };
 
 /** 获取访谈详情 */
@@ -152,5 +167,33 @@ export const endInterviewApi = (sessionId: string) => {
   return http.request<unknown>(
     "post",
     baseUrlApi(`/api/v1/interviews/${sessionId}/end`)
+  );
+};
+
+/** 获取访谈报告 */
+export const getInterviewReportApi = (sessionId: string) => {
+  return http.request<InterviewReportType>(
+    "get",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/report`)
+  );
+};
+
+/** 导出访谈报告 */
+export const exportInterviewReportApi = (sessionId: string, format = "md") => {
+  return http.request<Blob>(
+    "post",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/export`),
+    {
+      params: { format },
+      responseType: "blob"
+    }
+  );
+};
+
+/** 删除访谈 */
+export const deleteInterviewApi = (sessionId: string) => {
+  return http.request<unknown>(
+    "delete",
+    baseUrlApi(`/api/v1/interviews/${sessionId}`)
   );
 };

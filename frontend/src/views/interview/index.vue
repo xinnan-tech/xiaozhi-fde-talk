@@ -1,8 +1,8 @@
 ﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import dayjs from "dayjs";
-import Plus from "~icons/ep/plus";
 import ChatDotRound from "~icons/ep/chat-dot-round";
 import EditPen from "~icons/ep/edit-pen";
 import RefreshLeft from "~icons/ep/refresh-left";
@@ -15,12 +15,14 @@ import User from "~icons/ep/user";
 import VideoPlay from "~icons/ep/video-play";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
+import ReSegmented from "@/components/ReSegmented";
 import LayFooter from "@/layout/components/lay-footer/index.vue";
 import {
   endInterviewApi,
   getInterviewDetailApi,
   ignoreInterviewItemApi,
-  InterviewDetailType,
+  type InterviewDetailItem,
+  type InterviewDetailType,
   unignoreInterviewItemApi
 } from "@/api/interview";
 import { useAudioRecorder } from "@/composables/useAudioRecorder";
@@ -35,6 +37,7 @@ defineOptions({
 
 const router = useRouter();
 const route = useRoute();
+const { locale, t } = useI18n();
 const backIcon = useRenderIcon("heroicons:arrow-long-left");
 const eraserIcon = useRenderIcon("boxicons:eraser-filled");
 const handwritingIcon = useRenderIcon("boxicons:pencil-draw");
@@ -43,12 +46,6 @@ const aiLineIcon = useRenderIcon("si:ai-line");
 const newItemIcon = useRenderIcon("clarity:new-solid");
 const microphoneIcon = useRenderIcon("lucide:mic");
 const microphoneOffIcon = useRenderIcon("lucide:mic-off");
-
-const baseInterviewTitle = computed(() => {
-  const title = route.query.title;
-  if (typeof title === "string" && title.trim()) return title.trim();
-  return "访谈";
-});
 
 /** 访谈详情 */
 const interviewDetail = ref<InterviewDetailType>();
@@ -59,21 +56,21 @@ const startedAtDisplay = computed(() => {
 const startInterviewButtonText = computed(() => {
   const status = interviewDetail.value?.status;
   return status === "in_progress" || status === "suspended"
-    ? "继续访谈"
-    : "开始访谈";
+    ? t("interview.action.continue")
+    : t("interview.action.start");
 });
 const interviewStatusText = computed(() => {
   switch (interviewDetail.value?.status) {
     case "in_progress":
-      return "进行中";
+      return t("interview.status.in_progress");
     case "suspended":
-      return "已暂停";
+      return t("interview.status.suspended");
     case "ended":
     case "extracting":
     case "done":
-      return "已结束";
+      return t("interview.status.ended");
     default:
-      return "待开始";
+      return t("interview.status.created");
   }
 });
 const interviewStatusClass = computed(() => {
@@ -90,8 +87,12 @@ const interviewStatusClass = computed(() => {
       return "status-created";
   }
 });
-const activeMode = ref("转录");
-const activeMetric = ref("待追问");
+const activeMode = ref("transcript");
+const activeModeIndex = ref(2);
+type SuggestionStatus = InterviewDetailItem["status"];
+type SuggestionMetric = SuggestionStatus | "all" | "pending";
+
+const activeMetric = ref<SuggestionMetric>("pending");
 const noteContent = ref("");
 const signatureRef = ref();
 const brushColorPresets = [
@@ -123,7 +124,7 @@ type SuggestionCard = {
   title: string;
   tag: string;
   tagClass: string;
-  status: "待追问" | "已覆盖" | "已忽略";
+  status: SuggestionStatus;
   isNew: boolean;
   goal: string;
   hint: string;
@@ -155,17 +156,33 @@ type SuggestionSourceItem = {
 const mapItemStatus = (
   item: SuggestionSourceItem,
   ignoredIds: Set<string>
-): SuggestionCard["status"] => {
-  if (
-    ignoredIds.has(item.id) ||
-    item.status === "skipped" ||
-    item.status === "ignored"
-  ) {
-    return "已忽略";
-  }
-  if (item.status === "done") return "已覆盖";
-  return "待追问";
+): SuggestionStatus => {
+  if (ignoredIds.has(item.id)) return "ignored";
+  return item.status as SuggestionStatus;
 };
+
+const suggestionStatusKey = (status: SuggestionStatus) => {
+  switch (status) {
+    case "new":
+      return "interview.suggestion.pending";
+    case "todo":
+      return "interview.suggestion.pending";
+    case "done":
+      return "interview.suggestion.covered";
+    case "ignored":
+      return "interview.suggestion.ignored";
+    case "skipped":
+      return "interview.suggestion.skipped";
+    default:
+      return "interview.suggestion.pending";
+  }
+};
+
+const suggestionStatusLabel = (status: SuggestionStatus) =>
+  t(suggestionStatusKey(status));
+
+const isPendingStatus = (status: SuggestionStatus) =>
+  status === "new" || status === "todo";
 
 const createSuggestionCardsFromItems = (
   items: SuggestionSourceItem[],
@@ -186,9 +203,9 @@ const createSuggestionCardsFromItems = (
   return orderedItems.map((item, index) => {
     const status = mapItemStatus(item, ignoredIds);
     const tagClass =
-      status === "已覆盖"
+      status === "done"
         ? "success"
-        : status === "已忽略"
+        : status === "ignored" || status === "skipped"
           ? "muted"
           : "warning";
 
@@ -228,7 +245,7 @@ const mergeSuggestionCards = (items: SuggestionSourceItem[]) => {
     items
       .filter(item => {
         const status = mapItemStatus(item, new Set());
-        return !existingCards.has(item.id) && status === "待追问";
+        return !existingCards.has(item.id) && isPendingStatus(status);
       })
       .map(item => item.id)
   );
@@ -300,7 +317,7 @@ const handleStartInterview = async () => {
     shouldResumeMicrophone.value = false;
     isInterviewStarted.value = false;
     stopInterviewTimer();
-    ElMessage.error("无法开启麦克风，请检查浏览器权限");
+    ElMessage.error(t("interview.runtime.mic_permission"));
     return;
   }
 
@@ -327,49 +344,55 @@ const toggleMicrophone = async () => {
   await openMicrophone();
 };
 
-const metrics = computed(() => {
+const metrics = computed<
+  Array<{
+    label: string;
+    value: number;
+    tone: string;
+    filter: SuggestionMetric;
+  }>
+>(() => {
   const counts = suggestionCards.value.reduce(
     (acc, item) => {
       acc[item.status] = (acc[item.status] ?? 0) + 1;
       return acc;
     },
-    {
-      待追问: 0,
-      已覆盖: 0,
-      已忽略: 0
-    } as Record<string, number>
+    {} as Record<SuggestionStatus, number>
   );
 
   return [
     {
-      label: "待追问",
-      value: counts["待追问"],
+      label: t("interview.suggestion.pending"),
+      value: (counts.new ?? 0) + (counts.todo ?? 0),
       tone: "warn",
-      filter: "待追问"
+      filter: "pending"
     },
     {
-      label: "已覆盖",
-      value: counts["已覆盖"],
+      label: t("interview.suggestion.covered"),
+      value: counts.done ?? 0,
       tone: "success",
-      filter: "已覆盖"
+      filter: "done"
     },
     {
-      label: "已忽略",
-      value: counts["已忽略"],
+      label: t("interview.suggestion.ignored"),
+      value: counts.ignored ?? 0,
       tone: "muted",
-      filter: "已忽略"
+      filter: "ignored"
     },
     {
-      label: "总问题",
+      label: t("interview.suggestion.total"),
       value: suggestionCards.value.length,
       tone: "primary",
-      filter: "总问题"
+      filter: "all"
     }
   ];
 });
 
 const visibleSuggestionCards = computed(() => {
-  if (activeMetric.value === "总问题") return suggestionCards.value;
+  if (activeMetric.value === "all") return suggestionCards.value;
+  if (activeMetric.value === "pending") {
+    return suggestionCards.value.filter(item => isPendingStatus(item.status));
+  }
   return suggestionCards.value.filter(
     item => item.status === activeMetric.value
   );
@@ -392,14 +415,14 @@ const restoreIgnoredSuggestion = (itemId: string) => {
   if (!card) return;
 
   clearIgnoreTimer(card);
-  card.status = "待追问";
-  card.tag = "待追问";
+  card.status = "todo";
+  card.tag = "todo";
   card.tagClass = "warning";
 };
 
 const setIgnoredSuggestion = (card: SuggestionCard) => {
-  card.status = "已忽略";
-  card.tag = "已忽略";
+  card.status = "ignored";
+  card.tag = "ignored";
   card.tagClass = "muted";
 };
 
@@ -429,7 +452,7 @@ const formatTranscriptTime = (startMs: number | null = null) => {
       .map(value => String(value).padStart(2, "0"))
       .join(":");
   }
-  return new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  return new Date().toLocaleTimeString(locale.value, { hour12: false });
 };
 
 const createTranscriptEntries = (transcript: unknown[]) => {
@@ -448,7 +471,7 @@ const createTranscriptEntries = (transcript: unknown[]) => {
       const speaker =
         typeof record.speaker === "string" && record.speaker !== "unknown"
           ? record.speaker
-          : "说话人1";
+          : t("interview.runtime.speaker", { number: 1 });
 
       return [
         {
@@ -481,7 +504,10 @@ const appendAsrMessage = (
   const nextEntry = {
     segId: message.seg_id,
     startMs: message.start_ms,
-    role: message.speaker === "unknown" ? "说话人1" : message.speaker,
+    role:
+      message.speaker === "unknown"
+        ? t("interview.runtime.speaker", { number: 1 })
+        : message.speaker,
     time: formatTranscriptTime(message.start_ms),
     text: message.text,
     tone: "blue" as const
@@ -498,11 +524,11 @@ const appendAsrMessage = (
 const handleTakeoverConflict = async (message: string) => {
   try {
     await ElMessageBox.confirm(
-      message || "该访谈已在其他页面打开，是否接管？",
-      "访谈连接冲突",
+      message || t("interview.runtime.connection_conflict"),
+      t("interview.runtime.connection_conflict_title"),
       {
-        confirmButtonText: "接管",
-        cancelButtonText: "取消",
+        confirmButtonText: t("interview.runtime.takeover"),
+        cancelButtonText: t("home.cancel"),
         type: "warning"
       }
     );
@@ -522,11 +548,11 @@ const handleAsrUnavailable = async (message: string) => {
   isAsrUnavailableDialogOpen = true;
   try {
     await ElMessageBox.confirm(
-      message || "语音识别服务暂时不可用，请检查系统配置。",
-      "语音识别服务不可用",
+      message || t("interview.runtime.asr_unavailable"),
+      t("interview.runtime.asr_unavailable_title"),
       {
-        confirmButtonText: "前往配置",
-        cancelButtonText: "取消",
+        confirmButtonText: t("interview.runtime.go_config"),
+        cancelButtonText: t("home.cancel"),
         type: "error"
       }
     );
@@ -571,13 +597,13 @@ const handleServerMessage = (message: InterviewServerMessage) => {
     stopRecording();
     isInterviewStarted.value = false;
     stopInterviewTimer();
-    ElMessage.warning(message.reason || "当前访谈已被其他连接接管");
+    ElMessage.warning(message.reason || t("interview.runtime.kicked"));
     return;
   }
 
   if (message.type === "audio.low_level") {
     console.warn("[InterviewPage] 收到低音量提醒", message);
-    ElMessage.warning(message.message || "声音较小，请靠近麦克风");
+    ElMessage.warning(message.message || t("interview.runtime.low_volume"));
     return;
   }
 
@@ -666,11 +692,11 @@ const {
 
 const openMicrophone = async () => {
   if (!isWebSocketConnected.value) {
-    ElMessage.warning("WebSocket 尚未连接");
+    ElMessage.warning(t("interview.runtime.ws_not_connected"));
     return false;
   }
   if (!sendListenState("start")) {
-    ElMessage.warning("无法开始监听，请稍后重试");
+    ElMessage.warning(t("interview.runtime.listen_failed"));
     return false;
   }
   const started = await startRecording();
@@ -680,7 +706,7 @@ const openMicrophone = async () => {
 
 const handleIgnoreSuggestion = (itemId: string) => {
   const card = suggestionCards.value.find(item => item.itemId === itemId);
-  if (!card || card.status !== "待追问") return;
+  if (!card || !isPendingStatus(card.status)) return;
 
   clearIgnoreTimer(card);
   card.ignoreCountdown = 3;
@@ -698,7 +724,7 @@ const handleIgnoreSuggestion = (itemId: string) => {
       }
     } catch {
       restoreIgnoredSuggestion(itemId);
-      ElMessage.error("忽略问题失败，请稍后重试");
+      ElMessage.error(t("interview.suggestion.ignore_failed"));
     }
   }, 3000);
 };
@@ -711,17 +737,17 @@ const handleUndoIgnore = (itemId: string) => {
 
 const handleUnignoreSuggestion = async (itemId: string) => {
   const card = suggestionCards.value.find(item => item.itemId === itemId);
-  if (!card || card.status !== "已忽略") return;
+  if (!card || card.status !== "ignored") return;
 
   try {
     await unignoreInterviewItemApi(getInterviewSessionId(), itemId);
     restoreIgnoredSuggestion(itemId);
   } catch {
-    ElMessage.error("取消忽略失败，请稍后重试");
+    ElMessage.error(t("interview.suggestion.unignore_failed"));
   }
 };
 
-const setMetric = async (metric: string) => {
+const setMetric = async (metric: SuggestionMetric) => {
   // 切换分类时只更新内容，不触发整组列表的进出场动画。
   const animationToken = ++suggestionMetricAnimationToken;
   suggestionListAnimationEnabled.value = false;
@@ -750,39 +776,62 @@ const handleBack = () => {
 };
 
 const setMode = (mode: string) => {
-  if (mode !== "转录") return;
+  if (mode !== "transcript") return;
   activeMode.value = mode;
   void scrollTranscriptToTop();
 };
 
-const isKeyboardMode = computed(() => activeMode.value === "键盘");
-const isHandwritingMode = computed(() => activeMode.value === "手写");
+const isKeyboardMode = computed(() => activeMode.value === "keyboard");
+const isHandwritingMode = computed(() => activeMode.value === "handwriting");
 
 const transcriptPanelTitle = computed(() => {
-  if (isHandwritingMode.value) return "手写记录";
-  return isKeyboardMode.value ? "我的笔记" : "实时转录";
+  if (isHandwritingMode.value) return t("interview.panel.handwriting");
+  return isKeyboardMode.value
+    ? t("interview.panel.notes")
+    : t("interview.panel.transcript");
 });
 
-const handwritingActions = [
+const modeOptions = computed(() => [
+  {
+    value: "handwriting",
+    label: t("interview.mode.handwriting"),
+    disabled: true
+  },
+  {
+    value: "keyboard",
+    label: t("interview.mode.keyboard"),
+    disabled: true
+  },
+  {
+    value: "transcript",
+    label: t("interview.mode.transcript")
+  }
+]);
+
+const handleModeChange = ({ option }: { option: { value?: unknown } }) => {
+  if (typeof option.value === "string") setMode(option.value);
+};
+
+const handwritingActions = computed(() => [
   {
     key: "undo",
-    label: "撤销",
+    label: t("interview.handwriting.undo"),
     icon: RefreshLeft,
     handler: handleUndo
   },
   {
     key: "clear",
-    label: "清空",
+    label: t("interview.handwriting.clear"),
     icon: Delete,
     handler: handleClear
   },
   {
     key: "export",
-    label: "导出",
+    label: t("interview.handwriting.export"),
     icon: Download,
     handler: handleExportSignature
   }
-];
+]);
 
 const focusNoteEditor = () => {
   noteInputRef.value?.focus?.();
@@ -826,11 +875,15 @@ function handleExportSignature() {
 
 const handleEndInterview = async () => {
   try {
-    await ElMessageBox.confirm("确定结束当前访谈吗？", "结束访谈", {
-      confirmButtonText: "结束",
-      cancelButtonText: "取消",
-      type: "warning"
-    });
+    await ElMessageBox.confirm(
+      t("interview.end_confirm"),
+      t("interview.end_title"),
+      {
+        confirmButtonText: t("interview.action.end"),
+        cancelButtonText: t("home.cancel"),
+        type: "warning"
+      }
+    );
   } catch {
     return;
   }
@@ -838,7 +891,7 @@ const handleEndInterview = async () => {
   try {
     await endInterviewApi(getInterviewSessionId());
   } catch {
-    ElMessage.error("结束访谈失败，请稍后重试");
+    ElMessage.error(t("interview.end_failed"));
     return;
   }
 
@@ -876,10 +929,12 @@ onMounted(() => {
             text
             @click="handleBack"
           >
-            返回
+            {{ $t("interview.back") }}
           </el-button>
           <h1 class="page-title">
-            {{ interviewDetail?.base_info?.title || "访谈" }}
+            {{
+              interviewDetail?.base_info?.title || $t("interview.default_title")
+            }}
           </h1>
         </div>
       </header>
@@ -889,28 +944,24 @@ onMounted(() => {
           <div class="left-panel-header">
             <div class="panel-title">
               <component :is="aiLineIcon" class="panel-icon" />
-              <span>AI 追问建议与覆盖</span>
+              <span>{{ $t("interview.panel.coaching") }}</span>
               <span
                 v-if="isCoachingRecomputing"
                 class="panel-status panel-status-thinking"
               >
-                AI 思考中
+                {{ $t("interview.panel.thinking") }}
               </span>
               <span
                 v-if="idleWarningSeconds !== null"
                 class="panel-status panel-status-idle"
               >
-                即将暂停 {{ idleWarningSeconds }} 秒
+                {{
+                  $t("interview.panel.pause_in", {
+                    seconds: idleWarningSeconds
+                  })
+                }}
               </span>
             </div>
-            <!-- <el-button
-              class="panel-action"
-              text
-              :icon="Plus"
-              @click="handleMockNewSuggestion"
-            >
-              模拟新建议
-            </el-button> -->
           </div>
 
           <section class="metric-grid">
@@ -943,8 +994,8 @@ onMounted(() => {
                 :key="`${item.itemId}-${item.status}`"
                 class="suggestion-card"
                 :class="{
-                  ignored: item.status === '已忽略',
-                  covered: item.status === '已覆盖'
+                  ignored: item.status === 'ignored',
+                  covered: item.status === 'done' || item.status === 'skipped'
                 }"
               >
                 <div class="suggestion-head">
@@ -952,64 +1003,66 @@ onMounted(() => {
                     <span class="suggestion-title-text">{{ item.title }}</span>
                     <component
                       :is="newItemIcon"
-                      v-if="item.isNew && item.status === '待追问'"
+                      v-if="item.isNew && isPendingStatus(item.status)"
                       class="suggestion-new-icon"
-                      aria-label="新增问题"
+                      :aria-label="$t('interview.suggestion.new_question')"
                     />
                   </h3>
                   <span class="suggestion-tag" :class="item.tagClass">
-                    {{ item.tag }}
+                    {{ suggestionStatusLabel(item.status) }}
                   </span>
                 </div>
                 <p v-if="item.goal" class="suggestion-goal">
-                  <strong>追问目的：</strong>
+                  <strong>{{ $t("interview.suggestion.goal") }}</strong>
                   <span>{{ item.goal }}</span>
                 </p>
                 <p class="suggestion-hint">{{ item.hint }}</p>
                 <div
                   v-if="
-                    (item.isNew && item.status === '待追问') ||
-                    item.status === '待追问' ||
-                    item.status === '已忽略' ||
+                    (item.isNew && isPendingStatus(item.status)) ||
+                    isPendingStatus(item.status) ||
+                    item.status === 'ignored' ||
                     item.ignoreCountdown !== null
                   "
                   class="suggestion-head-actions"
                 >
                   <button
                     v-if="
-                      item.status === '待追问' ||
-                      item.status === '已忽略' ||
+                      isPendingStatus(item.status) ||
+                      item.status === 'ignored' ||
                       item.ignoreCountdown !== null
                     "
                     type="button"
                     class="suggestion-ignore-button"
                     :class="{ countdown: item.ignoreCountdown !== null }"
                     :aria-label="
-                      item.ignoreCountdown !== null
-                        ? '撤销忽略'
-                        : item.status === '已忽略'
-                          ? '取消忽略'
-                          : '忽略问题'
+                      $t(
+                        item.ignoreCountdown !== null
+                          ? 'interview.suggestion.undo_ignore'
+                          : item.status === 'ignored'
+                            ? 'interview.suggestion.unignore'
+                            : 'interview.suggestion.ignore'
+                      )
                     "
                     @click="
                       item.ignoreCountdown !== null
                         ? handleUndoIgnore(item.itemId)
-                        : item.status === '已忽略'
+                        : item.status === 'ignored'
                           ? handleUnignoreSuggestion(item.itemId)
                           : handleIgnoreSuggestion(item.itemId)
                     "
                   >
                     <component
                       :is="ignoreIcon"
-                      v-if="item.status !== '已忽略'"
+                      v-if="item.status !== 'ignored'"
                       class="suggestion-ignore-icon"
                     />
                     <span>{{
                       item.ignoreCountdown !== null
                         ? `${item.ignoreCountdown}s`
-                        : item.status === "已忽略"
-                          ? "取消忽略"
-                          : "忽略"
+                        : item.status === "ignored"
+                          ? $t("interview.suggestion.unignore")
+                          : $t("interview.suggestion.ignore_short")
                     }}</span>
                   </button>
                 </div>
@@ -1025,7 +1078,7 @@ onMounted(() => {
                 <div class="session-meta-copy">
                   <span class="session-meta-label">
                     <User class="session-meta-icon" />
-                    <span>受访者</span>
+                    <span>{{ $t("interview.meta.interviewee") }}</span>
                   </span>
                   <strong>{{
                     interviewDetail?.base_info?.interviewee || "--"
@@ -1039,7 +1092,7 @@ onMounted(() => {
                 <div class="session-meta-copy">
                   <span class="session-meta-label">
                     <Calendar class="session-meta-icon" />
-                    <span>访谈时间</span>
+                    <span>{{ $t("interview.meta.start_time") }}</span>
                   </span>
                   <strong>{{ startedAtDisplay }}</strong>
                 </div>
@@ -1048,7 +1101,7 @@ onMounted(() => {
                 <div class="session-meta-copy">
                   <span class="session-meta-label">
                     <Aim class="session-meta-icon" />
-                    <span>访谈目标</span>
+                    <span>{{ $t("interview.meta.goal") }}</span>
                   </span>
                   <strong>{{ interviewDetail?.goal || "--" }}</strong>
                 </div>
@@ -1059,7 +1112,7 @@ onMounted(() => {
               <span class="transcribing-badge" :class="interviewStatusClass">
                 <span class="transcribing-main">
                   <span class="transcribing-dot" />
-                  <span>访谈中</span>
+                  <span>{{ $t("interview.in_progress") }}</span>
                 </span>
                 <small>{{ interviewStatusText }}</small>
               </span>
@@ -1080,7 +1133,13 @@ onMounted(() => {
                 @click="toggleMicrophone"
               >
                 <span class="session-action-label session-microphone-label">
-                  {{ isMicrophoneEnabled ? "关闭麦克风" : "开启麦克风" }}
+                  {{
+                    $t(
+                      isMicrophoneEnabled
+                        ? "interview.action.disable_mic"
+                        : "interview.action.enable_mic"
+                    )
+                  }}
                 </span>
               </el-button>
               <el-button
@@ -1089,7 +1148,9 @@ onMounted(() => {
                 :icon="SwitchButton"
                 @click="handleEndInterview"
               >
-                <span class="session-action-label">结束访谈</span>
+                <span class="session-action-label">{{
+                  $t("interview.action.end")
+                }}</span>
               </el-button>
             </div>
           </div>
@@ -1107,19 +1168,11 @@ onMounted(() => {
                 <span>{{ transcriptPanelTitle }}</span>
               </div>
 
-              <div class="mode-switch">
-                <button
-                  v-for="mode in ['手写', '键盘', '转录']"
-                  :key="mode"
-                  class="mode-button"
-                  :class="{ active: activeMode === mode }"
-                  :disabled="mode !== '转录'"
-                  :title="mode !== '转录' ? `${mode}功能暂未开放` : undefined"
-                  @click="setMode(mode)"
-                >
-                  {{ mode }}
-                </button>
-              </div>
+              <ReSegmented
+                v-model="activeModeIndex"
+                :options="modeOptions"
+                @change="handleModeChange"
+              />
             </div>
 
             <el-scrollbar
@@ -1154,7 +1207,7 @@ onMounted(() => {
                   v-model="noteContent"
                   class="note-input"
                   type="textarea"
-                  placeholder="在这里记录你的访谈笔记..."
+                  :placeholder="$t('interview.notes.placeholder')"
                   resize="none"
                 />
               </div>
@@ -1163,7 +1216,9 @@ onMounted(() => {
             <div v-else class="handwriting-shell">
               <div class="handwriting-toolbar">
                 <div class="handwriting-toolbar-group">
-                  <span class="handwriting-group-label">常用</span>
+                  <span class="handwriting-group-label">{{
+                    $t("interview.handwriting.common")
+                  }}</span>
                   <div class="handwriting-tools">
                     <button
                       v-for="action in handwritingActions"
@@ -1182,13 +1237,21 @@ onMounted(() => {
                       @click="toggleEraserMode"
                     >
                       <component :is="eraserIcon" class="tool-icon" />
-                      <span>{{ isEraserMode ? "正在擦除" : "橡皮擦" }}</span>
+                      <span>
+                        {{
+                          isEraserMode
+                            ? $t("interview.handwriting.erasing")
+                            : $t("interview.handwriting.eraser")
+                        }}
+                      </span>
                     </button>
                   </div>
                 </div>
 
                 <div class="handwriting-toolbar-group">
-                  <span class="handwriting-group-label">颜色</span>
+                  <span class="handwriting-group-label">{{
+                    $t("interview.handwriting.color")
+                  }}</span>
                   <div class="handwriting-colors">
                     <button
                       v-for="color in brushColorPresets"
@@ -1508,9 +1571,7 @@ onMounted(() => {
 } */
 
   .suggestion-title {
-    display: flex;
-    gap: 5px;
-    align-items: center;
+    display: block;
     min-width: 0;
     margin: 0;
     font-size: 15px;
@@ -1521,19 +1582,12 @@ onMounted(() => {
   }
 
   .suggestion-title-text {
-    min-width: 0;
     overflow-wrap: anywhere;
     vertical-align: middle;
   }
 
   .suggestion-tag {
-    display: inline-flex;
-    grid-column: 2;
-    grid-row: 1;
-    align-self: center;
-    align-items: center;
-    justify-content: center;
-    justify-self: end;
+    align-self: flex-start;
     white-space: nowrap;
     padding: 3px 8px;
     font-size: 11px;
@@ -1548,9 +1602,9 @@ onMounted(() => {
 
   .suggestion-new-icon {
     display: inline-block;
-    flex: 0 0 34px;
     width: 34px;
     height: 34px;
+    margin-left: 5px;
     vertical-align: middle;
     color: #dc2626;
   }
@@ -1830,6 +1884,7 @@ onMounted(() => {
     overflow: hidden;
     white-space: normal;
     -webkit-box-orient: vertical;
+    line-clamp: 2;
     -webkit-line-clamp: 2;
   }
 
@@ -1929,6 +1984,16 @@ onMounted(() => {
     border-radius: 8px;
   }
 
+  :deep(.session-action-button.el-button [class*="el-icon"] + span) {
+    margin-left: 0 !important;
+    margin-inline-start: 0 !important;
+  }
+
+  :deep(.session-action-button.el-button > span) {
+    margin-left: 0 !important;
+    margin-inline-start: 0 !important;
+  }
+
   .session-action-button .el-icon,
   .session-action-button :deep(svg) {
     width: 18px;
@@ -1973,38 +2038,65 @@ onMounted(() => {
     border-bottom: 1px solid rgb(221 226 236 / 90%);
   }
 
-  .mode-switch {
-    display: inline-flex;
+  .transcript-head :deep(.pure-segmented) {
+    position: relative;
     padding: 4px;
-    background: rgb(241 245 249 / 96%);
-    border-radius: 999px;
+    background: rgb(255 255 255 / 65%);
+    border: 1px solid rgb(255 255 255 / 65%);
+    border-radius: 22px;
+    box-shadow: 0 4px 20px rgb(0 0 0 / 8%);
+    backdrop-filter: blur(4px);
   }
 
-  .mode-button {
-    height: 32px;
-    padding: 0 18px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #64748b;
-    background: transparent;
-    border: 0;
-    border-radius: 999px;
-    cursor: pointer;
-    transition:
-      color 0.2s ease,
-      background-color 0.2s ease,
-      box-shadow 0.2s ease;
+  .transcript-head :deep(.pure-segmented-item) {
+    border-radius: 18px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  .mode-button.active {
-    color: #24324a;
-    background: rgb(255 255 255 / 96%);
-    box-shadow: 0 10px 24px rgb(31 47 86 / 10%);
+  .transcript-head :deep(.pure-segmented-item > div) {
+    min-height: 34px;
+    padding: 0 20px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 34px;
+    color: rgb(31 35 41 / 60%);
+    transition: color 0.25s;
   }
 
-  .mode-button:disabled {
+  .transcript-head :deep(.pure-segmented-item:hover) {
+    background: rgb(255 255 255 / 35%);
+    border-radius: 18px;
+  }
+
+  .transcript-head :deep(.pure-segmented-item-disabled) {
     cursor: not-allowed;
     opacity: 0.45;
+  }
+
+  .transcript-head :deep(.pure-segmented-item-disabled:hover) {
+    background: transparent;
+  }
+
+  .transcript-head :deep(.pure-segmented-item:hover > div) {
+    color: rgb(31 35 41 / 85%);
+  }
+
+  .transcript-head :deep(.pure-segmented-item-selected > div) {
+    color: rgb(31 35 41 / 95%);
+  }
+
+  .transcript-head :deep(.pure-segmented-item-selected) {
+    background: rgb(255 255 255 / 65%);
+    border: 1px solid rgb(255 255 255 / 65%);
+    border-radius: 18px;
+    box-shadow:
+      0 2px 6px rgb(31 35 41 / 8%),
+      0 4px 12px rgb(31 35 41 / 6%);
+    backdrop-filter: blur(4px);
+  }
+
+  .transcript-head :deep(.pure-segmented-group) {
+    gap: 6px;
   }
 
   @keyframes transcribingPulse {
@@ -2367,15 +2459,6 @@ onMounted(() => {
     min-width: 40px;
     padding: 8px 10px;
   }
-
-  .interview-page .session-microphone-label {
-    font-size: 0;
-  }
-
-  .interview-page .session-microphone-label::after {
-    font-size: 13px;
-    content: "麦克风";
-  }
 }
 
 @media (max-width: 1080px) {
@@ -2539,16 +2622,6 @@ onMounted(() => {
 
   .interview-page .transcript-head {
     padding: 14px;
-  }
-
-  .interview-page .mode-switch {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .interview-page .mode-button {
-    flex: 1;
-    padding: 0 12px;
   }
 }
 

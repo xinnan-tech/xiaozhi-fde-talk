@@ -112,11 +112,21 @@ async def test_extract_real_config_store_uses_llm_output_language_key(extract_cl
     验 key 名拼写：若代码改成 llm.output_lang，set 注入失效，endpoint 仍 fallback zh_cn，本测试 fail。
     走 public API（get/set）而非私有 _cache，DB + cache + broadcast 都生效；finally 按 snapshot 还原。
 
-    不走 `with TestClient(app)` 触发 lifespan——manager.start_idle_watchdog() 创建的
-    asyncio.Event 绑死在 TestClient 内部 loop，pytest-asyncio 的 async 测试另起 loop
-    会 RuntimeError。这里只调 init_db + warm 拿 DEFAULTS 种入（含 llm.output_language
-    ="zh_cn"），跳过 JWT 解析 / 僵尸清扫 / 模板加载 / watchdog 这些与本测试无关的副作用。
-    下面的 assert 把「DB 一定有 llm.output_language 行」从注释里的隐含前提变成代码里的校验。
+    不走 `with TestClient(app)` 触发 lifespan 的真实原因（R8 修正）：
+    1. manager 是模块级单例（`app/services/sessions/manager.py`），start_idle_watchdog 跨测试
+       残留累积 task，破坏测试隔离
+    2. watchdog 内的 asyncio.Event 在第一次 `await wait()` 时绑死创建它的 loop；
+       TestClient 内部 loop（fixture setup 时跑 lifespan）跟 pytest-asyncio 的 async
+       测试 loop（fixture teardown 时跑 lifespan shutdown）不一致，__exit__ 触发
+       stop_idle_watchdog → await _idle_task → 内部 wait() → _get_loop → RuntimeError
+       ——实测：async 测试 body 跑得通，但 fixture teardown 必炸。
+    绕开方法：手动 init_db + warm，只取想要的 DB 种默认副作用，避开 JWT 解析 / 僵尸清扫
+    / 模板加载 / watchdog 这些无关副作用。
+
+    assert 是兜底，不是主防御：理论上 warm() 必种 ALL_B_KEYS 里缺的 key（含 llm.output
+    _language="zh_cn"），original 构造上不可能 None；只有 init_db 静默失败才触发。隔离
+    保证靠 conftest session 级 _restore_real_db 整轮快照兜着，本测试的 finally 只还原
+    一个 key——干净库上 warm 会种全部 ALL_B_KEYS，本测试的还原不构成 hermetic 性。
     """
     from app.core.config_store import get_config_store
     from app.persistence.bootstrap import init_db
@@ -124,7 +134,6 @@ async def test_extract_real_config_store_uses_llm_output_language_key(extract_cl
     store = get_config_store()
     key = "llm.output_language"
 
-    # 手动跑 init_db + warm：建表 + 种 DEFAULTS（lifespan 那条路 watchdog 会绑 loop）
     await init_db()
     await store.warm()
 

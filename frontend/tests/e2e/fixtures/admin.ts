@@ -14,10 +14,14 @@ export { ADMIN_USER, ADMIN_PWD }
 // 已登录时 .user-avatar 带 .online class；幂等跳过避免无效点击触发登出确认弹窗
 export async function loginAsAdmin(page: Page) {
   await page.goto("/")
+  // 先等 home 视图挂载完 + userStore 恢复完，避免 .online 类的 race：
+  // 否则 avatar 已挂上 .online 但 click 触发的是登出 confirm 而不是 login dialog
+  const avatar = page.locator(".user-avatar")
+  await avatar.waitFor({ state: "visible", timeout: 15_000 })
   if (await page.locator(".user-avatar.online").isVisible().catch(() => false)) {
     return
   }
-  await page.locator(".user-avatar").click()
+  await avatar.click()
   const dialog = page.locator(".login-dialog")
   await dialog.waitFor({ state: "visible", timeout: 15_000 })
   await dialog.locator("input").nth(0).fill(ADMIN_USER)

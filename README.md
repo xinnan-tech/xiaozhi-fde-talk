@@ -74,5 +74,3 @@ rm -rf backend/static/static
 cp -rf frontend/dist/. backend/static/
 ```
 
-> 不要跑 `update_fde.sh` —— 它会杀 8000 端口，而 8000 是当前用户的主程序。
-

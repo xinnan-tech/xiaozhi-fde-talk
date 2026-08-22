@@ -25,7 +25,7 @@
 
 ### 方式一：本地开发
 
-**1. 启动 ASR 服务（FunASR Docker）**
+#### 1.1. 启动 ASR 服务（FunASR Docker）
 
 ```bash
 # 首次启动会自动下载模型，完成后监听宿主机 10096 端口
@@ -37,7 +37,7 @@ docker compose logs -f funasr
 
 后端默认 ASR 地址为 `wss://localhost:10096`，本地开发开箱即连。
 
-**2. 启动后端**
+#### 1.2. 启动后端
 
 ```bash
 cd backend
@@ -50,9 +50,8 @@ python main.py
 
 访谈工作台页面由后端直接托管，浏览器打开 http://localhost:8000 即用，无需单独启动前端。
 
-### 方式二：前端独立开发（改前端代码时用）
+#### 1.3. 启动前端
 
-后端跑起来后，再单独起前端 dev server 改前端代码。dev server 走 vite proxy 把 `/api` `/ws` 转给后端，改前端不用重启后端。
 
 ```bash
 cd frontend
@@ -69,9 +68,7 @@ pnpm build        # 产物在 frontend/dist/，后缀 .gz 已自动生成
 部署到后端（后端会直接托管 dist 静态文件）：
 
 ```bash
-rm -rf backend/static/static
+rm -rf backend/static/*
 cp -rf frontend/dist/. backend/static/
 ```
-
-`pnpm preview`（4173 端口）是 vite 自带的本地预览服务，编译完想自己用浏览器验一下、又不影响 8000 时用，**不是部署必需**。
 

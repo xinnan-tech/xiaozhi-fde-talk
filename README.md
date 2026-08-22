@@ -50,3 +50,29 @@ python main.py
 
 访谈工作台页面由后端直接托管，浏览器打开 http://localhost:8000 即用，无需单独启动前端。
 
+### 方式二：前端独立开发（改前端代码时用）
+
+后端跑起来后，再单独起前端 dev server 改前端代码。dev server 走 vite proxy 把 `/api` `/ws` 转给后端，改前端不用重启后端。
+
+```bash
+cd frontend
+pnpm install
+pnpm dev          # 默认监听 http://localhost:8848（VITE_PORT in .env.development）
+```
+
+需要打生产包给后端托管时：
+
+```bash
+pnpm build        # 产物在 frontend/dist/，后缀 .gz 已自动生成
+pnpm preview      # 本地预览编译产物，监听 4173，/api /ws 代理到 8000 主后端
+```
+
+把 `frontend/dist/` 内容覆盖到后端静态目录即可（生产部署的标准做法）：
+
+```bash
+rm -rf backend/static/static
+cp -rf frontend/dist/. backend/static/
+```
+
+> 不要跑 `update_fde.sh` —— 它会杀 8000 端口，而 8000 是当前用户的主程序。
+

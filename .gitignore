@@ -172,3 +172,6 @@ tests/**/coverage/
 
 # 本地配置 SQL 脚本，不提交
 backend/update_config.sql
+
+# Playwright e2e 登录态缓存（globalSetup 落地的 storageState，含 token，敏感）
+frontend/tests/e2e/.auth/

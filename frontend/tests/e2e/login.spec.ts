@@ -3,6 +3,11 @@ import { test, expect } from "@playwright/test"
 const ADMIN_USER = "admin"
 const ADMIN_PWD = "longenough1234"
 
+// login.spec.ts 必须从「空 storageState」起步，才能验证
+// 「未登录 → 触发登录框 → 提交 → 落 home」整条链路。
+// chromium project 默认 use.storageState 已含登录态；这里 opt-out。
+test.use({ storageState: { cookies: [], origins: [] } })
+
 test.describe("login flow", () => {
   test("admin login closes dialog and lands on authenticated home", async ({ page }) => {
     // home 视图未登录时不会自动开 login dialog（brief 的假设有误）；

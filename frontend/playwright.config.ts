@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test"
 
 export default defineConfig({
   testDir: "tests/e2e",
+  globalSetup: "./tests/e2e/global-setup.ts",
   timeout: 30_000,
   expect: { timeout: 15_000 },
   retries: 0,
@@ -52,11 +53,14 @@ export default defineConfig({
       name: "chromium",
       use: {
         browserName: "chromium",
+        storageState: "tests/e2e/.auth/admin.json",
         launchOptions: {
           args: [
             "--use-fake-device-for-media-stream",
             "--use-fake-ui-for-media-stream",
-            `--use-file-for-fake-audio-capture=${process.cwd()}/tests/e2e/fixtures/recording.wav`,
+            // 真 9min16s 访谈录音（opus 32kbps mono 16kHz）——chromium 接受 webm/opus 直接喂
+            // MediaRecorder loop 播放，spec 跑 < 9min 永远是真语音段，FunASR 会出真文本
+            `--use-file-for-fake-audio-capture=${process.cwd()}/../backend/tests/e2e/audio/interview.webm`,
           ],
         },
         permissions: ["microphone"],

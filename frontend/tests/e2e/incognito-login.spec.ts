@@ -9,7 +9,7 @@ const ADMIN_PWD = "longenough1234"
 test("隐身新用户访问 / 自动弹登录框 + 登录成功", async ({ browser }) => {
   test.setTimeout(30_000)
 
-  const context = await browser.newContext()
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   try {
     const page = await context.newPage()
     await page.goto("/")

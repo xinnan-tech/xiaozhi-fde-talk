@@ -1297,7 +1297,7 @@ onMounted(() => {
 .interview-page {
   min-height: 100vh;
   padding: 38px 16px 0;
-  background: url("@/assets/images/bg.png") no-repeat;
+  background: url("@/assets/images/bg.webp") no-repeat;
   background-size: cover;
   overflow: hidden;
 }

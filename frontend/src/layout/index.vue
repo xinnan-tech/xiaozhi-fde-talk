@@ -120,7 +120,7 @@ onBeforeMount(() => setTheme(layout));
   width: 100%;
   height: 100%;
   // background: linear-gradient(135deg, #e8f2ff 0%, #ffffff 100%);
-  background: url("@/assets/images/bg.png") no-repeat;
+  background: url("@/assets/images/bg.webp") no-repeat;
   background-size: cover;
 
   &::after {

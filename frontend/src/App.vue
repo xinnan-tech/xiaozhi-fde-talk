@@ -4,7 +4,6 @@ import { storeToRefs } from "pinia";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import zhTw from "element-plus/es/locale/lang/zh-tw";
 import en from "element-plus/es/locale/lang/en";
-import { ElConfigProvider, ElMessage } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { addPathMatch } from "@/router/utils";
 import { usePermissionStoreHook } from "@/store/modules/permission";
@@ -81,3 +80,4 @@ onMounted(initRoutes);
     <ReDialog />
   </el-config-provider>
 </template>
+

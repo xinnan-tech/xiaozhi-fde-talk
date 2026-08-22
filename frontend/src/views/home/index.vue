@@ -10,7 +10,6 @@ import { useInterviewStoreHook } from "@/store/modules/interview";
 import ReSegmented from "@/components/ReSegmented";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import { isSupportedLocale, setLocale, type SupportedLocale } from "@/i18n";
-import { ElMessage, ElMessageBox } from "element-plus";
 import {
   type InterviewItem,
   type InterviewListType,

@@ -4,7 +4,6 @@ import { setupStore } from "@/store";
 import { getPlatformConfig } from "./config";
 import { MotionPlugin } from "@vueuse/motion";
 import { createApp, type Directive } from "vue";
-import { useElementPlus } from "@/plugins/elementPlus";
 import { injectResponsiveStorage } from "@/utils/responsive";
 import { i18n } from "@/i18n";
 
@@ -14,7 +13,6 @@ import "./style/reset.scss";
 import "./style/index.scss";
 // 一定要在main.ts中导入tailwind.css，防止vite每次hmr都会请求src/style/index.scss整体css文件导致热更新慢的问题
 import "./style/tailwind.css";
-import "element-plus/dist/index.css";
 // 导入字体图标
 import "./assets/iconfont/iconfont.css";
 
@@ -55,6 +53,6 @@ getPlatformConfig(app).then(async config => {
   app.use(router);
   await router.isReady();
   injectResponsiveStorage(app, config);
-  app.use(MotionPlugin).use(useElementPlus).use(Vue3Signature);
+  app.use(MotionPlugin).use(Vue3Signature);
   app.mount("#app");
 });

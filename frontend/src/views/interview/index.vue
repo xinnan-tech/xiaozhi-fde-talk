@@ -13,7 +13,6 @@ import Calendar from "~icons/ep/calendar";
 import SwitchButton from "~icons/ep/switch-button";
 import User from "~icons/ep/user";
 import VideoPlay from "~icons/ep/video-play";
-import { ElMessage, ElMessageBox } from "element-plus";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import ReSegmented from "@/components/ReSegmented";
 import LayFooter from "@/layout/components/lay-footer/index.vue";

@@ -2,6 +2,9 @@ import { getPluginsList } from "./build/plugins";
 import { include, exclude } from "./build/optimize";
 import { type UserConfigExport, type ConfigEnv, loadEnv } from "vite";
 import VueI18nPlugin from "@intlify/unplugin-vue-i18n/vite";
+import Components from "unplugin-vue-components/vite";
+import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
+import AutoImport from "unplugin-auto-import/vite";
 import {
   root,
   alias,
@@ -72,6 +75,12 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       VueI18nPlugin({
         include: pathResolve("./src/locales/**", import.meta.url)
       }),
+      Components({
+        resolvers: [ElementPlusResolver({ importStyle: "css" })]
+      }),
+      AutoImport({
+        resolvers: [ElementPlusResolver()]
+      }),
       ...getPluginsList(VITE_COMPRESSION)
     ],
     // https://cn.vitejs.dev/config/dep-optimization-options.html#dep-optimization-options
@@ -98,9 +107,7 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
           // 把大体积依赖按类别拆到独立 chunk，配合浏览器长缓存复用。
           manualChunks(id) {
             if (!id.includes("node_modules")) return
-            if (id.includes("element-plus") || id.includes("@element-plus")) {
-              return "element-plus"
-            }
+            // 不再硬塞 element-plus：让 unplugin 按组件自动拆，节省首屏 chunk
             if (
               id.match(/[\\/]vue[\\/]/) ||
               id.match(/[\\/]vue-router[\\/]/) ||
@@ -127,6 +134,9 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
             ) {
               return "utils-vendor"
             }
+            // element-plus 子模块按组件拆 chunk（unplugin 已做精确路径 import）
+            const m = id.match(/[\\/]element-plus[\\/]es[\\/]components[\\/]([^\\/]+)/);
+            if (m) return `element-plus-${m[1]}`;
             return "vendor"
           }
         }

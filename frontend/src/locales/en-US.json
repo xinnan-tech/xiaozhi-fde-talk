@@ -62,7 +62,7 @@
   "system.diagnostics.partial_failure": "Self-check finished, but some services failed",
   "sidebar.assistant.name": "Xiaozhi AI",
   "sidebar.assistant.status": "Hi! I can help:",
-  "sidebar.assistant.feature_id": "Create IDs",
+  "sidebar.logo.title": "FDETalk",
   "sidebar.assistant.feature_quick_create": "Quick create",
   "sidebar.assistant.feature_prompt": "Live prompts",
   "sidebar.assistant.feature_report": "Auto report",

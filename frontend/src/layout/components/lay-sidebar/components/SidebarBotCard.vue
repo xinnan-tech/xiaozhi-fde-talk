@@ -58,9 +58,6 @@ const handleMouseLeave = () => {
         <div class="bot-status">{{ t("sidebar.assistant.status") }}</div>
         <div class="bot-features">
           <div class="bot-feature-item">
-            {{ t("sidebar.assistant.feature_id") }}
-          </div>
-          <div class="bot-feature-item">
             {{ t("sidebar.assistant.feature_quick_create") }}
           </div>
           <div class="bot-feature-item">

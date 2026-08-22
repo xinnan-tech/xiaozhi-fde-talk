@@ -62,7 +62,7 @@
   "system.diagnostics.partial_failure": "自检完成，但部分服务异常",
   "sidebar.assistant.name": "小智 AI 助手",
   "sidebar.assistant.status": "您好！我可以帮您:",
-  "sidebar.assistant.feature_id": "生成访谈编号",
+  "sidebar.logo.title": "小智方糖",
   "sidebar.assistant.feature_quick_create": "一句话建访谈",
   "sidebar.assistant.feature_prompt": "开启即出提示",
   "sidebar.assistant.feature_report": "结束即得文档",

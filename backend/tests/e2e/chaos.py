@@ -315,6 +315,15 @@ class E2EApi:
             r.raise_for_status()
             return r.json()
 
+    async def list_interviews(self, status: str | None = None) -> dict:
+        """列访谈（按状态过滤可选）。返回 {"items": [...]}。"""
+        params = {"status": status} if status else None
+        async with await self._client() as c:
+            r = await c.get("/api/v1/interviews", params=params,
+                            headers=await self._auth_headers())
+            r.raise_for_status()
+            return r.json()
+
     async def get_report(self, sid: str) -> dict:
         """取报告。首访触发 LLM 生成，耗时可达分钟级，须用长超时。"""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=300) as c:

@@ -19,7 +19,26 @@ pytestmark = pytest.mark.e2e
 GRACE_PERIOD_S = 60   # session.grace_period_s 默认
 
 
-async def test_resume_rejected_by_max_concurrent(api, new_sid, make_client, restore_max_concurrent):
+@pytest.fixture
+async def _ensure_clean_active_count(api):
+    """本测试依赖"测试启动时 active=0"前提——清掉上一轮失败用例残留的
+    IN_PROGRESS / SETTING_UP 行，否则 count_active 已顶到 max_concurrent，
+    第一个 listen_start 就被 4409 拒。
+
+    仅清"当前用户"名下——其他用户的活动会话不在我们视线内，不动。
+    """
+    pairs = await api.list_interviews(status="in_progress,setting_up")
+    for item in pairs.get("items", []):
+        try:
+            await api.end_interview(item["id"])
+        except Exception:  # noqa: BLE001
+            pass
+    yield
+
+
+async def test_resume_rejected_by_max_concurrent(
+    api, new_sid, make_client, restore_max_concurrent, _ensure_clean_active_count,
+):
     """max_concurrent=1 时第二个活跃占满额度；第一个 suspended 尝试恢复应
     在握手阶段被 on_reconnect 拒（concurrent_limit 错误帧 + 4409 关闭）。
 

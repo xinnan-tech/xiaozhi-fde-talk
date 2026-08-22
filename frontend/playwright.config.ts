@@ -25,7 +25,7 @@ export default defineConfig({
       stderr: "pipe",
     },
     {
-      command: "pnpm preview --port 4173 --strictPort",
+      command: "pnpm preview",
       port: 4173,
       reuseExistingServer: false,
       timeout: 30_000,

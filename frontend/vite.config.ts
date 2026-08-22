@@ -49,6 +49,25 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
         clientFiles: ["./index.html", "./src/{views,components}/*"]
       }
     },
+    // E2E 用的 preview 服务（playwright webServer 拉 pnpm preview）
+    // 不带 proxy 会让浏览器 /api /ws 落 vite preview 静态服务器 404；
+    // 这里把 E2E 后端地址写死 127.0.0.1:8001（per Global Constraint 端口 8001 E2E 专用）
+    preview: {
+      port: 4173,
+      host: "0.0.0.0",
+      strictPort: true,
+      proxy: {
+        "/api": {
+          target: "http://127.0.0.1:8001",
+          changeOrigin: true
+        },
+        "/ws": {
+          target: "http://127.0.0.1:8001",
+          changeOrigin: true,
+          ws: true
+        }
+      }
+    },
     plugins: [
       VueI18nPlugin({
         include: pathResolve("./src/locales/**", import.meta.url)

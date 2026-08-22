@@ -95,7 +95,7 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       // 消除打包大小超过500kb警告
       chunkSizeWarningLimit: 4000,
       // B3：限 modulepreload 到 6 chunk，避开 HTTP/1.1 单 origin 6 并发排队
-      // 白名单：vue 运行时 + 5 个首屏最常用 element-plus 组件
+      // 白名单：vue-vendor（合并 vue 运行时 + vueuse + 其他未分类 vendor）+ 5 个首屏最常用 element-plus 组件
       modulePreload: {
         polyfill: false,
         resolveDependencies: (_filename, deps) => {
@@ -135,7 +135,9 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
             }
             if (id.includes("echarts")) return "echarts"
             if (id.includes("dayjs")) return "dayjs"
-            if (id.includes("@vueuse")) return "vueuse"
+            // vueuse 跟 vue 运行时强耦合，独立 chunk 会触发跨 chunk TDZ（"Cannot access 'zt' before initialization"）
+            // 跟 vue-vendor 合并避免循环依赖被 chunk 边界切断
+            if (id.includes("@vueuse")) return "vue-vendor"
             if (id.includes("axios")) return "axios"
             if (
               id.includes("sortablejs") ||
@@ -155,7 +157,10 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
             // element-plus 子模块按组件拆 chunk（unplugin 已做精确路径 import）
             const m = id.match(/[\\/]element-plus[\\/]es[\\/]components[\\/]([^\\/]+)/);
             if (m) return `element-plus-${m[1]}`;
-            return "vendor"
+            // 兜底合并到 vue-vendor：element-plus 按需引入后，vendor 跟 vue-vendor
+            // 之间出现循环依赖（chunk 边界切断执行顺序 → TDZ "Cannot access X before initialization"）。
+            // 合并成一个 chunk 消除边界；首屏只多等一次 vue-vendor 下载，但 B3 已 modulepreload 它，无明显延迟。
+            return "vue-vendor"
           }
         }
       }

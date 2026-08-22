@@ -74,6 +74,70 @@ def api() -> E2EApi:
     return E2EApi(BASE_URL, USERNAME, PASSWORD)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _enable_stub_llm():
+    """激活后端 llm.type=stub，避免 e2e 用例依赖真实 LLM API key。
+
+    后端在 backend/app/adapters/llm/stub.py 注册了 StubLLMProvider——返回确定
+    性 JSON 清单与 Markdown 报告，不联网、不耗 token。所有走 LLM 的路径
+    （coaching 重算 / 报告生成 / extract）都不再因 LLM_NOT_CONFIGURED 报错。
+
+    session 第一个用例前切到 stub，session 结束（yield 末尾）自动还原原 llm.type——
+    不依赖兄弟 fixture _restore_real_db 的间接兜底；后者对非 sqlite 库 / 进程被
+    signal 杀掉 / 异常终止时不会跑还原。把还原放在本 fixture 自己的 yield 后是
+    双保险：CI runner 复用同一个后端进程跑后续真实 LLM 用例时不会被桩污染。
+    """
+    import asyncio
+    import httpx
+
+    async def _login_token() -> str | None:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10) as c:
+            r = await c.post("/api/v1/auth/login",
+                             json={"username": USERNAME, "password": PASSWORD})
+            if r.status_code != 200:
+                return None
+            return r.json().get("access_token")
+
+    async def _current_type(token: str) -> str:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10) as c:
+            r = await c.get("/api/v1/admin/config/llm",
+                            headers={"Authorization": f"Bearer {token}"})
+            r.raise_for_status()
+            return str(r.json().get("type", "openai"))
+
+    async def _put_type(token: str, value: str) -> int:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10) as c:
+            r = await c.put("/api/v1/admin/config/llm",
+                            headers={"Authorization": f"Bearer {token}"},
+                            json={"type": value})
+            return r.status_code
+
+    try:
+        token = asyncio.run(_login_token())
+        if token is None:
+            print(f"[e2e conftest] 激活 stub LLM 失败：登录 {BASE_URL} 失败，继续")
+            yield
+            return
+        orig_type = asyncio.run(_current_type(token))
+        code = asyncio.run(_put_type(token, "stub"))
+        if code != 200:
+            raise RuntimeError(f"激活 stub LLM 失败（llm.type=stub）：HTTP {code}")
+    except Exception as e:  # noqa: BLE001
+        # 后端离线或 stub provider 未注册——让 probe 阶段整体 skip，不破坏测试
+        print(f"[e2e conftest] 激活 stub LLM 失败，继续：{e}")
+        yield
+        return
+
+    yield
+
+    try:
+        code = asyncio.run(_put_type(token, orig_type))
+        if code != 200:
+            print(f"[e2e conftest] 还原 llm.type={orig_type} 失败：HTTP {code}；请手动恢复")
+    except Exception as e:  # noqa: BLE001
+        print(f"[e2e conftest] 还原 llm.type={orig_type} 失败，请手动恢复：{e}")
+
+
 @pytest.fixture(scope="session")
 def logdir(tmp_path_factory) -> object:
     """本次运行的全量帧流水目录（事后排查用，目录被 git 忽略）。"""

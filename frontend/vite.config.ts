@@ -52,20 +52,22 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
         clientFiles: ["./index.html", "./src/{views,components}/*"]
       }
     },
-    // E2E 用的 preview 服务（playwright webServer 拉 pnpm preview）
-    // 不带 proxy 会让浏览器 /api /ws 落 vite preview 静态服务器 404；
-    // 这里把 E2E 后端地址写死 127.0.0.1:8001（per Global Constraint 端口 8001 E2E 专用）
+    // E2E + 手动预览：playwright webServer 跑 8001，本机手动测试可用 8000 主后端
+    // 代理目标由环境变量 E2E_BACKEND_URL 切换：e2e 默认 127.0.0.1:8001，
+    // 手动预览不传 → 走 127.0.0.1:8000（用户主程序，跟 8000 页面同源同数据）
     preview: {
       port: 4173,
       host: "0.0.0.0",
       strictPort: true,
       proxy: {
         "/api": {
-          target: "http://127.0.0.1:8001",
+          target:
+            process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
           changeOrigin: true
         },
         "/ws": {
-          target: "http://127.0.0.1:8001",
+          target:
+            process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
           changeOrigin: true,
           ws: true
         }

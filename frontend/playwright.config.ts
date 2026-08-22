@@ -48,6 +48,8 @@ export default defineConfig({
       timeout: 30_000,
       env: {
         NODE_ENV: "production",
+        // 让 vite preview /api /ws 代理到 e2e 专用 8001（不走 8000 主后端）
+        E2E_BACKEND_URL: "http://127.0.0.1:8001",
       },
       stdout: "pipe",
       stderr: "pipe",

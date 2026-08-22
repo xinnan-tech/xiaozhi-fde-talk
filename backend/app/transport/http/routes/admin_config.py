@@ -54,6 +54,17 @@ async def put_group_config(
             f"unknown keys: {sorted(unknown)}; allowed: {sorted(allowed_keys)}",
         )
 
+    # stub LLM 仅供 e2e/单测使用：prod 模式下任何 admin PUT llm.type=stub
+    # 都会被静默接受并立即生效，结果是真实路径返回假数据且零日志。生产模式
+    # 显式拒绝；dev/test 留给 fixture 自由启用。
+    if group == "llm" and body.get("type") == "stub":
+        from app.core.settings import get_settings
+        if get_settings().env == "prod":
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "stub LLM provider is test-only; cannot be enabled when env=prod",
+            )
+
     # 转换为 full key；None 当成空串（敏感字段空串会被 set_many 跳过）
     full_items = {f"{group}.{k}": ("" if v is None else str(v)) for k, v in body.items()}
     try:

@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 # llm_type → (模块, 类名)
 _REGISTRY = {
     "openai": ("app.adapters.llm.openai_compatible", "OpenAILLMProvider"),
+    # 测试桩：返回确定性响应，无需真实 API key。只能由测试主动启用。
+    "stub": ("app.adapters.llm.stub", "StubLLMProvider"),
 }
 
 _provider: Optional[LLMProvider] = None
@@ -50,6 +52,14 @@ def create_llm() -> LLMProvider:
     cfg = _read_llm_config()
     if cfg["type"] not in _REGISTRY:
         raise ValueError(f"未知 LLM_TYPE={cfg['type']}，可选: {list(_REGISTRY)}")
+    # stub 是测试桩：prod 模式下即使绕过 admin 路由（直接改 DB / 镜像回放）
+    # 也会静默返回假数据。这里加一道兜底：prod 启动期拒绝构造 stub。
+    if cfg["type"] == "stub":
+        from app.core.settings import get_settings
+        if get_settings().env == "prod":
+            raise RuntimeError(
+                "stub LLM provider is test-only; refusing to start when env=prod"
+            )
     module_path, class_name = _REGISTRY[cfg["type"]]
     module = importlib.import_module(module_path)
     return getattr(module, class_name)(

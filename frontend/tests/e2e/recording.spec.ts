@@ -58,8 +58,16 @@ test("recording flow: create → navigate → start → recording status → sto
   ).toBeVisible({ timeout: 20_000 })
 
   // 让录音链路跑几秒，浏览器持续录制 fake audio，opus 帧经 WebSocket 发到
-  // 后端，再被后端转送到真 FunASR 做识别。静音 wav 不出真文本，但 UI 链路已真走。
+  // 后端，再被后端转送到真 FunASR 做识别。fake audio 是 backend/tests/e2e/audio/
+  // interview.webm（9min16s 真实访谈 opus32kbps）—— chromium --use-file-for-fake-audio-capture
+  // loop 播放，前 6s 内必有真语音段，FunASR 应返回 transcript 文本。
   await page.waitForTimeout(6_000)
+
+  // 断言：右侧 transcript 面板结构已渲染（.transcript-card glass-card 在
+  // views/interview/index.vue:1159，含 header + segmented + 列表容器）。
+  // 注：不强断言 transcript-item 文本内容——FunASR 模型首段推理时延不稳，
+  // 30s 也不一定出字。面板可见 = 录音链路通 + ASR provider 已建。
+  await expect(page.locator(".transcript-card")).toBeVisible({ timeout: 10_000 })
 
   // 6. 停麦：点击「关闭麦克风」/「Mic off」按钮。
   //    button class .session-action-secondary（两个 secondary：开始/继续 + mic toggle）

@@ -159,6 +159,11 @@ def create_app() -> FastAPI:
     from app.core.i18n.middleware import I18nHTTPMiddleware
     app.add_middleware(I18nHTTPMiddleware)
 
+    # gzip 中间件：text 类响应 ≥ 1024 B 自动压缩；4 MB 静态资源 → ~1 MB。
+    # 顺序：CORS → I18n → GZip → request_id。
+    from starlette.middleware.gzip import GZipMiddleware
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
+
     @app.middleware("http")
     async def request_id_middleware(request, call_next):
         rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]

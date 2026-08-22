@@ -94,6 +94,24 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       sourcemap: false,
       // 消除打包大小超过500kb警告
       chunkSizeWarningLimit: 4000,
+      // B3：限 modulepreload 到 6 chunk，避开 HTTP/1.1 单 origin 6 并发排队
+      // 白名单：vue 运行时 + 5 个首屏最常用 element-plus 组件
+      modulePreload: {
+        polyfill: false,
+        resolveDependencies: (_filename, deps) => {
+          const whitelist = [
+            "vue-vendor",
+            "element-plus-message",
+            "element-plus-form",
+            "element-plus-input",
+            "element-plus-dialog",
+            "element-plus-button"
+          ];
+          return deps.filter((dep) =>
+            whitelist.some((w) => dep.includes(w))
+          );
+        }
+      },
       rollupOptions: {
         input: {
           index: pathResolve("./index.html", import.meta.url)

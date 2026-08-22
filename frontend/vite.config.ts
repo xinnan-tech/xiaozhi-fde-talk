@@ -93,7 +93,42 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
         output: {
           chunkFileNames: "static/js/[name]-[hash].js",
           entryFileNames: "static/js/[name]-[hash].js",
-          assetFileNames: "static/[ext]/[name]-[hash].[ext]"
+          assetFileNames: "static/[ext]/[name]-[hash].[ext]",
+          // 拆 vendor：主入口单点 > 1MB 会拉长首屏 JS parse 时间，
+          // 把大体积依赖按类别拆到独立 chunk，配合浏览器长缓存复用。
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return
+            if (id.includes("element-plus") || id.includes("@element-plus")) {
+              return "element-plus"
+            }
+            if (
+              id.match(/[\\/]vue[\\/]/) ||
+              id.match(/[\\/]vue-router[\\/]/) ||
+              id.match(/[\\/]pinia[\\/]/)
+            ) {
+              return "vue-vendor"
+            }
+            if (id.includes("echarts")) return "echarts"
+            if (id.includes("dayjs")) return "dayjs"
+            if (id.includes("@vueuse")) return "vueuse"
+            if (id.includes("axios")) return "axios"
+            if (
+              id.includes("sortablejs") ||
+              id.includes("tippy.js") ||
+              id.includes("vue-tippy") ||
+              id.includes("markdown-it") ||
+              id.includes("localforage") ||
+              id.includes("responsive-storage") ||
+              id.includes("@pureadmin") ||
+              id.includes("path-browserify") ||
+              id.includes("animate.css") ||
+              id.includes("vue-i18n") ||
+              id.includes("@intlify")
+            ) {
+              return "utils-vendor"
+            }
+            return "vendor"
+          }
         }
       }
     },

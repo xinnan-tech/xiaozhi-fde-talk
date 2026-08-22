@@ -64,13 +64,14 @@ pnpm dev          # 默认监听 http://localhost:8848（VITE_PORT in .env.devel
 
 ```bash
 pnpm build        # 产物在 frontend/dist/，后缀 .gz 已自动生成
-pnpm preview      # 本地预览编译产物，监听 4173，/api /ws 代理到 8000 主后端
 ```
 
-把 `frontend/dist/` 内容覆盖到后端静态目录即可（生产部署的标准做法）：
+部署到后端（后端会直接托管 dist 静态文件）：
 
 ```bash
 rm -rf backend/static/static
 cp -rf frontend/dist/. backend/static/
 ```
+
+`pnpm preview`（4173 端口）是 vite 自带的本地预览服务，编译完想自己用浏览器验一下、又不影响 8000 时用，**不是部署必需**。
 

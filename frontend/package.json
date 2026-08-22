@@ -22,7 +22,11 @@
     "preinstall": "npx only-allow pnpm",
     "check:dist": "node scripts/check-dist-no-host.mjs",
     "check:dist-size": "node scripts/check-dist-size.mjs",
-    "prebuild:e2e": "pnpm check:dist"
+    "prebuild:e2e": "pnpm check:dist",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:report": "playwright show-report"
   },
   "keywords": [
     "xiaozhi-fde-talk"

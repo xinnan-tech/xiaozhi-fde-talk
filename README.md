@@ -62,13 +62,9 @@ pnpm dev          # 默认监听 http://localhost:8848（VITE_PORT in .env.devel
 需要打生产包给后端托管时：
 
 ```bash
-pnpm build        # 产物在 frontend/dist/，后缀 .gz 已自动生成
-```
-
-部署到后端（后端会直接托管 dist 静态文件）：
-
-```bash
+pnpm build
+cd ..
 rm -rf backend/static/*
 cp -rf frontend/dist/. backend/static/
 ```
-
+执行后，访问 http://localhost:8000 即可支持前后端交互

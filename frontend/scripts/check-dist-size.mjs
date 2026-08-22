@@ -39,6 +39,7 @@ const offenders = []
 for (const dir of SCAN_DIRS) {
   if (!existsSync(dir)) continue
   for (const name of readdirSync(dir)) {
+    if (name.endsWith(".gz")) continue
     const p = join(dir, name)
     if (!statSync(p).isFile()) continue
     const buf = readFileSync(p)

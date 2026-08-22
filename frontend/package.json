@@ -20,6 +20,7 @@
     "lint": "pnpm lint:eslint && pnpm lint:prettier && pnpm lint:stylelint",
     "preinstall": "npx only-allow pnpm",
     "check:dist": "node scripts/check-dist-no-host.mjs",
+    "check:dist-size": "node scripts/check-dist-size.mjs",
     "prebuild:e2e": "pnpm check:dist"
   },
   "keywords": [

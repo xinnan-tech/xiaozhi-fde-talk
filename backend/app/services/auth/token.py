@@ -120,10 +120,15 @@ def decode_token(token: str) -> dict[str, Any]:
 
     不强制 type claim——历史签出的 access token 没有 type 字段，兼容。
     需要按类型分发时由调用方自行 if payload.get("type") 判断。
+
+    leeway=30s：吸收 NTP 漂移与本地时钟小幅不同步——若服务节点时钟偏差超过
+    leeway，签发即报「签名过期」拒收。30s 是 iat/exp 容差默认，对正常
+    容器 / VM 时钟足够宽松。
     """
     settings = get_settings()
     return jwt.decode(
         token, settings.jwt_secret, algorithms=[_SIGNING_ALG],
         audience=_AUDIENCE,
         issuer=_ISSUER,
+        leeway=30,
     )

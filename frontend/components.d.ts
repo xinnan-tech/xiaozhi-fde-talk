@@ -12,6 +12,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    ChangePasswordDialog: typeof import('./src/components/auth/ChangePasswordDialog.vue')['default']
     CreateInterviewDialog: typeof import('./src/components/interview/CreateInterviewDialog.vue')['default']
     ElBacktop: typeof import('element-plus/es')['ElBacktop']
     ElButton: typeof import('element-plus/es')['ElButton']
@@ -20,6 +21,8 @@ declare module 'vue' {
     ElColorPicker: typeof import('element-plus/es')['ElColorPicker']
     ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
+    ElDescriptions: typeof import('element-plus/es')['ElDescriptions']
+    ElDescriptionsItem: typeof import('element-plus/es')['ElDescriptionsItem']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDrawer: typeof import('element-plus/es')['ElDrawer']
     ElDropdown: typeof import('element-plus/es')['ElDropdown']
@@ -58,6 +61,7 @@ declare module 'vue' {
 
 // For TSX support
 declare global {
+  const ChangePasswordDialog: typeof import('./src/components/auth/ChangePasswordDialog.vue')['default']
   const CreateInterviewDialog: typeof import('./src/components/interview/CreateInterviewDialog.vue')['default']
   const ElBacktop: typeof import('element-plus/es')['ElBacktop']
   const ElButton: typeof import('element-plus/es')['ElButton']
@@ -66,6 +70,8 @@ declare global {
   const ElColorPicker: typeof import('element-plus/es')['ElColorPicker']
   const ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
   const ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
+  const ElDescriptions: typeof import('element-plus/es')['ElDescriptions']
+  const ElDescriptionsItem: typeof import('element-plus/es')['ElDescriptionsItem']
   const ElDialog: typeof import('element-plus/es')['ElDialog']
   const ElDrawer: typeof import('element-plus/es')['ElDrawer']
   const ElDropdown: typeof import('element-plus/es')['ElDropdown']

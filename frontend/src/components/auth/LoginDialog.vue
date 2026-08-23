@@ -8,6 +8,25 @@ import { registrationStatusApi } from "@/api/user";
 import User from "~icons/ep/user";
 import Lock from "~icons/ep/lock";
 
+// 后端错误响应里 detail 字段三种形态 → 用户可读句子数组：
+// - pydantic 422：[{loc:[...,field], msg, type}] 列表
+// - I18nError 4xx：已本地化字符串（直接返回）
+// - FastAPI HTTPException：字符串 detail
+// 取不到则返回空数组，由调用方走通用兜底文案。
+function extractReadableErrors(detail: unknown): string[] {
+  if (typeof detail === "string" && detail.trim()) return [detail];
+  if (Array.isArray(detail) && detail.length > 0) {
+    const out = detail
+      .map((d: { msg?: string; loc?: unknown[] }) => {
+        const field = Array.isArray(d?.loc) && d.loc.length > 1 ? String(d.loc[d.loc.length - 1]) : "";
+        return field ? `${field}: ${d.msg}` : d.msg;
+      })
+      .filter((m): m is string => typeof m === "string" && m.trim().length > 0);
+    return out;
+  }
+  return [];
+}
+
 defineOptions({ name: "LoginDialog" });
 
 interface RuleForm {
@@ -89,21 +108,16 @@ async function submit(formEl: FormInstance | undefined) {
     }
     emit("update:modelValue", false);
   } catch (e: unknown) {
-    // 后端 pydantic 422 detail 形如 [{loc:[body,field],msg:"...",type:"string_too_short",...}]
-    // 转成可读字段错误；其他保持原样走「注册失败，请稍后重试」。
+    // 后端两类可读错误：
+    // 1. pydantic 422 → detail 是 [{loc:[body,field],msg,type}] 列表
+    // 2. I18nError 4xx → detail 是已本地化的字符串（auth.username_taken 等）
+    // 优先把它们展示给用户；否则走通用「注册/登录失败」兜底。
     if (mode.value === "register") {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-      if (Array.isArray(detail) && detail.length > 0) {
-        const messages = detail
-          .map((d: { msg?: string; loc?: unknown[] }) => {
-            const field = Array.isArray(d?.loc) && d.loc.length > 1 ? String(d.loc[d.loc.length - 1]) : "";
-            return field ? `${field}: ${d.msg}` : d.msg;
-          })
-          .filter(Boolean);
-        if (messages.length) {
-          message(messages.join("；"), { type: "error" });
-          return;
-        }
+      const messages = extractReadableErrors(detail);
+      if (messages.length) {
+        message(messages.join("；"), { type: "error" });
+        return;
       }
     }
     message(mode.value === "login" ? t("auth.login_failed") : t("auth.register_failed"), { type: "error" });

@@ -1,0 +1,37 @@
+# Python 缓存与构建产物
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+*.db
+*.sqlite3
+*.egg-info
+.coverage
+htmlcov
+
+# 测试目录不进镜像
+tests/
+
+# 本地模型（funasr 模型由 funasr 服务容器拉取，不属于主应用镜像）
+models/
+
+# 本地 venv 与 dotenv
+.venv
+venv/
+env/
+.env
+.env.*
+
+# 编辑器/系统
+.vscode
+.idea
+.DS_Store
+
+# 文档与构建日志
+*.md
+server.log
+exports/
+
+# alembic 容器运行时执行即可，源码与配置足够
+alembic/versions/.trash/

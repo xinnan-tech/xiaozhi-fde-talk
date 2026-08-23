@@ -43,3 +43,15 @@ export const registerApi = (data: RegisterRequest) =>
   http.request<LoginResult>("post", baseUrlApi("/api/v1/auth/register"), {
     data
   });
+
+/** 自助改密：普通用户改自己密码（旧密码验证 + 写新密码）。 */
+export type ChangePasswordRequest = {
+  old_password: string;
+  new_password: string;
+};
+export const changePasswordApi = (data: ChangePasswordRequest) =>
+  http.request<{ ok: boolean }>(
+    "post",
+    baseUrlApi("/api/v1/auth/change-password"),
+    { data }
+  );

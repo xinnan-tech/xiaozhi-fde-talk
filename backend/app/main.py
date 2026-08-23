@@ -26,11 +26,25 @@ def _startup_msg(key: Keys, **params) -> str:
     return t(key.value, locale=DEFAULT, **params)
 
 
+def _exit_config_error(message: str) -> None:
+    """打印一行配置错误到 stderr，然后用 SystemExit 退出。
+
+    vs os._exit：SystemExit 是 BaseException 同族但走 Python 异常路径，
+    uvicorn 之外的子进程 / 包装脚本能正常接住并清理现场；orchestrator 看
+    到的是干净的退出码 2 而不是 abort 信号。但 uv_runner.run() 不会主动
+    catch SystemExit——它在 uvicorn 启动前就已经 raise，过程根本还没跑起来。
+    """
+    print(f"\n[配置错误] {message}\n", file=sys.stderr, flush=True)
+    raise SystemExit(2)
+
+
 def _load_settings_or_exit():
     """加载配置；启动期配置错误（env 值非法等）翻译成单行友好提示并立即退出。
 
-    设计：与 lifespan 的 init_db 失败同款——stderr 单行 + os._exit，避开 uvicorn
-    的 [error] Traceback 噪音，让 docker/systemd 用户一眼看到根因。
+    设计：与 lifespan 的 init_db 失败同款——stderr 单行 + SystemExit(2)，
+    避开 uvicorn 的 [error] Traceback 噪音，让 docker/systemd 用户一眼看到根因。
+    SystemExit(2) 比 os._exit(2) 更友好：包装器 / 测试 / IDE debug 都能 catch，
+    而退出码语义不变。
 
     注意：必须在 import `app.app` 之前调用——`app.app` 的 import 链会拉起
     `app.persistence.db`，而 db.py 模块级就会触发 Settings() 校验。若先 import
@@ -40,12 +54,7 @@ def _load_settings_or_exit():
     try:
         settings = get_settings()
     except Exception:  # noqa: BLE001
-        print(
-            f"\n[配置错误] {_startup_msg(Keys.STARTUP_CONFIG_INVALID)}\n",
-            file=sys.stderr,
-            flush=True,
-        )
-        os._exit(2)
+        _exit_config_error(_startup_msg(Keys.STARTUP_CONFIG_INVALID))
     # prod 模式额外扫一遍 env，拼错的 DATABSE_URL 等大写会被识别并拒启动。
     # dev/test 不强制，方便本地临时覆盖 / CI 注入怪变量。
     if settings.env == "prod":
@@ -55,11 +64,8 @@ def _load_settings_or_exit():
         except Exception as e:  # noqa: BLE001
             from app.core.i18n.errors import I18nError
             if isinstance(e, I18nError):
-                msg = e.localized()
-            else:
-                msg = str(e)
-            print(f"\n[配置错误] {msg}\n", file=sys.stderr, flush=True)
-            os._exit(2)
+                _exit_config_error(e.localized())
+            _exit_config_error(str(e))
     return settings
 
 

@@ -64,20 +64,21 @@ async def _lifespan_startup(app: FastAPI) -> None:
     try:
         await init_db()
     except RuntimeError as e:
-        # 配置错误：stderr 单行提示 + 立即退出（不走 uvicorn [error] 链路打印 traceback）
-        # 用 os._exit 而不是 sys.exit：后者会被 asyncio 转成异常被 starlette traceback 出来
+        # 配置错误：stderr 单行提示 + SystemExit(2) 立即退出。
+        # SystemExit 通过 asyncio Task 抛出后由 main() 沿调用栈向上传；
+        # 比 os._exit 友好——单元测试可 catch、IDE debug 不被杀。
         print(f"\n[配置错误] {e}\n", file=sys.stderr, flush=True)
-        os._exit(2)
+        raise SystemExit(2)
 
     # 解析 JWT 密钥：DB → 缺失则自动生成并持久化到 system_config 表
     # prod 无密钥时 secret.resolve() 抛 I18nError(http_status=503)；同样按
-    # 配置错误路径走（单行 stderr 提示 + os._exit），避开 uvicorn traceback。
+    # 配置错误路径走（单行 stderr 提示 + SystemExit(2)），避开 uvicorn traceback。
     resolver = JWTSecretResolver(settings, SessionLocal)
     try:
         settings.jwt_secret = await resolver.resolve()
     except I18nError as e:
         print(f"\n[配置错误] {e.localized()}\n", file=sys.stderr, flush=True)
-        os._exit(2)
+        raise SystemExit(2)
 
     # 配置 KV 预热（含默认值种入 + 内存缓存）
     await get_config_store().warm()

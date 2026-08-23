@@ -96,11 +96,11 @@ def validate_value(key: str, value: str) -> None:
     """
     if key in BOOL_KEYS:
         if value not in ("true", "false"):
+            # 占位用 {name}，避免与 t() 的 `key` 形参撞名（TypeError）。
             raise I18nError(
                 Keys.CONFIG_INVALID_BOOL,
                 http_status=400,
-                key=key,
-                value=value,
+                name=key,
             )
         return
     if key in ENUM_KEYS:

@@ -82,7 +82,7 @@
   "password.too_weak": "Password is in the weak-password blacklist ({count} entries), please choose another",
   "password.charset_insufficient": "Password must include at least 3 character classes (lower/upper/digit/symbol); current input is insufficient",
   "config.invalid_enum_value": "Invalid value for {field}: {value} (allowed: {allowed})",
-  "config.invalid_bool": "{key} value must be true or false",
+  "config.invalid_bool": "{name} value must be true or false",
   "auth.username_invalid_format": "Username must be 4-32 chars (letters, digits, underscore, hyphen)",
   "auth.username_taken": "Username is already taken",
   "auth.password_mismatch": "Passwords do not match",

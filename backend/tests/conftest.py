@@ -3,8 +3,6 @@
 - 注册 markers：integration（依赖运行中的服务）、contracts（端口契约）
 - 提供 service_online 探测（集成测试在服务未运行时整体跳过）
 - _restore_real_db：整轮测试前后快照/恢复真实库（防测试污染线上配置/用户）
-- _override_admin_password_env：每个测试为 APP_ADMIN_PASSWORD 设置合法值，
-  避免 commit 9c4ea4a 的 ≥8 char 校验炸 Settings() 构造；不污染全局 env。
 对应 design §10 PR2：测试拆分 + conftest 分层。
 """
 from __future__ import annotations
@@ -18,29 +16,10 @@ import pytest  # F401 (re-exported for tests)
 BASE_URL = "http://localhost:8000"
 WS_BASE = "ws://localhost:8000"
 
-_TEST_ADMIN_PASSWORD = "longenough1234"
-
-
-@pytest.fixture(autouse=True)
-def _override_admin_password_env(monkeypatch: pytest.MonkeyPatch):
-    """每个测试为 APP_ADMIN_PASSWORD 设置合法值（per-test isolation）。
-
-    注：collection 阶段 pytest_configure 已设默认值（弱密码 .env 兼容），这里
-    提供测试执行期的 per-test override，monkeypatch 在测试结束时自动恢复 env，
-    避免单测内修改 APP_ADMIN_PASSWORD 后污染后续测试。
-    """
-    monkeypatch.setenv("APP_ADMIN_PASSWORD", _TEST_ADMIN_PASSWORD)
-
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "integration: 依赖运行中的后端服务（起 `python main.py` 后再跑）")
     config.addinivalue_line("markers", "contracts: 外部端口契约测试（依赖模型/网络）")
-    # 必须在 collection 之前：app.core.settings.Settings() 会在测试文件 import 阶段
-    # 构造，届时 commit 9c4ea4a 的密码强度校验会读 APP_ADMIN_PASSWORD。仓库 .env 默认
-    # 是弱密码 123456，setdefault 覆盖为合法值。仅当用户未在外部显式设置时才覆盖，
-    # 不污染已有环境。per-test autouse fixture（_override_admin_password_env）负责
-    # 测试执行期的 env 恢复，详见该 fixture 注释。
-    os.environ.setdefault("APP_ADMIN_PASSWORD", _TEST_ADMIN_PASSWORD)
 
 
 @pytest.fixture(scope="session")

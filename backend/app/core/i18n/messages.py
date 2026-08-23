@@ -102,7 +102,7 @@ class Keys(StrEnum):
     DIAG_OCR_OK = "diag.ocr.ok"
 
     # ---- Startup / settings / secrets ----
-    STARTUP_ADMIN_PASSWORD_MISSING = "startup.admin_password_missing"
+    STARTUP_CONFIG_INVALID = "startup.config_invalid"
     STARTUP_DATABASE_MIGRATION_FAIL = "startup.database_migration_fail"
     SETTINGS_PROD_NO_SQLITE = "settings.prod_no_sqlite"
     SECRET_RESOLVE_FAILED = "secret.resolve_failed"

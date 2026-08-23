@@ -50,7 +50,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
     """lifespan 启动：DB init + ConfigStore warm + JWT 密钥解析 + 清扫僵尸 + 模板加载 + idle watchdog。
 
     流式 ASR 在 listen:start 时创建连接，不再全局预加载。
-    配置类错误（如缺 APP_ADMIN_PASSWORD）由 init_db 抛 RuntimeError，
+    配置类错误（如 alembic 迁移失败）由 init_db 抛 RuntimeError，
     这里捕获后打印一行用户友好提示并 os._exit，避开 uvicorn 的 [error] Traceback 噪音。
     """
     from app.core.i18n.errors import I18nError

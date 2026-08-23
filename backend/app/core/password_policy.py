@@ -1,7 +1,7 @@
-"""admin 启动密码强度策略。
+"""密码强度策略。
 
-校验失败抛 I18nError（http_status=400），由调用方（Settings model_validator /
-seed_dev_users）转译。最小长度 ≥ 8，且不能命中弱密码表（不区分大小写）。
+校验失败抛 I18nError（http_status=400），由调用方（注册 / 改密 / 重置密码）
+转译。最小长度 ≥ 8，且不能命中弱密码表（不区分大小写）。
 
 """
 from __future__ import annotations

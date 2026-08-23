@@ -79,7 +79,7 @@
   "diag.ocr.bad_image": "Failed to read test image: {detail}",
   "diag.ocr.ok": "OCR connection normal (service available)",
 
-  "startup.admin_password_missing": "APP_ADMIN_PASSWORD is not set, configure it in .env or env var and restart",
+  "startup.config_invalid": "Startup configuration is invalid, check .env or env vars and restart",
   "startup.database_migration_fail": "alembic upgrade head failed:\n{stdout}\n{stderr}",
   "settings.prod_no_sqlite": "SQLite is not allowed in production, must use MySQL/PostgreSQL",
   "secret.resolve_failed": "Could not resolve JWT secret",

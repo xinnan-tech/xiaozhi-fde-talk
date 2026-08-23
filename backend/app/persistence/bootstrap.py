@@ -87,7 +87,7 @@ async def init_db() -> None:
 
 
 async def _drop_seed_admin() -> None:
-    """dev 自愈：清掉老 seed 灌入的 admin 账户（窄 WHERE），幂等。
+    """dev 自愈：清掉老种子 admin 账户（窄 WHERE），幂等。
 
     dev 模式不跑 alembic，此处镜像生产迁移的窄清理，避免旧种子 admin 残留
     导致 registration-status 返回 allow_registration=false、首用户注册路径卡住。
@@ -95,9 +95,6 @@ async def _drop_seed_admin() -> None:
     async with SessionLocal() as session:
         await session.execute(
             text("DELETE FROM users WHERE username = 'admin' AND role = 'admin'")
-        )
-        await session.execute(
-            text("DELETE FROM system_config WHERE key = 'auth.demo_username'")
         )
         await session.commit()
 

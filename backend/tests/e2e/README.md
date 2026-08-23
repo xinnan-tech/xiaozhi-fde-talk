@@ -32,7 +32,7 @@ python -m pytest -m e2e tests/e2e/test_takeover.py  # 单文件
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `E2E_BASE_URL` | `http://127.0.0.1:8000` | 后端地址 |
-| `E2E_USERNAME` / `E2E_PASSWORD` | `admin` / `admin` | 登录账号（对应 `APP_ADMIN_PASSWORD`） |
+| `E2E_USERNAME` / `E2E_PASSWORD` | `admin` / `admin` | 登录账号（首位注册的用户为超级管理员；启动后到登录弹窗点"去注册"创建首位用户即可） |
 | `E2E_BACKEND_PID` | 无 | 后端进程号；不设则跳过泄漏用例 |
 | `E2E_ASR_ADDR` | `100.79.27.90:10096` | FunASR 的 host:port，残留连接检查用，按实际部署覆盖 |
 

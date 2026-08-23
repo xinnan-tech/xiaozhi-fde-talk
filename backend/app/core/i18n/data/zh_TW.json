@@ -79,7 +79,7 @@
   "diag.ocr.bad_image": "讀取測試圖片失敗：{detail}",
   "diag.ocr.ok": "OCR 連線正常（服務可用）",
 
-  "startup.admin_password_missing": "APP_ADMIN_PASSWORD 未設定，請在 .env 或環境變數中設定後重啟",
+  "startup.config_invalid": "啟動配置無效，請檢查 .env 或環境變數後重啟",
   "startup.database_migration_fail": "alembic upgrade head 失敗：\n{stdout}\n{stderr}",
   "settings.prod_no_sqlite": "生產環境禁止使用 SQLite，必須使用 MySQL/PostgreSQL",
   "secret.resolve_failed": "無法解析 JWT 金鑰",

@@ -27,21 +27,21 @@ def _startup_msg(key: Keys, **params) -> str:
 
 
 def _load_settings_or_exit():
-    """加载配置；启动期配置错误（密码强度等）翻译成单行友好提示并立即退出。
+    """加载配置；启动期配置错误（env 值非法等）翻译成单行友好提示并立即退出。
 
     设计：与 lifespan 的 init_db 失败同款——stderr 单行 + os._exit，避开 uvicorn
     的 [error] Traceback 噪音，让 docker/systemd 用户一眼看到根因。
 
     注意：必须在 import `app.app` 之前调用——`app.app` 的 import 链会拉起
     `app.persistence.db`，而 db.py 模块级就会触发 Settings() 校验。若先 import
-    `app.app` 再校验配置，password 错误会以不友好的 pydantic traceback 形式
+    `app.app` 再校验配置，错误会以不友好的 pydantic traceback 形式
     在 import 阶段抛出，绕过本函数的友好提示。
     """
     try:
         return get_settings()
     except Exception:  # noqa: BLE001
         print(
-            f"\n[配置错误] {_startup_msg(Keys.STARTUP_ADMIN_PASSWORD_MISSING)}\n",
+            f"\n[配置错误] {_startup_msg(Keys.STARTUP_CONFIG_INVALID)}\n",
             file=sys.stderr,
             flush=True,
         )

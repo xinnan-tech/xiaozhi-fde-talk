@@ -1,8 +1,7 @@
-"""admin 启动密码强度策略回归测试。
+"""密码强度策略回归测试。
 
-覆盖 validate_password_strength 的四个分支 + init_db 在缺少 APP_ADMIN_PASSWORD
-时的拒启语义；并固定弱密码黑名单的若干关键项（包括「漏逗号拼接 bug
-\"admin123456qwerty123\"」与 bcrypt 72 字节 UTF-8 上限）。
+覆盖 validate_password_strength 的四个分支；并固定弱密码黑名单的若干关键项
+（包括「漏逗号拼接 bug \"admin123456qwerty123\"」与 bcrypt 72 字节 UTF-8 上限）。
 
 测试是纯函数 / 集成小启动，不依赖任何外部服务。
 """

@@ -4,10 +4,10 @@
 对应 design §10 PR2：集成测试 DB 隔离 + 演示账号 + 模型可用性探测。
 
 登录账号默认从环境变量读，避免把生产密码改弱来迁就测试：
-- APP_ADMIN_USERNAME（默认 admin）
-- APP_ADMIN_PASSWORD（默认 admin）
+- E2E_USERNAME（默认 admin）
+- E2E_PASSWORD（默认 admin）
 要让这套测试在跑着真实强密码的服务上通过，跑测试时显式 export
-APP_ADMIN_PASSWORD='<服务实际密码>'（用户名仍是 admin）。
+E2E_PASSWORD='<服务实际密码>'（用户名仍是 admin）。
 """
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ BASE_URL = "http://localhost:8000"
 WS_BASE = "ws://localhost:8000"
 
 # admin 默认账号：env 覆盖，缺省维持原行为（admin/admin）
-ADMIN_USERNAME = os.environ.get("APP_ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("APP_ADMIN_PASSWORD", "admin")
+ADMIN_USERNAME = os.environ.get("E2E_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("E2E_PASSWORD", "admin")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -61,7 +61,7 @@ _login_token_cache: dict[tuple[str, str], str] = {}
 
 @pytest.fixture
 def login():
-    """登录返回 token。默认账号读 APP_ADMIN_USERNAME/APP_ADMIN_PASSWORD env，
+    """登录返回 token。默认账号读 E2E_USERNAME/E2E_PASSWORD env，
     缺省 admin/admin（保留旧行为）。显式传 username/password 时覆盖 env。
     """
     async def _login(

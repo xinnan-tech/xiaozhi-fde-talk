@@ -79,7 +79,7 @@
   "diag.ocr.bad_image": "Không đọc được ảnh kiểm tra: {detail}",
   "diag.ocr.ok": "Kết nối OCR bình thường (dịch vụ khả dụng)",
 
-  "startup.admin_password_missing": "APP_ADMIN_PASSWORD chưa được đặt, hãy cấu hình trong .env hoặc biến môi trường và khởi động lại",
+  "startup.config_invalid": "Cấu hình khởi động không hợp lệ, hãy kiểm tra .env hoặc biến môi trường và khởi động lại",
   "startup.database_migration_fail": "alembic upgrade head thất bại:\n{stdout}\n{stderr}",
   "settings.prod_no_sqlite": "SQLite không được phép trong production, phải dùng MySQL/PostgreSQL",
   "secret.resolve_failed": "Không thể giải quyết JWT secret",

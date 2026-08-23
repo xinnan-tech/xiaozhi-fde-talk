@@ -91,5 +91,11 @@
   "auth.refresh_invalid": "invalid refresh token",
   "auth.refresh_expired": "refresh token expired",
   "auth.refresh_revoked": "refresh token revoked",
+  "validation.required": "{field} is required",
+  "validation.string_too_short": "{field} must be at least {min} characters",
+  "validation.string_too_long": "{field} must be at most {max} characters",
+  "validation.string_pattern_mismatch": "{field} format is invalid",
+  "validation.extra_forbidden": "unexpected field: {field}",
+  "validation.invalid": "{field} is invalid",
   "settings.prod_typo_env": "Production detected suspected typo env vars: {names}"
 }

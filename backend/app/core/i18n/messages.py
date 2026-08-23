@@ -129,6 +129,14 @@ class Keys(StrEnum):
     AUTH_REFRESH_EXPIRED = "auth.refresh_expired"
     AUTH_REFRESH_REVOKED = "auth.refresh_revoked"
 
+    # ---- Pydantic request validation (422) ----
+    VALIDATION_REQUIRED = "validation.required"
+    VALIDATION_STRING_TOO_SHORT = "validation.string_too_short"
+    VALIDATION_STRING_TOO_LONG = "validation.string_too_long"
+    VALIDATION_STRING_PATTERN_MISMATCH = "validation.string_pattern_mismatch"
+    VALIDATION_EXTRA_FORBIDDEN = "validation.extra_forbidden"
+    VALIDATION_INVALID = "validation.invalid"
+
 
 @lru_cache(maxsize=1)
 def load_catalogs() -> dict[str, dict[str, str]]:

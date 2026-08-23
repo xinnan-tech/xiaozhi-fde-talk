@@ -13,6 +13,7 @@ import logging
 import os
 import sys
 import uuid
+from typing import Any
 
 from fastapi import FastAPI, Request
 from structlog.contextvars import bind_contextvars, clear_contextvars
@@ -232,6 +233,8 @@ def create_app() -> FastAPI:
     from fastapi.responses import JSONResponse
     from app.core.i18n.context import current_locale
     from app.core.i18n.errors import I18nError
+    from app.core.i18n.messages import Keys
+    from app.core.i18n.translator import t
 
     @app.exception_handler(I18nError)
     async def _i18n_handler(request: Request, exc: I18nError):
@@ -239,6 +242,45 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=exc.http_status,
             content={"detail": exc.localized(locale=locale), "code": exc.code},
+            headers={"Content-Language": locale},
+        )
+
+    # pydantic 422：默认 detail 是英文「String should have at least N characters」之类，
+    # 直接返回给前端用户看不懂。逐条按 error.type 映射到 i18n key，附带字段名与
+    # ctx 里的 min_length / max_length / pattern，让前端照旧按数组解析（loc + msg）。
+    from fastapi.exceptions import RequestValidationError
+
+    _PYDANTIC_TYPE_TO_KEY: dict[str, str] = {
+        "missing": Keys.VALIDATION_REQUIRED,
+        "string_too_short": Keys.VALIDATION_STRING_TOO_SHORT,
+        "string_too_long": Keys.VALIDATION_STRING_TOO_LONG,
+        "string_pattern_mismatch": Keys.VALIDATION_STRING_PATTERN_MISMATCH,
+        "extra_forbidden": Keys.VALIDATION_EXTRA_FORBIDDEN,
+    }
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_handler(request: Request, exc: RequestValidationError):
+        locale = current_locale()
+        items = []
+        for err in exc.errors():
+            etype = err.get("type", "")
+            loc = err.get("loc") or ()
+            field = str(loc[-1]) if loc else ""
+            ctx = err.get("ctx") or {}
+            key = _PYDANTIC_TYPE_TO_KEY.get(etype, Keys.VALIDATION_INVALID)
+            params: dict[str, Any] = {"field": field}
+            if "min_length" in ctx:
+                params["min"] = ctx["min_length"]
+            if "max_length" in ctx:
+                params["max"] = ctx["max_length"]
+            try:
+                msg = t(key, locale=locale, **params)
+            except Exception:
+                msg = err.get("msg", "")
+            items.append({"type": etype, "loc": list(loc), "msg": msg})
+        return JSONResponse(
+            status_code=422,
+            content={"detail": items},
             headers={"Content-Language": locale},
         )
 

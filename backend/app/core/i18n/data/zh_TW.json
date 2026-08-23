@@ -91,5 +91,11 @@
   "auth.refresh_invalid": "refresh token 無效",
   "auth.refresh_expired": "refresh token 已過期",
   "auth.refresh_revoked": "refresh token 已被撤銷",
+  "validation.required": "{field} 不能為空",
+  "validation.string_too_short": "{field} 長度不足：要求 ≥ {min} 個字元",
+  "validation.string_too_long": "{field} 長度超出：上限 {max} 個字元",
+  "validation.string_pattern_mismatch": "{field} 格式不正確",
+  "validation.extra_forbidden": "不允許的欄位：{field}",
+  "validation.invalid": "{field} 不合法",
   "settings.prod_typo_env": "生產環境檢測到疑似拼寫錯的環境變數：{names}"
 }

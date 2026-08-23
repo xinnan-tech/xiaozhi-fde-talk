@@ -91,5 +91,11 @@
   "auth.refresh_invalid": "refresh token không hợp lệ",
   "auth.refresh_expired": "refresh token đã hết hạn",
   "auth.refresh_revoked": "refresh token đã bị thu hồi",
+  "validation.required": "{field} không được để trống",
+  "validation.string_too_short": "{field} quá ngắn: yêu cầu ≥ {min} ký tự",
+  "validation.string_too_long": "{field} quá dài: tối đa {max} ký tự",
+  "validation.string_pattern_mismatch": "{field} không đúng định dạng",
+  "validation.extra_forbidden": "trường không được phép: {field}",
+  "validation.invalid": "{field} không hợp lệ",
   "settings.prod_typo_env": "Production phát hiện biến môi trường nghi đánh sai chính tả: {names}"
 }

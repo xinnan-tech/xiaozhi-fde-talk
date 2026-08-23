@@ -3,6 +3,8 @@ import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
+import { usePermissionStoreHook } from "@/store/modules/permission";
+import { registrationStatusApi } from "@/api/user";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import {
   systemConfigApi,
@@ -54,6 +56,7 @@ type SelfCheckResult = {
 };
 
 const userStore = useUserStoreHook();
+const permissionStore = usePermissionStoreHook();
 const { t } = useI18n();
 
 const icons = {
@@ -222,6 +225,15 @@ const saveConfig = async (group: ConfigGroup) => {
   if (res.ok) {
     ElMessage.success(t("system.save_success"));
     await initCofig();
+    // auth.allow_registration 改变后，把最新值喂给 permission store 以刷新「用户管理」菜单可见性。
+    if (group.key === "auth") {
+      try {
+        const r = await registrationStatusApi();
+        permissionStore.setRegistrationAllowed(r.allow_registration);
+      } catch {
+        /* 取值失败不阻塞保存成功的提示 */
+      }
+    }
   } else {
     ElMessage.error(`保存 ${group.title} 配置失败：${getErrorMessage(res)}`);
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import zhTw from "element-plus/es/locale/lang/zh-tw";
@@ -7,12 +7,14 @@ import en from "element-plus/es/locale/lang/en";
 import { useI18n } from "vue-i18n";
 import { addPathMatch } from "@/router/utils";
 import { usePermissionStoreHook } from "@/store/modules/permission";
+import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { useInterviewStoreHook } from "@/store/modules/interview";
 import { ReDialog } from "@/components/ReDialog";
 import CreateInterviewDialog from "@/components/interview/CreateInterviewDialog.vue";
 import LoginDialog from "@/components/auth/LoginDialog.vue";
 import { saveInterviewApi, type CreateInterviewForm } from "@/api/interview";
+import { registrationStatusApi } from "@/api/user";
 
 const { locale, t } = useI18n();
 const currentLocale = computed(() => {
@@ -27,6 +29,9 @@ const currentLocale = computed(() => {
 });
 const dialogStore = useDialogStoreHook();
 const interviewStore = useInterviewStoreHook();
+const permissionStore = usePermissionStoreHook();
+const userStore = useUserStoreHook();
+const { role: userRole } = storeToRefs(userStore);
 const { createInterviewVisible, loginVisible } = storeToRefs(dialogStore);
 const creatingInterview = ref(false);
 
@@ -49,12 +54,32 @@ const handleCreateInterview = async (form: CreateInterviewForm) => {
   }
 };
 
+const fetchRegistrationStatus = async () => {
+  try {
+    const r = await registrationStatusApi();
+    permissionStore.setRegistrationAllowed(r.allow_registration);
+  } catch {
+    permissionStore.setRegistrationAllowed(false);
+  }
+};
+
 const initRoutes = () => {
-  usePermissionStoreHook().handleWholeMenus([]);
+  permissionStore.handleWholeMenus([]);
   addPathMatch();
 };
 
-onMounted(initRoutes);
+onMounted(() => {
+  initRoutes();
+  void fetchRegistrationStatus();
+});
+
+// 用户角色变化（登录 / 登出 / 注册）→ 重新过滤菜单。
+// 监听 role 而非整个 userStore：role 之外字段（username / avatar）变化不需要重算。
+watch(userRole, () => {
+  permissionStore.applyMenuFilter();
+});
+
+defineExpose({ fetchRegistrationStatus });
 </script>
 
 <template>

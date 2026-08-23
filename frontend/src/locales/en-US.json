@@ -170,6 +170,19 @@
   "users.registration_closed_hint": "Registration is closed; password reset is unavailable",
   "users.reset_password_success": "Password reset",
   "users.reset_password_failed": "Reset failed",
+  "users.subtitle": "Manage backend accounts and reset their passwords",
+  "users.search_placeholder": "Search by username",
+  "users.empty_state": "No users yet",
+  "users.col_index": "#",
+  "users.col_password_changed_at": "Last password change",
+  "users.never_changed": "Never changed",
+  "users.role.admin": "Admin",
+  "users.role.user": "User",
+  "users.cancel_button": "Cancel",
+  "users.confirm_button": "Confirm",
+  "users.dialog_subtitle": "Reset password for {username}",
+  "users.new_password_placeholder": "At least 8 characters, with letters and digits",
+  "users.confirm_password_placeholder": "Re-enter the new password",
 
   "create.dialog.title": "Create new interview",
   "create.dialog.basic_info": "Basic information",
@@ -509,5 +522,12 @@
   "about.product_name": "xiaozhi-fde-talk",
   "about.version": "Version",
   "about.copyright": "Copyright",
-  "about.description": "A desktop-grade AI copilot for structured interviews: auto-capture, auto-follow-up, auto-report."
+  "about.description": "A desktop-grade AI copilot for structured interviews: auto-capture, auto-follow-up, auto-report.",
+  "about.subtitle": "A desktop-grade AI copilot for structured interviews",
+  "about.section_product": "Product",
+  "about.section_stack": "Tech stack",
+  "about.field_author": "Maintainer",
+  "about.field_license": "License",
+  "about.field_repo": "Repository",
+  "about.stack_hint": "Key third-party dependencies; versions come from package.json"
 }

@@ -170,6 +170,19 @@
   "users.registration_closed_hint": "Registration is closed; password reset is unavailable",
   "users.reset_password_success": "Password reset",
   "users.reset_password_failed": "Reset failed",
+  "users.subtitle": "Quản lý tài khoản backend và đặt lại mật khẩu",
+  "users.search_placeholder": "Tìm theo tên đăng nhập",
+  "users.empty_state": "Chưa có người dùng",
+  "users.col_index": "STT",
+  "users.col_password_changed_at": "Lần đổi mật khẩu gần nhất",
+  "users.never_changed": "Chưa từng đổi",
+  "users.role.admin": "Quản trị viên",
+  "users.role.user": "Người dùng",
+  "users.cancel_button": "Huỷ",
+  "users.confirm_button": "Xác nhận",
+  "users.dialog_subtitle": "Đặt lại mật khẩu cho {username}",
+  "users.new_password_placeholder": "Tối thiểu 8 ký tự, gồm chữ và số",
+  "users.confirm_password_placeholder": "Nhập lại mật khẩu mới",
 
   "create.dialog.title": "Tạo phỏng vấn mới",
   "create.dialog.basic_info": "Thông tin cơ bản",
@@ -509,5 +522,12 @@
   "about.product_name": "xiaozhi-fde-talk",
   "about.version": "Phiên bản",
   "about.copyright": "Bản quyền",
-  "about.description": "Trợ lý AI cấp desktop cho phỏng vấn có cấu trúc: tự động ghi, tự động theo dõi, tự động tạo báo cáo."
+  "about.description": "Trợ lý AI cấp desktop cho phỏng vấn có cấu trúc: tự động ghi, tự động theo dõi, tự động tạo báo cáo.",
+  "about.subtitle": "Trợ lý AI cấp desktop cho phỏng vấn có cấu trúc",
+  "about.section_product": "Thông tin sản phẩm",
+  "about.section_stack": "Ngăn xếp công nghệ",
+  "about.field_author": "Người bảo trì",
+  "about.field_license": "Giấy phép",
+  "about.field_repo": "Kho mã nguồn",
+  "about.stack_hint": "Các phụ thuộc chính; phiên bản lấy từ package.json"
 }

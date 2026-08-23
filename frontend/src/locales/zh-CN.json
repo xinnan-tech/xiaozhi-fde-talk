@@ -170,6 +170,19 @@
   "users.registration_closed_hint": "注册已关闭，无法重置密码",
   "users.reset_password_success": "密码已重置",
   "users.reset_password_failed": "重置失败",
+  "users.subtitle": "管理后台账号、重置登录密码",
+  "users.search_placeholder": "按用户名搜索",
+  "users.empty_state": "暂无用户数据",
+  "users.col_index": "序号",
+  "users.col_password_changed_at": "上次改密",
+  "users.never_changed": "从未改密",
+  "users.role.admin": "管理员",
+  "users.role.user": "普通用户",
+  "users.cancel_button": "取消",
+  "users.confirm_button": "确认",
+  "users.dialog_subtitle": "正在为 {username} 重置登录密码",
+  "users.new_password_placeholder": "至少 8 位，包含字母与数字",
+  "users.confirm_password_placeholder": "再次输入新密码",
 
   "create.dialog.title": "创建新访谈",
   "create.dialog.basic_info": "基本信息",
@@ -509,5 +522,12 @@
   "about.product_name": "xiaozhi-fde-talk",
   "about.version": "版本",
   "about.copyright": "版权",
-  "about.description": "面向结构化访谈场景的桌面级 AI 辅助工具：自动记录、自动跟进、自动生成报告。"
+  "about.description": "面向结构化访谈场景的桌面级 AI 辅助工具：自动记录、自动跟进、自动生成报告。",
+  "about.subtitle": "面向结构化访谈场景的桌面级 AI 辅助工具",
+  "about.section_product": "产品信息",
+  "about.section_stack": "技术栈",
+  "about.field_author": "维护者",
+  "about.field_license": "许可证",
+  "about.field_repo": "代码仓库",
+  "about.stack_hint": "主要第三方依赖，版本号来自 package.json"
 }

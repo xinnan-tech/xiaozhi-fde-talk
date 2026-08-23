@@ -170,6 +170,19 @@
   "users.registration_closed_hint": "Registration is closed; password reset is unavailable",
   "users.reset_password_success": "Password reset",
   "users.reset_password_failed": "Reset failed",
+  "users.subtitle": "管理後台帳號、重置登入密碼",
+  "users.search_placeholder": "依使用者名稱搜尋",
+  "users.empty_state": "暫無使用者資料",
+  "users.col_index": "序號",
+  "users.col_password_changed_at": "上次改密",
+  "users.never_changed": "從未改密",
+  "users.role.admin": "管理員",
+  "users.role.user": "一般使用者",
+  "users.cancel_button": "取消",
+  "users.confirm_button": "確認",
+  "users.dialog_subtitle": "正在為 {username} 重置登入密碼",
+  "users.new_password_placeholder": "至少 8 位，包含字母與數字",
+  "users.confirm_password_placeholder": "再次輸入新密碼",
 
   "create.dialog.title": "建立新訪談",
   "create.dialog.basic_info": "基本資訊",
@@ -509,5 +522,12 @@
   "about.product_name": "xiaozhi-fde-talk",
   "about.version": "版本",
   "about.copyright": "版權",
-  "about.description": "面向結構化訪談場景的桌面級 AI 輔助工具：自動記錄、自動跟進、自動生成報告。"
+  "about.description": "面向結構化訪談場景的桌面級 AI 輔助工具：自動記錄、自動跟進、自動生成報告。",
+  "about.subtitle": "面向結構化訪談場景的桌面級 AI 輔助工具",
+  "about.section_product": "產品資訊",
+  "about.section_stack": "技術堆疊",
+  "about.field_author": "維護者",
+  "about.field_license": "授權條款",
+  "about.field_repo": "程式碼倉庫",
+  "about.stack_hint": "主要第三方依賴，版本號取自 package.json"
 }

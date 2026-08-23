@@ -156,12 +156,19 @@ def create_app() -> FastAPI:
     from fastapi.middleware.cors import CORSMiddleware
     settings = get_settings()
     origins = _resolve_cors_origins(settings)
+    # 显式方法/请求头白名单：通配 "*" 锁定到 RESTful 标准 + 当前路由实际用到的
+    # 自定义头（X-Lang 多语请求；X-Request-ID 由中间件生成回传，便于客户端核对）。
+    # expose 同步回写 X-Request-ID，否则浏览器 JS 拿不到该响应头，对账失败。
+    _ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    _ALLOWED_HEADERS = ["Authorization", "Content-Type", "X-Lang", "X-Request-ID"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=_ALLOWED_METHODS,
+        allow_headers=_ALLOWED_HEADERS,
+        expose_headers=["X-Request-ID"],
+        max_age=600,
     )
 
     # i18n: per-request locale resolution (X-Lang → Accept-Language → DEFAULT).

@@ -8,4 +8,5 @@
     persistence/   持久化基础设施（DB engine + ORM + Repository）
     transport/     传输层（HTTP / WebSocket 薄适配器）
 """
-__version__ = "0.0.0"
+# 0.1.0 — 开源前首次打 tag 的版本基线（Wave 1-4 安全 / 测试 / 文档硬化的累积）。
+__version__ = "0.1.0"

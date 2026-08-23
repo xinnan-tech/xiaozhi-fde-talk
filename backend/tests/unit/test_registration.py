@@ -56,12 +56,17 @@ async def _wipe() -> None:
 @pytest.fixture
 async def empty_db(_lifespan_app):
     """清 users + allow_registration 配置 → ConfigStore 缓存失效。"""
+    from app.transport.http.routes.auth import _reset_for_test
+
+    # 清空登录 / 注册限流桶：模块级 RateLimiter 跨用例持续累加，会污染后续测试。
     await _wipe()
     get_config_store().invalidate()
+    _reset_for_test()
     yield _lifespan_app
     # teardown：再清一次，避免下一个测试看到本测试的副作用
     await _wipe()
     get_config_store().invalidate()
+    _reset_for_test()
 
 
 # ─────────────────────────────────────────────────────────────────────

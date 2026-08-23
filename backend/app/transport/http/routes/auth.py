@@ -33,6 +33,26 @@ from app.domain.auth import CurrentUser
 router = APIRouter()
 
 _login_limiter = RateLimiter(capacity=5, refill_per_hour=300)
+# 注册限流比登录更严：首用户自动获得 admin，必须防止枚举/抢首注册。
+# 同样的 (ip, username) 桶复用同一份限流逻辑；register 端点自身的校验失败
+# （弱密码 / 两次密码不一致 / 重复 username）也消耗令牌——避免暴力扫 username
+# 与弱密码走绕过路径。
+_register_limiter = RateLimiter(capacity=3, refill_per_hour=60)
+
+
+def _reset_for_test() -> None:
+    """清空登录 / 注册限流桶。仅 settings.env in {"test","dev"} 时生效。
+
+    单元/集成测试用例间需要隔离限流状态；模块级 RateLimiter 跨用例持续累加，
+    不暴露 reset 的话测试要么 sleep 等令牌再生（慢），要么依赖运气。生产环境
+    误调会清掉所有封禁桶，故显式 env 守门——只放行 dev/test，禁止 prod。
+    """
+    from app.core.settings import get_settings
+
+    if get_settings().env not in ("test", "dev"):
+        return
+    _login_limiter._buckets.clear()
+    _register_limiter._buckets.clear()
 
 
 def _client_ip(request: Request) -> str:
@@ -86,12 +106,15 @@ async def registration_status(db: AsyncSession = Depends(get_db)) -> Registratio
 
 @router.post("/auth/register", response_model=LoginResponse)
 async def register(
-    req: RegisterRequest, db: AsyncSession = Depends(get_db),
+    req: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
     """注册 + 自动登录（公开端点）。
 
     单一事务：先 `async with db.begin()`，再 `await svc_register(db, ...)`；
     register_user 内部不管理事务边界（dialect 锁 + count + insert 必须同事务）。
+
+    限流先于任何校验：防止扫 username / 撞首注册。桶与登录同款
+    `_client_ip(request):req.username`，失败校验也消耗令牌。
 
     SQLite 并发安全说明：SQLAlchemy 2 AsyncSession 不暴露 `execution_options`
     在依赖注入的 session 上（autobegin 后 isolation_level 不可改）；aiosqlite
@@ -102,6 +125,11 @@ async def register(
     弱密码校验移到 service.register_user（保证 CLI / admin 代注册同受约束），
     本路由只做 confirm_password 比对。
     """
+    # 限流先于 confirm 比对与弱密码校验：失败路径同样消耗令牌，避免枚举绕路
+    rl_key = f"{_client_ip(request)}:{req.username}"
+    if not _register_limiter.try_acquire(rl_key):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
+
     if req.password != req.confirm_password:
         raise I18nError(Keys.AUTH_PASSWORD_MISMATCH, http_status=400)
 

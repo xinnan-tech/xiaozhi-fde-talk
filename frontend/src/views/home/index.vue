@@ -8,6 +8,7 @@ import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { useInterviewStoreHook } from "@/store/modules/interview";
 import ReSegmented from "@/components/ReSegmented";
+import ChangePasswordDialog from "@/components/auth/ChangePasswordDialog.vue";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import { isSupportedLocale, setLocale, type SupportedLocale } from "@/i18n";
 import {
@@ -41,6 +42,8 @@ const messageIcon = useRenderIcon("tabler:message");
 const businessmanIcon = useRenderIcon("flat-color-icons:businessman");
 const noteIcon = useRenderIcon("majesticons:note-text");
 const languageIcon = useRenderIcon("flowbite:language-outline");
+const keyIcon = useRenderIcon("tabler:key");
+const logoutIcon = useRenderIcon("tabler:logout");
 
 const localeOptions: Array<{ value: SupportedLocale; label: string }> = [
   { value: "zh-CN", label: "简体中文" },
@@ -195,19 +198,21 @@ const formatRecentTime = (value: string | null) => {
   }).format(timestamp);
 };
 
-const clickUserAvatar = async () => {
+const clickUserAvatar = () => {
   if (!isLoggedIn.value) {
     dialogStore.openLogin();
-  } else {
-    try {
-      await ElMessageBox.confirm(t("home.logout_confirm"), "", {
-        confirmButtonText: t("home.confirm"),
-        cancelButtonText: t("home.cancel"),
-        type: "primary"
-      });
-      logOut();
-      ElMessage.success(t("home.logout_success"));
-    } catch (error) {}
+  }
+};
+
+// 头像菜单（登录后）：改密 + 登出
+const changePwdVisible = ref(false);
+
+const handleAvatarCommand = (command: string) => {
+  if (command === "change_password") {
+    changePwdVisible.value = true;
+  } else if (command === "logout") {
+    logOut();
+    ElMessage.success(t("home.logout_success"));
   }
 };
 
@@ -320,12 +325,35 @@ watch(
           effect="light"
         >
           <div
+            v-if="!isLoggedIn"
             class="user-avatar w-10 h-10 rounded-full flex items-center justify-center"
-            :class="{ online: isLoggedIn }"
             @click="clickUserAvatar"
           >
             <component :is="businessmanIcon" class="w-8 h-8" />
           </div>
+          <el-dropdown
+            v-else
+            trigger="click"
+            placement="bottom-end"
+            class="user-avatar-dropdown"
+            @command="handleAvatarCommand"
+          >
+            <div
+              class="user-avatar w-10 h-10 rounded-full flex items-center justify-center online"
+            >
+              <component :is="businessmanIcon" class="w-8 h-8" />
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu class="user-menu">
+                <el-dropdown-item command="change_password" :icon="keyIcon">
+                  {{ t("auth.change_password") }}
+                </el-dropdown-item>
+                <el-dropdown-item command="logout" :icon="logoutIcon" divided>
+                  {{ t("home.logout") }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </el-tooltip>
         <el-dropdown
           class="locale-dropdown"
@@ -556,6 +584,8 @@ watch(
         </template>
       </el-skeleton>
     </div>
+
+    <ChangePasswordDialog v-model="changePwdVisible" />
   </div>
 </template>
 
@@ -706,6 +736,24 @@ watch(
     &:hover {
       box-shadow: 0 0 8px rgba(0, 0, 0, 0.08);
     }
+  }
+
+  /* 头像被 el-dropdown trigger 包裹后，点击区域需要直传；原 w-10 h-10 圆环保持。 */
+  .user-avatar-dropdown {
+    display: inline-flex;
+  }
+
+  :deep(.user-menu) {
+    min-width: 152px;
+    padding: 6px;
+    border-radius: 8px;
+  }
+
+  :deep(.user-menu .el-dropdown-menu__item) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 6px;
   }
 
   .locale-dropdown {

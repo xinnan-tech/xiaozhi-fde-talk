@@ -89,6 +89,7 @@
   "home.confirm": "確定",
   "home.cancel": "取消",
   "home.logout_success": "登出成功",
+  "home.logout": "登出",
   "home.tab.all": "全部",
   "home.tab.created": "待開始",
   "home.tab.in_progress": "進行中",
@@ -146,7 +147,6 @@
   "auth.change_password_failed": "Password change failed. Please try again later.",
   "auth.change_password_old_wrong": "Current password is incorrect",
   "auth.change_password_mismatch": "The two new passwords do not match",
-  "auth.forgot_password_link": "Forgot password?",
 
   "users.list_title": "Users",
   "users.col_username": "Username",

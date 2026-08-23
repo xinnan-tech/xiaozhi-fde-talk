@@ -89,6 +89,7 @@
   "home.confirm": "确定",
   "home.cancel": "取消",
   "home.logout_success": "退出成功",
+  "home.logout": "退出登录",
   "home.tab.all": "全部",
   "home.tab.created": "待开始",
   "home.tab.in_progress": "进行中",
@@ -146,7 +147,6 @@
   "auth.change_password_failed": "修改失败，请稍后重试",
   "auth.change_password_old_wrong": "当前密码错误",
   "auth.change_password_mismatch": "两次输入的密码不一致",
-  "auth.forgot_password_link": "忘记密码？",
 
   "users.list_title": "用户列表",
   "users.col_username": "用户名",

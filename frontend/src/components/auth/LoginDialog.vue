@@ -4,7 +4,7 @@ import type { FormInstance, FormRules } from "element-plus/es/components/form";
 import { useI18n } from "vue-i18n";
 import { message } from "@/utils/message";
 import { useUserStoreHook } from "@/store/modules/user";
-import { changePasswordApi, registrationStatusApi } from "@/api/user";
+import { registrationStatusApi } from "@/api/user";
 import User from "~icons/ep/user";
 import Lock from "~icons/ep/lock";
 
@@ -14,13 +14,6 @@ interface RuleForm {
   username: string;
   password: string;
   confirmPassword: string;
-}
-
-interface ChangePwdForm {
-  username: string; // 仅 UI 提示（后端按 JWT 识别 user）；预填自登录框
-  old_password: string;
-  new_password: string;
-  confirm_new_password: string;
 }
 
 const props = defineProps<{ modelValue: boolean }>();
@@ -95,7 +88,24 @@ async function submit(formEl: FormInstance | undefined) {
       message(t("auth.register_success"), { type: "success" });
     }
     emit("update:modelValue", false);
-  } catch {
+  } catch (e: unknown) {
+    // 后端 pydantic 422 detail 形如 [{loc:[body,field],msg:"...",type:"string_too_short",...}]
+    // 转成可读字段错误；其他保持原样走「注册失败，请稍后重试」。
+    if (mode.value === "register") {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      if (Array.isArray(detail) && detail.length > 0) {
+        const messages = detail
+          .map((d: { msg?: string; loc?: unknown[] }) => {
+            const field = Array.isArray(d?.loc) && d.loc.length > 1 ? String(d.loc[d.loc.length - 1]) : "";
+            return field ? `${field}: ${d.msg}` : d.msg;
+          })
+          .filter(Boolean);
+        if (messages.length) {
+          message(messages.join("；"), { type: "error" });
+          return;
+        }
+      }
+    }
     message(mode.value === "login" ? t("auth.login_failed") : t("auth.register_failed"), { type: "error" });
   } finally {
     loading.value = false;
@@ -106,70 +116,6 @@ function onKeydown(event: KeyboardEvent) {
   if (event.key === "Enter") {
     event.preventDefault();
     void submit(ruleFormRef.value);
-  }
-}
-
-// ── 改密子 dialog：login 模式底部「忘记密码？」链接触发 ─────────────────
-// 注意：后端按 JWT 识别 user，因此提交必须有 token；token 缺失时弹"请先登录"。
-const changePwdDialogVisible = ref(false);
-const changePwdFormRef = ref<FormInstance>();
-const changePwdForm = reactive<ChangePwdForm>({
-  username: "",
-  old_password: "",
-  new_password: "",
-  confirm_new_password: ""
-});
-const changePwdLoading = ref(false);
-
-const changePwdRules = computed<FormRules<ChangePwdForm>>(() => ({
-  username: [{ required: true, message: t("auth.username_required"), trigger: "blur" }],
-  old_password: [{ required: true, message: t("auth.change_password_old_placeholder"), trigger: "blur" }],
-  new_password: [
-    { required: true, message: t("auth.change_password_new_placeholder"), trigger: "blur" },
-    { min: 8, message: t("auth.change_password_new_placeholder"), trigger: "blur" }
-  ],
-  confirm_new_password: [
-    { required: true, message: t("auth.change_password_confirm_placeholder"), trigger: "blur" },
-    {
-      validator: (_, v, cb) =>
-        v === changePwdForm.new_password ? cb() : cb(new Error(t("auth.change_password_mismatch"))),
-      trigger: "blur"
-    }
-  ]
-}));
-
-function openChangePasswordDialog() {
-  // 预填用户名（如果登录框已经填了）—— 仅 UI 提示，后端不读这个字段
-  changePwdForm.username = ruleForm.username || "";
-  changePwdForm.old_password = "";
-  changePwdForm.new_password = "";
-  changePwdForm.confirm_new_password = "";
-  changePwdDialogVisible.value = true;
-}
-
-async function submitChangePassword(formEl: FormInstance | undefined) {
-  if (!formEl || changePwdLoading.value) return;
-  const valid = await formEl.validate().catch(() => false);
-  if (!valid) return;
-  changePwdLoading.value = true;
-  try {
-    await changePasswordApi({
-      old_password: changePwdForm.old_password,
-      new_password: changePwdForm.new_password
-    });
-    message(t("auth.change_password_success"), { type: "success" });
-    changePwdDialogVisible.value = false;
-  } catch (e: unknown) {
-    // 401 → 旧密码错（HTTP_AUTH_INVALID_CREDENTIALS） 或 token 缺失；
-    // 400 → 新密码强度不合规；其余 → 通用失败。
-    const status = (e as { response?: { status?: number } })?.response?.status;
-    if (status === 401) {
-      message(t("auth.change_password_old_wrong"), { type: "error" });
-    } else {
-      message(t("auth.change_password_failed"), { type: "error" });
-    }
-  } finally {
-    changePwdLoading.value = false;
   }
 }
 </script>
@@ -206,24 +152,23 @@ async function submitChangePassword(formEl: FormInstance | undefined) {
           <el-input v-model="ruleForm.confirmPassword" class="login-input" type="password" :placeholder="$t('auth.confirm_password_placeholder')" show-password :prefix-icon="Lock" @keydown="onKeydown" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" class="w-full login-btn" :loading="loading" :disabled="mode === 'register' && registrationAvailable === false" @click="submit(ruleFormRef)">
+          <el-button type="primary" class="w-full login-btn" :loading="loading" @click="submit(ruleFormRef)">
             {{ mode === "login" ? t("auth.login") : t("auth.register") }}
           </el-button>
         </el-form-item>
         <div class="text-center text-sm text-[#666]">
           <template v-if="mode === 'login'">
+            <!--
+              注册入口：注册关闭（registrationAvailable === false）时直接隐藏，
+              避免「看到却点不动」的反向引导；其它状态显示「去注册」链接。
+            -->
             <el-link
               v-if="registrationAvailable !== false"
               type="primary"
               @click="mode = 'register'"
             >{{ t("auth.go_register") }}</el-link>
-            <el-tooltip v-else :content="t('auth.registration_unavailable')" placement="top">
-              <el-link type="primary" disabled>{{ t("auth.go_register") }}</el-link>
-            </el-tooltip>
-            <span class="mx-2 text-[#ccc]">|</span>
-            <el-link type="primary" @click="openChangePasswordDialog">
-              {{ t("auth.forgot_password_link") }}
-            </el-link>
+            <span v-if="registrationAvailable !== false" class="mx-2 text-[#ccc]">|</span>
+            <!-- 找回密码入口下线：改密走登录后头像菜单，旧入口隐藏。 -->
           </template>
           <template v-else>
             <el-link type="primary" @click="mode = 'login'">{{ t("auth.signin_instead") }}</el-link>
@@ -231,74 +176,6 @@ async function submitChangePassword(formEl: FormInstance | undefined) {
         </div>
       </el-form>
     </div>
-  </el-dialog>
-
-  <!-- 改密子 dialog：login 底部「忘记密码？」链接触发 -->
-  <el-dialog
-    v-model="changePwdDialogVisible"
-    width="450px"
-    align-center
-    append-to-body
-    destroy-on-close
-    class="login-dialog"
-    :title="t('auth.change_password_title')"
-  >
-    <el-form
-      ref="changePwdFormRef"
-      :model="changePwdForm"
-      :rules="changePwdRules"
-      label-position="top"
-    >
-      <el-form-item :label="t('auth.username_placeholder')" prop="username">
-        <el-input
-          v-model="changePwdForm.username"
-          class="login-input"
-          :placeholder="t('auth.username_placeholder')"
-          :prefix-icon="User"
-        />
-      </el-form-item>
-      <el-form-item prop="old_password">
-        <el-input
-          v-model="changePwdForm.old_password"
-          class="login-input"
-          type="password"
-          show-password
-          :placeholder="t('auth.change_password_old_placeholder')"
-          :prefix-icon="Lock"
-        />
-      </el-form-item>
-      <el-form-item prop="new_password">
-        <el-input
-          v-model="changePwdForm.new_password"
-          class="login-input"
-          type="password"
-          show-password
-          :placeholder="t('auth.change_password_new_placeholder')"
-          :prefix-icon="Lock"
-        />
-      </el-form-item>
-      <el-form-item prop="confirm_new_password">
-        <el-input
-          v-model="changePwdForm.confirm_new_password"
-          class="login-input"
-          type="password"
-          show-password
-          :placeholder="t('auth.change_password_confirm_placeholder')"
-          :prefix-icon="Lock"
-          @keydown.enter="submitChangePassword(changePwdFormRef)"
-        />
-      </el-form-item>
-      <el-form-item>
-        <el-button
-          type="primary"
-          class="w-full login-btn"
-          :loading="changePwdLoading"
-          @click="submitChangePassword(changePwdFormRef)"
-        >
-          {{ t("auth.change_password") }}
-        </el-button>
-      </el-form-item>
-    </el-form>
   </el-dialog>
 </template>
 

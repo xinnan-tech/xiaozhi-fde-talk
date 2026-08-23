@@ -89,6 +89,7 @@
   "home.confirm": "Xác nhận",
   "home.cancel": "Hủy",
   "home.logout_success": "Đăng xuất thành công",
+  "home.logout": "Đăng xuất",
   "home.tab.all": "Tất cả",
   "home.tab.created": "Chưa bắt đầu",
   "home.tab.in_progress": "Đang diễn ra",
@@ -146,7 +147,6 @@
   "auth.change_password_failed": "Password change failed. Please try again later.",
   "auth.change_password_old_wrong": "Current password is incorrect",
   "auth.change_password_mismatch": "The two new passwords do not match",
-  "auth.forgot_password_link": "Forgot password?",
 
   "users.list_title": "Users",
   "users.col_username": "Username",

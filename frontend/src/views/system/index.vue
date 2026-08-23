@@ -11,6 +11,7 @@ import {
   systemDiagnosticsApi,
   systemAsrDiagnosticsApi,
   systemLlmDiagnosticsApi,
+  systemOcrDiagnosticsApi,
   systemConfigSaveApi
 } from "@/api/system";
 
@@ -37,7 +38,7 @@ type ConfigGroup = {
   icon: ReturnType<typeof useRenderIcon>;
   fields: ConfigField[];
 };
-type CheckTarget = "all" | "asr" | "llm";
+type CheckTarget = "all" | "asr" | "llm" | "ocr";
 type CheckStatus = "normal" | "running" | "error";
 
 /** 自检结果 */
@@ -249,7 +250,11 @@ const getOrCreateResult = (key: SelfCheckResult["key"]) => {
   const result: SelfCheckResult = {
     key,
     titleKey:
-      key === "asr" ? "system.diagnostics.asr" : "system.diagnostics.llm",
+      key === "asr"
+        ? "system.diagnostics.asr"
+        : key === "llm"
+          ? "system.diagnostics.llm"
+          : "system.diagnostics.ocr",
     description: t("system.diagnostics.running"),
     detail: "",
     duration: "-",
@@ -292,10 +297,25 @@ const updateLlmResult = (
   target.model = result.detail?.model || "-";
 };
 
+/** 更新 OCR 接口结果 */
+const updateOcrResult = (
+  result: Awaited<ReturnType<typeof systemOcrDiagnosticsApi>>
+) => {
+  const target = getOrCreateResult("ocr");
+
+  target.status = result.ok ? "normal" : "error";
+  target.description = result.message || t("system.diagnostics.ocr_success");
+  target.detail = t("system.diagnostics.ocr_reply", {
+    text: result.detail?.reply || t("system.no_result")
+  });
+  target.duration = `${result.latency_ms} ms`;
+  target.model = result.detail?.model || "-";
+};
+
 /** 单项检测保留另一张卡片的位置；只有“运行全部”才会先清空整个结果列表 */
 const setRunningState = (target: CheckTarget, status: CheckStatus) => {
   const keys: SelfCheckResult["key"][] =
-    target === "all" ? ["asr", "llm"] : [target];
+    target === "all" ? ["asr", "llm", "ocr"] : [target];
   keys.forEach(key => {
     const result = getOrCreateResult(key);
     result.status = status;
@@ -324,10 +344,13 @@ const runSelfCheck = async (target: CheckTarget) => {
       const result = await systemDiagnosticsApi();
       updateAsrResult(result.asr);
       updateLlmResult(result.llm);
+      updateOcrResult(result.ocr);
     } else if (target === "asr") {
       updateAsrResult(await systemAsrDiagnosticsApi());
-    } else {
+    } else if (target === "llm") {
       updateLlmResult(await systemLlmDiagnosticsApi());
+    } else {
+      updateOcrResult(await systemOcrDiagnosticsApi());
     }
 
     const hasError = selfCheckResults.some(
@@ -527,6 +550,14 @@ watch(
             @click="runSelfCheck('llm')"
           >
             {{ t("system.llm_only") }}
+          </el-button>
+          <el-button
+            plain
+            type="primary"
+            :loading="selfCheckRunning && selfCheckTarget === 'ocr'"
+            @click="runSelfCheck('ocr')"
+          >
+            {{ t("system.ocr_only") }}
           </el-button>
         </div>
 

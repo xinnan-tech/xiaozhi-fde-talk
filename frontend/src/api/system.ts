@@ -67,11 +67,24 @@ export interface LlmDiagnosticsResult {
   };
 }
 
+/** OCR 诊断结果 */
+export interface OcrDiagnosticsResult {
+  ok: boolean;
+  code: string;
+  message: string;
+  latency_ms: number;
+  detail: {
+    model: string;
+    reply: string;
+  };
+}
+
 /** 系统诊断结果 */
 export interface SystemDiagnostics {
   ok: boolean;
   asr: AsrDiagnosticsResult;
   llm: LlmDiagnosticsResult;
+  ocr: OcrDiagnosticsResult;
 }
 
 /** 系统配置 */
@@ -100,6 +113,14 @@ export const systemLlmDiagnosticsApi = () => {
   return http.request<LlmDiagnosticsResult>(
     "post",
     baseUrlApi("/api/v1/diagnostics/llm")
+  );
+};
+
+/** 运行 OCR 自检 */
+export const systemOcrDiagnosticsApi = () => {
+  return http.request<OcrDiagnosticsResult>(
+    "post",
+    baseUrlApi("/api/v1/diagnostics/ocr")
   );
 };
 

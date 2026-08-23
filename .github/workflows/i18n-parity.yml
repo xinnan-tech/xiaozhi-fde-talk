@@ -8,7 +8,6 @@ on:
   pull_request:
     paths:
       - "backend/app/core/i18n/**"
-      - "backend/app/core/i18n.py"
       - "frontend/src/locales/**"
       - "backend/scripts/check_i18n_parity.py"
       - ".github/workflows/i18n-parity.yml"

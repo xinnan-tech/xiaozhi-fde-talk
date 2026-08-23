@@ -33,7 +33,6 @@ export default defineConfig({
         DB_URL: "sqlite+aiosqlite:///./tests/e2e/.e2e.db",
         HOST: "127.0.0.1",
         PORT: "8001",
-        APP_ADMIN_PASSWORD: "longenough1234",
         E2E_PYTHON_BIN:
           process.env.E2E_PYTHON_BIN ||
           "/home/claw/miniconda3/envs/xiaozhi-fde-talk/bin/python",

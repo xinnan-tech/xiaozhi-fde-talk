@@ -38,4 +38,6 @@ export type setType = {
 export type userType = {
   accessToken?: string;
   username?: string;
+  userId?: string;
+  role?: "admin" | "user";
 };

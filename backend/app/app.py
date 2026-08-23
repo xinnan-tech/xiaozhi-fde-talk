@@ -248,6 +248,11 @@ def create_app() -> FastAPI:
     # pydantic 422：默认 detail 是英文「String should have at least N characters」之类，
     # 直接返回给前端用户看不懂。逐条按 error.type 映射到 i18n key，附带字段名与
     # ctx 里的 min_length / max_length / pattern，让前端照旧按数组解析（loc + msg）。
+    #
+    # 字段级精细化：username 在 auth endpoint 上有具体 pattern 约束，
+    # `string_pattern_mismatch` 通用 key 文案（「格式不正确」）太笼统、不知道
+    # 期望什么——落到 username 字段时换用 `auth.username_invalid_format`（已说明
+    # 「4-32 位字母、数字、下划线或连字符」）。
     from fastapi.exceptions import RequestValidationError
 
     _PYDANTIC_TYPE_TO_KEY: dict[str, str] = {
@@ -256,6 +261,16 @@ def create_app() -> FastAPI:
         "string_too_long": Keys.VALIDATION_STRING_TOO_LONG,
         "string_pattern_mismatch": Keys.VALIDATION_STRING_PATTERN_MISMATCH,
         "extra_forbidden": Keys.VALIDATION_EXTRA_FORBIDDEN,
+    }
+    # 哪些 key 的文案还引用 `{field}`：仅 extra_forbidden（field 指被禁的字段名本身）
+    # 与 invalid 兜底（无 field 时也保留——见下面 params 拼装）。
+    _KEYS_USE_FIELD: frozenset[str] = frozenset({
+        Keys.VALIDATION_EXTRA_FORBIDDEN,
+        Keys.VALIDATION_INVALID,
+    })
+    # 字段级精细化：loc[-1] == "username" + pattern_mismatch → 走具体 auth 文案。
+    _FIELD_SPECIFIC_OVERRIDE: dict[tuple[str, str], str] = {
+        ("username", "string_pattern_mismatch"): Keys.AUTH_USERNAME_INVALID_FORMAT,
     }
 
     @app.exception_handler(RequestValidationError)
@@ -267,8 +282,14 @@ def create_app() -> FastAPI:
             loc = err.get("loc") or ()
             field = str(loc[-1]) if loc else ""
             ctx = err.get("ctx") or {}
-            key = _PYDANTIC_TYPE_TO_KEY.get(etype, Keys.VALIDATION_INVALID)
-            params: dict[str, Any] = {"field": field}
+            key = _FIELD_SPECIFIC_OVERRIDE.get((field, etype)) \
+                or _PYDANTIC_TYPE_TO_KEY.get(etype, Keys.VALIDATION_INVALID)
+            # 仅当 key 文案里仍用 `{field}` 时才传 field——避免 format 多余占位
+            # KeyError。generic validation.* 已统一不带 `{field}`（前端用 `${field}: `
+            # 前缀代劳），剩下两个 key 是真有需要。
+            params: dict[str, Any] = {}
+            if key in _KEYS_USE_FIELD:
+                params["field"] = field
             if "min_length" in ctx:
                 params["min"] = ctx["min_length"]
             if "max_length" in ctx:

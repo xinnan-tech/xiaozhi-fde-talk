@@ -57,7 +57,21 @@ type SelfCheckResult = {
 
 const userStore = useUserStoreHook();
 const permissionStore = usePermissionStoreHook();
-const { t } = useI18n();
+const { t, locale } = useI18n();
+
+/** 配置项 field key 翻译为本地化 label，未匹配则回退 key。 */
+const translateFieldLabel = (fieldKey: string): string => {
+  const key = `system.field.${fieldKey}`;
+  const translated = t(key);
+  return translated === key ? fieldKey : translated;
+};
+
+/** 配置分组 key 翻译为本地化 title，未匹配则回退 key。 */
+const translateGroupTitle = (groupKey: string): string => {
+  const key = `system.group.${groupKey}`;
+  const translated = t(key);
+  return translated === key ? groupKey : translated;
+};
 
 const icons = {
   llm: useRenderIcon("tabler:robot"),
@@ -120,7 +134,7 @@ const buildConfigGroups = (data: SystemConfig) => {
     /** 配置分组字段 */
     const fields = Object.entries(section).map(([fieldKey, value]) => ({
       key: fieldKey,
-      label: fieldKey,
+      label: translateFieldLabel(fieldKey),
       type: checkboxKeys.includes(fieldKey)
         ? ("checkbox" as const)
         : sensitiveKeys.includes(fieldKey)
@@ -139,7 +153,7 @@ const buildConfigGroups = (data: SystemConfig) => {
 
     return {
       key: groupKey,
-      title: groupKey,
+      title: translateGroupTitle(groupKey),
       icon: getGroupIcon(groupKey),
       fields
     };
@@ -235,7 +249,12 @@ const saveConfig = async (group: ConfigGroup) => {
       }
     }
   } else {
-    ElMessage.error(`保存 ${group.title} 配置失败：${getErrorMessage(res)}`);
+    ElMessage.error(
+      t("system.save_failed", {
+        group: group.title,
+        message: getErrorMessage(res)
+      })
+    );
   }
 };
 
@@ -405,6 +424,19 @@ watch(
   },
   { immediate: true }
 );
+
+/** locale 切换时重算 title/label，原 configGroups 已缓存翻译后的字符串 */
+watch(locale, () => {
+  if (configGroups.value.length === 0) return;
+  configGroups.value = configGroups.value.map(group => ({
+    ...group,
+    title: translateGroupTitle(group.key),
+    fields: group.fields.map(field => ({
+      ...field,
+      label: translateFieldLabel(field.key)
+    }))
+  }));
+});
 </script>
 
 <template>

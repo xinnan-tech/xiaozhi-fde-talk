@@ -76,3 +76,9 @@ rm -rf backend/static/*
 cp -rf frontend/dist/. backend/static/
 ```
 执行后，访问 http://localhost:8000 即可支持前后端交互
+
+## Security notes
+
+JWT 当前同时写入 `localStorage` 与 `js-cookie`（见 `frontend/src/utils/auth.ts:14,39-49`）：后端 `/auth/login` 与 `/auth/register` 当前以 JSON 返回 Bearer token，前端无 httpOnly cookie 可用，只能在 JS 域可读的位置落盘。任何 XSS（含 LLM 输出中的 `<img onerror>`、依赖链供应链等）都能读走 `accessToken`，等同于会话被完整接管。报告渲染侧的 markdown-it 已硬化为 `html:false`（详见 `frontend/src/views/report/index.vue` 同段注释），是第一道闸，但不是根治。
+
+计划迁移：后端 `/auth/login` 与 `/auth/register` 响应头追加 `Set-Cookie: authorized-token=...; HttpOnly; SameSite=Lax; Secure`，前端移除 localStorage / js-cookie 落盘并改读 `withCredentials` 请求；同时后端引入 CSRF token（双提交 cookie 或 synchronizer token pattern）应对跨站请求伪造。该迁移需后端配合，独立 issue 跟踪。

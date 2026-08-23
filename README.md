@@ -84,19 +84,3 @@ rm -rf backend/static/*
 cp -rf frontend/dist/. backend/static/
 ```
 执行后，访问 http://localhost:8000 即可支持前后端交互
-
-## 架构
-
-后端按 Clean Architecture 分四层，依赖单向 `transport → services → domain ← persistence`：
-
-```
-backend/app/
-├── transport/    # FastAPI 路由 + WebSocket 连接层 + /health 健康检查
-├── services/     # 业务编排：访谈会话管理、模板加载、密码策略、JWT 签发
-├── domain/       # 纯领域模型与协议（不依赖 SQLAlchemy / FastAPI）
-├── persistence/  # SQLAlchemy 2 异步 ORM + Alembic 迁移 + Bootstrap 自愈
-├── adapters/     # LLM / ASR / OCR 第三方 provider 适配（可插拔工厂）
-└── core/         # 横切关注：settings、config_store、i18n、logging、password_policy
-```
-
-`core/config_store` 是单一 KV 真源（DB `system_config` 表 + 内存缓存），LLM/ASR/OCR provider 通过订阅 `invalidate` 事件在配置变更时热重建实例。WebSocket 协议详见 [docs/websocket-protocol.md](docs/websocket-protocol.md)。

@@ -62,10 +62,10 @@ class RegisterRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     username: str = Field(pattern=_USERNAME_RE)
-    # 12 与 password_policy.MIN_LENGTH 对齐；72 是 bcrypt 字节上限——超长静默截断
+    # 8 与 password_policy.MIN_LENGTH 对齐；72 是 bcrypt 字节上限——超长静默截断
     # 或抛裸 ValueError 都不友好，前置拒绝。
-    password: str = Field(min_length=12, max_length=72)
-    confirm_password: str = Field(min_length=12, max_length=72)
+    password: str = Field(min_length=8, max_length=72)
+    confirm_password: str = Field(min_length=8, max_length=72)
 
 
 class AdminResetPasswordRequest(BaseModel):
@@ -77,7 +77,7 @@ class AdminResetPasswordRequest(BaseModel):
     # extra="forbid" 防止注入 user_id / target_user_id 等改指定对象字段。
     model_config = ConfigDict(extra="forbid")
 
-    new_password: str = Field(min_length=12, max_length=72)
+    new_password: str = Field(min_length=8, max_length=72)
 
 
 class ChangePasswordRequest(BaseModel):
@@ -91,7 +91,7 @@ class ChangePasswordRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     old_password: str = Field(min_length=1, max_length=72)
-    new_password: str = Field(min_length=12, max_length=72)
+    new_password: str = Field(min_length=8, max_length=72)
 
 
 class AdminUserInfo(BaseModel):

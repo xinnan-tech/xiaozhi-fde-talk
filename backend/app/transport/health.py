@@ -15,7 +15,10 @@ logger = logging.getLogger(__name__)
 def mount(app: FastAPI) -> None:
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": __version__}
+        # /health 编排器/公网探测：剥 __version__ —— 版本号是侦察信号，
+        # 给"已知 X.Y 的某个 CVE 可利用"的攻击者直接送出靶标。
+        # 深度诊断（含版本）放 admin 专用端点。
+        return {"status": "ok"}
 
     @app.get("/ready")
     async def ready():

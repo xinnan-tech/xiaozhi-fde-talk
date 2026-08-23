@@ -58,9 +58,9 @@ def test_decode_rejects_wrong_issuer(fake_jwt_secret):
         decode_token(_make_token(iss="other-system"))
 
 
-def test_extract_auth_rejects_wrong_issuer_token(fake_jwt_secret):
+async def test_extract_auth_rejects_wrong_issuer_token(fake_jwt_secret):
     with pytest.raises(AuthError):
-        extract_auth("Bearer " + _make_token(iss="other-system"))
+        await extract_auth("Bearer " + _make_token(iss="other-system"))
 
 
 # ---- save 锁：用完回收，字典不随历史会话数无限增长 ----

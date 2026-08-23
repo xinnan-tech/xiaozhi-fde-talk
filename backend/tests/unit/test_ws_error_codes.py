@@ -22,7 +22,7 @@ async def test_internal_error_does_not_leak_detail(monkeypatch):
     ws.close = AsyncMock()
     user = MagicMock()
     user.user_id = "u1"
-    monkeypatch.setattr(h_mod, "extract_auth", lambda t: user)
+    monkeypatch.setattr(h_mod, "extract_auth", AsyncMock(return_value=user))
     h = WSHandler(ws, "s1")
     # _handshake 抛内部异常 → run 的兜底 except
     await h.run()
@@ -143,7 +143,7 @@ async def test_handshake_sends_connection_conflict_with_i18n_params(monkeypatch)
 
     user = MagicMock()
     user.user_id = "u1"
-    monkeypatch.setattr(h_mod, "extract_auth", lambda t: user)
+    monkeypatch.setattr(h_mod, "extract_auth", AsyncMock(return_value=user))
 
     # state 让 manager.get / start 走通
     state = MagicMock()
@@ -255,7 +255,7 @@ async def test_bad_handshake_invalid_json_closes_with_4000(monkeypatch):
     ws.close = AsyncMock()
     user = MagicMock()
     user.user_id = "u1"
-    monkeypatch.setattr(h_mod, "extract_auth", lambda t: user)
+    monkeypatch.setattr(h_mod, "extract_auth", AsyncMock(return_value=user))
 
     h = WSHandler(ws, "s1")
     await h.run()
@@ -291,7 +291,7 @@ async def test_bad_handshake_wrong_type_closes_with_4000(monkeypatch):
     ws.close = AsyncMock()
     user = MagicMock()
     user.user_id = "u1"
-    monkeypatch.setattr(h_mod, "extract_auth", lambda t: user)
+    monkeypatch.setattr(h_mod, "extract_auth", AsyncMock(return_value=user))
 
     h = WSHandler(ws, "s1")
     await h.run()

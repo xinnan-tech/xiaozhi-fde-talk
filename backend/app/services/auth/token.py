@@ -23,8 +23,15 @@ _AUDIENCE = "xiaozhi-client"
 _ISSUER = "xiaozhi-fde-talk"
 
 
-async def create_access_token(subject: str, extra: Optional[dict[str, Any]] = None) -> str:
-    """异步签名 token：从 ConfigStore 读 jwt_expire_minutes。"""
+async def create_access_token(
+    subject: str,
+    pwd_ver: int,
+    extra: Optional[dict[str, Any]] = None,
+) -> str:
+    """异步签名 token。
+
+    pwd_ver 是 password_changed_at 的 Unix 秒戳——改密即吊销的对照值。
+    """
     settings = get_settings()
     cfg = await get_auth_runtime_config()
     now = datetime.now(timezone.utc)
@@ -35,6 +42,7 @@ async def create_access_token(subject: str, extra: Optional[dict[str, Any]] = No
         "jti": secrets.token_urlsafe(16),
         "iss": _ISSUER,
         "aud": _AUDIENCE,
+        "pwd_ver": int(pwd_ver),
     }
     if extra:
         payload.update(extra)

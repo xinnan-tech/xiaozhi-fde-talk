@@ -35,7 +35,7 @@ async def test_token_has_standard_claims(monkeypatch):
     async def fake_cfg():
         return {"jwt_expire_minutes": 60}
     monkeypatch.setattr(tok, "get_auth_runtime_config", fake_cfg)
-    t = await tok.create_access_token(subject="u1", extra={"username": "a", "role": "admin"})
+    t = await tok.create_access_token(subject="u1", pwd_ver=1, extra={"username": "a", "role": "admin"})
     payload = pyjwt.decode(t, "k" * 32, algorithms=["HS256"], options={"verify_aud": False})
     assert "jti" in payload and "iss" in payload and "aud" in payload
 

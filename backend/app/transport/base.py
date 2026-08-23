@@ -10,15 +10,17 @@ from typing import Literal, Optional, Protocol
 
 from app.core.exceptions import AuthError
 from app.domain.auth import CurrentUser
+from app.persistence.repositories.user import user_repo
 from app.services.auth.token import decode_token
 
 
 # ─────────────── 协议无关鉴权 ───────────────
 
-def extract_auth(raw_token: Optional[str]) -> CurrentUser:
-    """解析 `Bearer xxx` 或裸 token，返回当前用户。失败抛 AuthError。
+async def extract_auth(raw_token: Optional[str]) -> CurrentUser:
+    """解析 `Bearer xxx` 或裸 token，比对 DB password_changed_at，返回当前用户。
 
-    HTTP 中间件与 WS hello.token 共用此函数。
+    失败抛 AuthError。HTTP dependency + WS hello.token 共用。
+    改密后旧 token 的 pwd_ver 与 DB 不一致 → 立即吊销。
     """
     if not raw_token:
         raise AuthError("missing token")
@@ -29,8 +31,19 @@ def extract_auth(raw_token: Optional[str]) -> CurrentUser:
         payload = decode_token(cred)
     except Exception as e:
         raise AuthError("invalid or expired token") from e
+    user_id = payload.get("sub", "")
+    if not user_id:
+        raise AuthError("missing sub")
+    pwd_ver_claim = payload.get("pwd_ver")
+    if pwd_ver_claim is None:
+        raise AuthError("token missing pwd_ver")
+    pwd_changed_at = await user_repo.get_pwd_changed_at(user_id)
+    if pwd_changed_at is None:
+        raise AuthError("user not found")
+    if int(pwd_changed_at.timestamp()) != int(pwd_ver_claim):
+        raise AuthError("token revoked (pwd_ver mismatch)")
     return CurrentUser(
-        user_id=payload.get("sub", ""),
+        user_id=user_id,
         username=payload.get("username", ""),
         role=payload.get("role", "user"),
     )

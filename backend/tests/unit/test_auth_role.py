@@ -29,9 +29,17 @@ async def test_require_admin_accepts_admin():
 
 async def test_extract_auth_reads_role_from_token(monkeypatch):
     """token payload 带 role → extract_auth 回填到 CurrentUser.role。"""
+    from datetime import datetime, timezone
+
+    from app.persistence.repositories import user as user_mod
+
     monkeypatch.setattr(
         "app.transport.base.decode_token",
-        lambda _tok: {"sub": "u1", "username": "bob", "role": "admin"},
+        lambda _tok: {"sub": "u1", "username": "bob", "role": "admin", "pwd_ver": 1000},
     )
-    u = extract_auth("Bearer x")
+    # pwd_ver 校验：DB 返回与 claim 一致的时间戳
+    async def fake_pwd(user_id):
+        return datetime.fromtimestamp(1000, tz=timezone.utc)
+    monkeypatch.setattr(user_mod.user_repo, "get_pwd_changed_at", fake_pwd)
+    u = await extract_auth("Bearer x")
     assert u.role == "admin"

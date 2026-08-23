@@ -152,7 +152,7 @@ class WSHandler:
         # 收消息必须先完成握手，accept-then-auth 会给无凭证连接留存活窗口。
         token = _token_from_subprotocols(self.ws.scope.get("subprotocols"))
         try:
-            self._user = extract_auth(token)
+            self._user = await extract_auth(token)
         except AuthError as e:
             # accept 之前 close = 拒绝握手：uvicorn 回 HTTP 403，浏览器 onclose code=1006。
             # WS 关闭码此刻没有载体可发，故不传 code。显式 close 表达拒意，

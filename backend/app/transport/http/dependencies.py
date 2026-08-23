@@ -27,7 +27,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        return extract_auth(credentials.credentials)
+        return await extract_auth(credentials.credentials)
     except AuthError:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,

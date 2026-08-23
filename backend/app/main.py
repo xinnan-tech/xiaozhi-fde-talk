@@ -98,10 +98,14 @@ def main() -> None:
         ws_ping_timeout=20.0,
         # 反向代理后的 X-Forwarded-For/Proto 让 request.client.host 拿到真实客户端 IP
         # ——request.client.host 是 proxy 时，所有用户共享一个桶，单点刷爆全员 429。
-        # forwarded-allow-ips="*"：我们只跑在自建 docker network / 已知 nginx 后，
-        # 不暴露到公网直接面向 uvicorn；信任上游代理即可。
+        # 默认信任 loopback / docker 网络：compose 默认网关 172.16.0.0/12、私网 10/8、
+        # 本机 127.0.0.0/8；运维布在公网需在 .env 加 FORWARDED_ALLOW_IPS 覆盖
+        # （与 .env.example 注释同步）。显式 "*" 不安全——攻击者可伪造 XFF 旁路
+        # 限流桶与 /ws/v1/echo loopback 检查。
         proxy_headers=True,
-        forwarded_allow_ips="*",
+        forwarded_allow_ips=os.getenv(
+            "FORWARDED_ALLOW_IPS", "127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16",
+        ),
         workers=workers if workers > 1 else None,
     )
 

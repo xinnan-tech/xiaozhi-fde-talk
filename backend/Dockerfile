@@ -17,10 +17,11 @@ RUN pnpm build
 
 FROM python:3.12-alpine AS app
 
-# bcrypt/onnxruntime/numpy 等扩展在 Alpine 上需要编译工具链与 libffi 头文件；
-# 这些 apk 包必须保留在最终镜像——运行期 bcrypt 与 onnxruntime 会动态链接它们。
+# bcrypt/numpy 等扩展在 Alpine 上需要编译工具链与 libffi 头文件；
+# 这些 apk 包必须保留在最终镜像——运行期 bcrypt 会动态链接它们。
 # 因此不剥离、注释说明权衡：保留 = 镜像 +30MB 但确保 wheel 编译成功；
 # 若改用纯 musl 预编译 wheel（如改 Debian slim base），可删除这几行。
+# 注：onnxruntime/llvmlite 已从 requirements.txt 移除（WS 客户端路径不 import）。
 RUN apk add --no-cache \
         gcc \
         musl-dev \

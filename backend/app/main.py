@@ -59,7 +59,11 @@ def main() -> None:
 
     import uvicorn
 
-    logger.info("小智方糖 %s 启动中，监听 %s:%s", __version__, settings.host, settings.port)
+    # WEB_CONCURRENCY: dev/single-worker 测试期保持 1；compose prod 设为 2~N 时
+    # uvicorn 走多进程：每个 worker 独立进程模型，asyncio + 数据库池各自一份，
+    # 因此 --workers > 1 必须配 DB 连接池上限（pool_size < 总连接数 / workers）。
+    workers = int(os.getenv("WEB_CONCURRENCY", "1"))
+    logger.info("小智方糖 %s 启动中，监听 %s:%s（workers=%d）", __version__, settings.host, settings.port, workers)
     uvicorn.run(
         create_app(),
         host=settings.host,
@@ -71,6 +75,13 @@ def main() -> None:
         # 期间所有 send 都会卡在 _send_lock 里直到 safe_send 2s 超时。
         ws_ping_interval=20.0,
         ws_ping_timeout=20.0,
+        # 反向代理后的 X-Forwarded-For/Proto 让 request.client.host 拿到真实客户端 IP
+        # ——request.client.host 是 proxy 时，所有用户共享一个桶，单点刷爆全员 429。
+        # forwarded-allow-ips="*"：我们只跑在自建 docker network / 已知 nginx 后，
+        # 不暴露到公网直接面向 uvicorn；信任上游代理即可。
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+        workers=workers if workers > 1 else None,
     )
 
 

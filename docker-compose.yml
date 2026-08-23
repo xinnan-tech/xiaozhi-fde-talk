@@ -50,6 +50,9 @@ services:
       - SERVE_FRONTEND=true
       - ASR_WS_URL=ws://funasr:10095
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+      # 多 worker 模式：每个 worker 独立进程 + 各自 DB 连接池。
+      # 生产请按 CPU 核数上调（4 核一般 2-4 worker），dev 单 worker 便于调试。
+      - WEB_CONCURRENCY=${WEB_CONCURRENCY:-2}
     volumes:
       - app_data:/app/data
       - app_exports:/app/exports

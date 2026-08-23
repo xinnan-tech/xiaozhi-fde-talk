@@ -57,7 +57,11 @@ ENTRYPOINT ["/sbin/tini", "--"]
 
 # 默认 SQLite + dev；生产请把 ENV=prod 并切到 MySQL/PostgreSQL，
 # 否则 Settings._validate_prod 会拒绝启动。
-# uvicorn 直接以 app:app 启动多 worker；proxy-headers 让反向代理后的 X-Forwarded-* 生效。
-CMD ["uvicorn", "app.app:create_app", "--factory", \
-     "--host", "0.0.0.0", "--port", "8000", \
-     "--workers", "2", "--proxy-headers"]
+# Shell form：WEB_CONCURRENCY 环境变量展开生效；dev 默认 1 worker，compose prod 设 2~N。
+# proxy-headers + forwarded-allow-ips="*"：取反向代理后的 X-Forwarded-For，
+# 让 request.client.host 拿到真实客户端 IP（否则 rate limiter 一人刷爆全员 429）。
+CMD uvicorn app.app:create_app --factory \
+    --host 0.0.0.0 --port 8000 \
+    --workers ${WEB_CONCURRENCY:-1} \
+    --proxy-headers \
+    --forwarded-allow-ips="*"

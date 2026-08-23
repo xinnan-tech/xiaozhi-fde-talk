@@ -46,7 +46,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: Dockerfile
     container_name: xiaozhi_app
     restart: unless-stopped
     ports:

@@ -31,9 +31,17 @@
   "keywords": [
     "xiaozhi-fde-talk"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": {
     "name": "xiaozhi-fde-talk"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xinnan-tech/xiaozhi-fde-talk.git"
+  },
+  "homepage": "https://github.com/xinnan-tech/xiaozhi-fde-talk",
+  "bugs": {
+    "url": "https://github.com/xinnan-tech/xiaozhi-fde-talk/issues"
   },
   "dependencies": {
     "@pureadmin/utils": "^2.6.2",

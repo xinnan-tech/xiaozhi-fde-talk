@@ -38,7 +38,10 @@ def mount(app: FastAPI) -> None:
             ok = False
         return JSONResponse(
             status_code=200 if ok else 503,
-            content={"ok": ok, "db": ok, "version": __version__},
+            # 不返 __version__：编排器轮询本端点，外网侦察「已知 X.Y 的某个
+            # CVE 可利用」攻击者直接拿到靶标——/health 已剥，/ready 同步剥。
+            # 深度诊断（含版本）放 admin 专用端点。
+            content={"ok": ok, "db": ok},
         )
 
     if get_settings().env != "prod":

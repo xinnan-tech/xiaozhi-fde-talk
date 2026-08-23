@@ -319,42 +319,36 @@ watch(
         >
           {{ $t("home.create_interview") }}
         </el-button>
-        <el-tooltip
-          :content="$t(isLoggedIn ? 'home.online' : 'home.offline')"
-          placement="bottom"
-          effect="light"
+        <div
+          v-if="!isLoggedIn"
+          class="user-avatar w-10 h-10 rounded-full flex items-center justify-center"
+          @click="clickUserAvatar"
+        >
+          <component :is="businessmanIcon" class="w-8 h-8" />
+        </div>
+        <el-dropdown
+          v-else
+          trigger="click"
+          placement="bottom-end"
+          class="user-avatar-dropdown"
+          @command="handleAvatarCommand"
         >
           <div
-            v-if="!isLoggedIn"
-            class="user-avatar w-10 h-10 rounded-full flex items-center justify-center"
-            @click="clickUserAvatar"
+            class="user-avatar w-10 h-10 rounded-full flex items-center justify-center online"
           >
             <component :is="businessmanIcon" class="w-8 h-8" />
           </div>
-          <el-dropdown
-            v-else
-            trigger="click"
-            placement="bottom-end"
-            class="user-avatar-dropdown"
-            @command="handleAvatarCommand"
-          >
-            <div
-              class="user-avatar w-10 h-10 rounded-full flex items-center justify-center online"
-            >
-              <component :is="businessmanIcon" class="w-8 h-8" />
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu class="user-menu">
-                <el-dropdown-item command="change_password" :icon="keyIcon">
-                  {{ t("auth.change_password") }}
-                </el-dropdown-item>
-                <el-dropdown-item command="logout" :icon="logoutIcon" divided>
-                  {{ t("home.logout") }}
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </el-tooltip>
+          <template #dropdown>
+            <el-dropdown-menu class="user-menu">
+              <el-dropdown-item command="change_password" :icon="keyIcon">
+                {{ t("auth.change_password") }}
+              </el-dropdown-item>
+              <el-dropdown-item command="logout" :icon="logoutIcon" divided>
+                {{ t("home.logout") }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-dropdown
           class="locale-dropdown"
           trigger="hover"

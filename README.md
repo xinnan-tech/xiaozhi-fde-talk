@@ -43,10 +43,12 @@ docker compose logs -f funasr
 cd backend
 conda create -n xiaozhi-fde-talk python=3.12 -y
 conda activate xiaozhi-fde-talk
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -r requirements.txt
 cp .env.example .env
 python main.py
 ```
+
+国内用户可在 `pip install` 后追加 `-i https://pypi.tuna.tsinghua.edu.cn/simple` 走清华镜像加速，默认走官方 PyPI。
 
 访谈工作台页面由后端直接托管，浏览器打开 http://localhost:8000 即用，无需单独启动前端。
 

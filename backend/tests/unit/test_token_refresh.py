@@ -19,6 +19,7 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import jwt as pyjwt
 import pytest
@@ -152,6 +153,7 @@ async def test_refresh_with_valid_refresh_token(reset_state):
         s.add(User(
             id=str(uuid.uuid4()), username="alice",
             password_hash=pwd_hash, role="user",
+            password_changed_at=datetime.now(timezone.utc),
         ))
         await s.commit()
 

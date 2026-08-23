@@ -140,9 +140,10 @@ class FunASRServerProvider(ASRProvider):
         self, on_utterance: Callable[[str, bool], Awaitable[None]]
     ) -> None:
         """连接 FunASR 服务端 WS（SSL + 自签名证书），初始化 2pass 会话。"""
-        if not self._ws_url:
+        if not self._ws_url.strip():
             # 与同文件 ASR_DEAD / ASR_CONNECT_FAIL 同款 i18n 化错误，handler
             # 现有 except ASRProviderError 自动接住；前端拿 code + 502。
+            # strip() 防 DB 写入全空白 / 误配空格字符串。
             raise ASRProviderError(Keys.ASR_URL_NOT_CONFIGURED, http_status=502)
         self._on_utterance = on_utterance
         ws_url = self._ws_url.rstrip("/")

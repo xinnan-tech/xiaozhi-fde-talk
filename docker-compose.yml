@@ -58,7 +58,6 @@ services:
       - DB_URL=sqlite+aiosqlite:////app/data/xiaozhi_fde_talk.db
       - LOG_LEVEL=INFO
       - SERVE_FRONTEND=true
-      - ASR_WS_URL=ws://funasr:10095
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
       # 默认单 worker：_revoked_refresh_jtis、RateLimiter._buckets、
       # config_store 缓存等模块级单例在多 worker 间不共享；改密 / logout 后

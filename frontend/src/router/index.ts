@@ -131,7 +131,7 @@ router.beforeEach((to: ToRouteType, _from, next) => {
     if (requiredRoles.length > 0) {
       const userRole = useUserStoreHook().role;
       if (!requiredRoles.includes(userRole ?? "user")) {
-        next({ path: "/403" });
+        next({ path: "/error/403" });
         return;
       }
     }

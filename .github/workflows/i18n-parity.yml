@@ -1,0 +1,38 @@
+name: i18n-parity
+
+# 多语键值齐平检查：每次改动 locale 文件或 i18n 模块都跑一遍，
+# 防止新增 key 只加在一种语言、忘记同步到其他语种。
+# 触发路径：locale JSON / i18n Python 模块 / 脚本自身 / 本 workflow 文件。
+
+on:
+  pull_request:
+    paths:
+      - "backend/app/core/i18n/**"
+      - "backend/app/core/i18n.py"
+      - "frontend/src/locales/**"
+      - "backend/scripts/check_i18n_parity.py"
+      - ".github/workflows/i18n-parity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/core/i18n/**"
+      - "frontend/src/locales/**"
+      - "backend/scripts/check_i18n_parity.py"
+      - ".github/workflows/i18n-parity.yml"
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run parity check
+        run: python -m backend.scripts.check_i18n_parity

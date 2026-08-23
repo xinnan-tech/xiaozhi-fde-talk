@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # 多阶段构建：stage1 用 Node 编译前端 Vue 工程，stage2 把 dist/ 拷进 Python 运行时镜像。
 # 这样最终镜像只需 python+deps，不带 node_modules 与构建工具，体积更小。
-FROM node:20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /web
 

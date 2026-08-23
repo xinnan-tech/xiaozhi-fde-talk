@@ -111,7 +111,9 @@ class FunASRServerProvider(ASRProvider):
 
     def __init__(self) -> None:
         store = get_config_store()
-        self._ws_url = store.get_sync("asr.ws_url") or "wss://localhost:10096"
+        # 不再 or 兜底 localhost：DB 显式为空时 start_stream 抛 ASRProviderError，
+        # prod 没配 ASR 第一次请求就报错（fail-fast），不再静默连 localhost 失败。
+        self._ws_url = store.get_sync("asr.ws_url") or ""
         self._sample_rate = int(store.get_sync("asr.sample_rate") or 16000)
         self._funasr_language: str = _to_funasr_language(store.get_sync("asr.language"))
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
@@ -139,7 +141,9 @@ class FunASRServerProvider(ASRProvider):
     ) -> None:
         """连接 FunASR 服务端 WS（SSL + 自签名证书），初始化 2pass 会话。"""
         if not self._ws_url:
-            raise RuntimeError("ASR_WS_URL 未配置")
+            # 与同文件 ASR_DEAD / ASR_CONNECT_FAIL 同款 i18n 化错误，handler
+            # 现有 except ASRProviderError 自动接住；前端拿 code + 502。
+            raise ASRProviderError(Keys.ASR_URL_NOT_CONFIGURED, http_status=502)
         self._on_utterance = on_utterance
         ws_url = self._ws_url.rstrip("/")
         connect_kwargs = dict(

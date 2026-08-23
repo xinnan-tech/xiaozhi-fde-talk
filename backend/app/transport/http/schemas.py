@@ -3,10 +3,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoginRequest(BaseModel):
+    # extra="forbid" 防止请求体注入多余字段被静默丢弃、未来 schema 字段扩张时
+    # 形成静默越权路径。当前仅 username / password，其余一律 422。
+    model_config = ConfigDict(extra="forbid")
+
     username: str
     password: str
 
@@ -35,6 +39,9 @@ _USERNAME_RE = r"^[A-Za-z0-9_-]{4,32}$"
 
 class RegisterRequest(BaseModel):
     """POST /auth/register 请求体。"""
+    # extra="forbid" 防止 role / is_admin 等字段被静默注入后忽略。
+    model_config = ConfigDict(extra="forbid")
+
     username: str = Field(pattern=_USERNAME_RE)
     # 8 是 password_policy.MIN_LENGTH，72 是 bcrypt 字节上限——超长静默截断或抛裸
     # ValueError 都不友好，前置拒绝。
@@ -48,6 +55,9 @@ class AdminResetPasswordRequest(BaseModel):
     仅持 admin token 才能调用，弱密码在路由层被 validate_password_strength
     二次兜底（pydantic min/max 只管形态，长度合规的弱密码仍需黑名单拒）。
     """
+    # extra="forbid" 防止注入 user_id / target_user_id 等改指定对象字段。
+    model_config = ConfigDict(extra="forbid")
+
     new_password: str = Field(min_length=8, max_length=72)
 
 
@@ -57,6 +67,10 @@ class ChangePasswordRequest(BaseModel):
     不限 admin role——任何持有效 token 的登录用户都能改自己密码。
     旧密码错误 → 401；新密码强度不通过 → 400（路由层 validate_password_strength）。
     """
+    # extra="forbid" 防止注入 user_id / username 试图指定他人目标（cf70cee 提交加的
+    # schema 当时未 forbid，4f2eb2e 用 query / body 注入测试兜底；此处硬化前瞻）。
+    model_config = ConfigDict(extra="forbid")
+
     old_password: str = Field(min_length=1, max_length=72)
     new_password: str = Field(min_length=8, max_length=72)
 

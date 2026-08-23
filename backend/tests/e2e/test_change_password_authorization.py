@@ -92,7 +92,7 @@ async def _fresh_user(username: str) -> User:
 
 async def test_A1_body_user_id_field_does_not_change_other_user(empty_db):
     """bob 调改密，请求体加 `"user_id": "<admin id>"`。
-    不论端点返回 200 还是 422/400：必须确认 admin 的 password_hash **未变**。
+    不论端点返回 200 / 422/400：必须确认 admin 的 password_hash **未变**。
     """
     app = empty_db
     transport = ASGITransport(app=app)
@@ -104,6 +104,7 @@ async def test_A1_body_user_id_field_does_not_change_other_user(empty_db):
 
         admin_id = admin["user"]["id"]
         admin_before = await _fresh_user("admin1")
+        bob_before = await _fresh_user("bobby")
 
         r = await c.post(
             "/api/v1/auth/change-password",
@@ -114,8 +115,11 @@ async def test_A1_body_user_id_field_does_not_change_other_user(empty_db):
                 "user_id": admin_id,  # 注入他人 id
             },
         )
-        # 端点对未知字段的处理可能 200（pydantic 默认 ignore）/ 422（若 forbid）。
-        # 这里只关心副作用：admin 密码不该被改。
+        # extra="forbid" 后此请求会被 422 拒绝（hardening 正向行为）；
+        # 主断言永远是：admin 密码不该被改、bob 密码不该变成 _NEW。
+        assert r.status_code in (200, 422), (
+            f"端点对未知字段应 200/422，实际 {r.status_code}：{r.text}"
+        )
 
         admin_after = await _fresh_user("admin1")
         assert admin_after.password_hash == admin_before.password_hash, (
@@ -124,9 +128,9 @@ async def test_A1_body_user_id_field_does_not_change_other_user(empty_db):
         assert verify_password(_STRONG_PWD, admin_after.password_hash), (
             "admin 旧密码应仍可用，但 verify_password 失败"
         )
-        # 行为兜底：bob 自己必须被改
-        assert verify_password(_STRONG_PWD_NEW, (await _fresh_user("bobby")).password_hash), (
-            "bob 自己应已被改密成功（A1 主体行为）"
+        bob_after = await _fresh_user("bobby")
+        assert bob_after.password_hash == bob_before.password_hash, (
+            "bob 密码被改向他人——body 注入 user_id 已越权成指定对象"
         )
 
 
@@ -141,6 +145,7 @@ async def test_A2_body_username_field_does_not_change_other_user(empty_db):
         bob_token = bob["access_token"]
 
         admin_before = await _fresh_user("admin1")
+        bob_before = await _fresh_user("bobby")
 
         r = await c.post(
             "/api/v1/auth/change-password",
@@ -151,14 +156,18 @@ async def test_A2_body_username_field_does_not_change_other_user(empty_db):
                 "username": "admin1",  # 注入他人 username
             },
         )
+        assert r.status_code in (200, 422), (
+            f"端点对未知字段应 200/422，实际 {r.status_code}：{r.text}"
+        )
 
         admin_after = await _fresh_user("admin1")
         assert admin_after.password_hash == admin_before.password_hash, (
             "危险：admin 的 password_hash 被改动了！body 注入 username 已越权"
         )
         assert verify_password(_STRONG_PWD, admin_after.password_hash)
-        assert verify_password(_STRONG_PWD_NEW, (await _fresh_user("bobby")).password_hash), (
-            "bob 自己应已被改密成功"
+        bob_after = await _fresh_user("bobby")
+        assert bob_after.password_hash == bob_before.password_hash, (
+            "bob 密码被改向他人——body 注入 username 已越权成指定对象"
         )
 
 

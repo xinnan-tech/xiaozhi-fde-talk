@@ -15,14 +15,19 @@ const keep = computed(() => {
   return props.currRoute.meta?.keepAlive && !!props.currRoute.meta?.frameSrc;
 });
 // 避免重新渲染 LayFrame
+// 守 props.currComp：路由切换瞬间或 keep-alive 缓存命中时，<router-view> 的
+// slot prop Component 可能短暂为 undefined；markRaw(undefined) 内部 def(value, ...)
+// 会触发 hasOwnProperty.call(undefined, ...) → "Cannot convert undefined or null
+// to object"，整页直接空白且后续路由都打不开。null 兜底让 <component :is="null">
+// 静默跳过渲染，由 keep-alive / transition 兜底下一帧渲染正确组件。
 const normalComp = computed(() =>
-  !keep.value ? markRaw(props.currComp) : null
+  !keep.value && props.currComp ? markRaw(props.currComp) : null
 );
 
 watch(
   () => props.currRoute.fullPath,
   path => {
-    if (keep.value && !MAP.has(path)) {
+    if (keep.value && props.currComp && !MAP.has(path)) {
       setMap(path, props.currComp);
     }
 

@@ -12,6 +12,7 @@
   "menu.home": "Phỏng vấn",
   "menu.system": "Cấu hình hệ thống",
   "menu.users": "Users",
+  "menu.about": "Giới thiệu",
   "system.title": "Cấu hình backend",
   "system.save_hint": "Thay đổi có hiệu lực sau khi nhấn Lưu (LLM/ASR clients tự động tải lại). ",
   "system.sensitive_hint": "Trường nhạy cảm hiển thị dưới dạng ************; để trống để giữ giá trị hiện tại.",
@@ -492,5 +493,12 @@
   "diag.detail.model": "Model: {model}",
   "diag.detail.sample_real": "Mẫu: âm thanh thực",
   "diag.detail.sample_tone": "Mẫu: âm thanh tổng hợp",
-  "diag.latency": "{ms} ms"
+  "diag.latency": "{ms} ms",
+
+  "about.title": "Giới thiệu",
+  "about.product": "Sản phẩm",
+  "about.product_name": "xiaozhi-fde-talk",
+  "about.version": "Phiên bản",
+  "about.copyright": "Bản quyền",
+  "about.description": "Trợ lý AI cấp desktop cho phỏng vấn có cấu trúc: tự động ghi, tự động theo dõi, tự động tạo báo cáo."
 }

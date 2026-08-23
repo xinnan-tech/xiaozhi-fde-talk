@@ -12,6 +12,7 @@
   "menu.home": "访谈主页",
   "menu.system": "系统配置",
   "menu.users": "用户管理",
+  "menu.about": "关于",
   "system.title": "后端配置",
   "system.save_hint": "修改后点击【保存】立即生效（LLM/ASR 客户端会自动重载）。",
   "system.sensitive_hint": "敏感字段显示为 ************，留空 = 保留原值。",
@@ -492,5 +493,12 @@
   "diag.detail.model": "模型：{model}",
   "diag.detail.sample_real": "样本：真实音频",
   "diag.detail.sample_tone": "样本：合成 tone",
-  "diag.latency": "{ms} ms"
+  "diag.latency": "{ms} ms",
+
+  "about.title": "关于",
+  "about.product": "产品",
+  "about.product_name": "xiaozhi-fde-talk",
+  "about.version": "版本",
+  "about.copyright": "版权",
+  "about.description": "面向结构化访谈场景的桌面级 AI 辅助工具：自动记录、自动跟进、自动生成报告。"
 }

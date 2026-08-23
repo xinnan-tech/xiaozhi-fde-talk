@@ -1,15 +1,10 @@
 <script setup lang="ts">
-import { getConfig } from "@/config";
-
-const TITLE = getConfig("Title");
+// 占位：原本展示项目版本与版权（©2026 xiaozhi-fde-talk 0.1.0）。
+// 现已迁至侧边栏「关于」菜单的 /about 页面，此处只保留布局占位。
 </script>
 
 <template>
-  <footer
-    class="layout-footer text-[rgba(0,0,0,0.6)] dark:text-[rgba(220,220,242,0.8)]"
-  >
-    ©2026 xiaozhi-fde-talk 0.1.0
-  </footer>
+  <footer class="layout-footer" />
 </template>
 
 <style lang="scss" scoped>

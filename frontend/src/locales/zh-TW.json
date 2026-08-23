@@ -12,6 +12,7 @@
   "menu.home": "訪談首頁",
   "menu.system": "系統設定",
   "menu.users": "Users",
+  "menu.about": "關於",
   "system.title": "後端設定",
   "system.save_hint": "修改後點擊【儲存】立即生效（LLM/ASR 用戶端會自動重新載入）。",
   "system.sensitive_hint": "敏感欄位顯示為 ************，留空 = 保留原值。",
@@ -492,5 +493,12 @@
   "diag.detail.model": "模型：{model}",
   "diag.detail.sample_real": "樣本：真實音訊",
   "diag.detail.sample_tone": "樣本：合成 tone",
-  "diag.latency": "{ms} ms"
+  "diag.latency": "{ms} ms",
+
+  "about.title": "關於",
+  "about.product": "產品",
+  "about.product_name": "xiaozhi-fde-talk",
+  "about.version": "版本",
+  "about.copyright": "版權",
+  "about.description": "面向結構化訪談場景的桌面級 AI 輔助工具：自動記錄、自動跟進、自動生成報告。"
 }

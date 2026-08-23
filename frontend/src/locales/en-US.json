@@ -12,6 +12,7 @@
   "menu.home": "Interviews",
   "menu.system": "System config",
   "menu.users": "Users",
+  "menu.about": "About",
   "system.title": "Backend config",
   "system.save_hint": "Changes take effect after clicking Save (LLM/ASR clients auto-reload). ",
   "system.sensitive_hint": "Sensitive fields show as ************; leave blank to keep the current value.",
@@ -492,5 +493,12 @@
   "diag.detail.model": "Model: {model}",
   "diag.detail.sample_real": "Sample: real audio",
   "diag.detail.sample_tone": "Sample: synthetic tone",
-  "diag.latency": "{ms} ms"
+  "diag.latency": "{ms} ms",
+
+  "about.title": "About",
+  "about.product": "Product",
+  "about.product_name": "xiaozhi-fde-talk",
+  "about.version": "Version",
+  "about.copyright": "Copyright",
+  "about.description": "A desktop-grade AI copilot for structured interviews: auto-capture, auto-follow-up, auto-report."
 }

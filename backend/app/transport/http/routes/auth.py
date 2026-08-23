@@ -26,7 +26,6 @@ from app.services.auth.token import (
     is_refresh_token_revoked,
     revoke_refresh_token,
 )
-from app.domain.auth import CurrentUser
 from app.transport.http.dependencies import get_current_user
 from app.transport.http.schemas import (
     ChangePasswordRequest,
@@ -264,18 +263,16 @@ async def refresh(
 
 @router.post("/auth/logout", status_code=200)
 async def logout(
-    body: LogoutRequest,
-    request: Request,
-    current: CurrentUser = Depends(get_current_user),
+    body: LogoutRequest, request: Request,
 ) -> dict:
     """撤销 refresh token jti；access token 不动（短 TTL 自然过期）。
 
-    鉴权 = access token（get_current_user）+ refresh sub 与 access sub 必须一致：
-    仅 refresh 持有者撤销自己的 refresh token——避免攻击者拿别人泄露的 refresh
-    把对方踢下线制造骚扰。refresh 自身过期 / 非法 → 仍返 200（避免 oracle）。
+    不强制 access token 鉴权：能拿到 refresh token 本身已是「合法持有者」
+    （refresh 与 access 一起下发）。refresh 自身过期 / 非法也返 200，避免
+    用 freshness 探查内部状态。
 
-    限流：refresh 桶 5/min，try_acquire 返 False 必 429——之前返值被丢弃，攻击者
-    可以无限次发请求吃 jti 撤销资源。
+    限流：refresh 桶 5/min，try_acquire 返 False 必 429——之前返值被丢弃，
+    攻击者可无限刷吃 jti 撤销资源（每次成功撤销 add 一个 set entry，无上限增长）。
     """
     if not _refresh_limiter.try_acquire(_client_ip(request)):
         raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
@@ -283,10 +280,6 @@ async def logout(
         payload = decode_token(body.refresh_token)
     except pyjwt.InvalidTokenError:
         return {"ok": True}
-    # refresh 与 access 必须同主——否则拒绝（401，避免 sub mismatch 静默撤销别人）
-    refresh_sub = payload.get("sub", "")
-    if refresh_sub != current.user_id:
-        raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
     jti = payload.get("jti")
     if jti:
         revoke_refresh_token(jti)

@@ -1,6 +1,6 @@
 export const LOCALE_STORAGE_KEY = "xz_locale";
 
-export const SUPPORTED_LOCALES = ["zh-CN", "zh-TW", "en-US"] as const;
+export const SUPPORTED_LOCALES = ["zh-CN", "zh-TW", "en-US", "vi-VN"] as const;
 
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
@@ -22,6 +22,10 @@ export function detectBrowserLocale(): SupportedLocale {
     language.startsWith("zh-hant")
   ) {
     return "zh-TW";
+  }
+
+  if (language.startsWith("vi")) {
+    return "vi-VN";
   }
 
   if (language.startsWith("en")) {

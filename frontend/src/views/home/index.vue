@@ -45,7 +45,8 @@ const languageIcon = useRenderIcon("flowbite:language-outline");
 const localeOptions: Array<{ value: SupportedLocale; label: string }> = [
   { value: "zh-CN", label: "简体中文" },
   { value: "zh-TW", label: "繁體中文" },
-  { value: "en-US", label: "English" }
+  { value: "en-US", label: "English" },
+  { value: "vi-VN", label: "Tiếng Việt" }
 ];
 
 const statisticsLoading = ref(false);

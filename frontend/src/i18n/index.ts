@@ -2,6 +2,7 @@ import { createI18n } from "vue-i18n";
 import enUS from "@/locales/en-US.json";
 import zhCN from "@/locales/zh-CN.json";
 import zhTW from "@/locales/zh-TW.json";
+import viVN from "@/locales/vi-VN.json";
 import {
   DEFAULT_LOCALE,
   getInitialLocale,
@@ -24,7 +25,8 @@ export const i18n = createI18n({
   messages: {
     "zh-CN": zhCN,
     "zh-TW": zhTW,
-    "en-US": enUS
+    "en-US": enUS,
+    "vi-VN": viVN
   },
   missingWarn: import.meta.env.DEV,
   fallbackWarn: import.meta.env.DEV

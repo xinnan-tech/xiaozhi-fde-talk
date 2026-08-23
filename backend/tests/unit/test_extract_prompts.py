@@ -1,11 +1,10 @@
-"""extract prompt i18n 改造：单一英文 base + 参数化指令（从 translator 模块读）。"""
+"""extract prompt：单一英文 base + 参数化指令（_EXTRACT_DIRECTIVES 模块字典）。"""
 from __future__ import annotations
 
 import re
 
 from app.core.i18n.extract_prompts import build_extract_system, _extract_directive
 from app.core.i18n.lang_meta import _LANG_META
-from app.core.i18n.translator import t
 
 
 def test_directive_zh_cn_chinese():
@@ -69,8 +68,13 @@ def test_build_extract_system_base_part_no_cjk():
 
 
 def test_directive_keys_match_lang_meta():
-    """i18n.extract.directive.{lang} 键集合 == _LANG_META 键集合——加语种必须双边改。"""
+    """_EXTRACT_DIRECTIVES 键集合 == _LANG_META 键集合——加语种必须双边改。"""
+    from app.core.i18n.extract_prompts import _EXTRACT_DIRECTIVES
+
+    missing = set(_LANG_META) - set(_EXTRACT_DIRECTIVES)
+    extra = set(_EXTRACT_DIRECTIVES) - set(_LANG_META)
+    assert not missing, f"_EXTRACT_DIRECTIVES 缺: {sorted(missing)}"
+    assert not extra, f"_EXTRACT_DIRECTIVES 多: {sorted(extra)}"
     for lang in _LANG_META:
-        # t() 在 key 缺失时 raise KeyError；这里 expect 不 raise
-        text = t(f"i18n.extract.directive.{lang}", locale="en-US")
-        assert text, f"i18n.extract.directive.{lang} 文案为空"
+        text = _EXTRACT_DIRECTIVES[lang]
+        assert text, f"_EXTRACT_DIRECTIVES[{lang}] 文案为空"

@@ -58,7 +58,10 @@ def mount(app: FastAPI) -> None:
             0 鉴权 + 无空闲超时。prod 不挂载；dev/test 还加 IP 锁：仅 loopback。
             """
             client = ws.client.host if ws.client else "unknown"
-            if client not in {"127.0.0.1", "::1", "localhost"}:
+            # 「testclient」是 httpx.ASGITransport 跑 e2e 时给 ws.client.host
+            # 注入的占位字符串（实际是测试进程内部 loopback）；不放到白名单会
+            # 把整套 ASGITransport e2e 拒掉。
+            if client not in {"127.0.0.1", "::1", "localhost", "testclient"}:
                 logger.warning("/ws/v1/echo 非 loopback 接入拒绝：%s", client)
                 await ws.close(code=1008, reason="loopback only")
                 return

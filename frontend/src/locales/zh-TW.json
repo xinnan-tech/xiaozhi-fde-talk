@@ -518,16 +518,6 @@
   "diag.latency": "{ms} ms",
 
   "about.title": "關於",
-  "about.product": "產品",
-  "about.product_name": "xiaozhi-fde-talk",
-  "about.version": "版本",
-  "about.copyright": "版權",
-  "about.description": "面向結構化訪談場景的桌面級 AI 輔助工具：自動記錄、自動跟進、自動生成報告。",
-  "about.subtitle": "面向結構化訪談場景的桌面級 AI 輔助工具",
-  "about.section_product": "產品資訊",
-  "about.section_stack": "技術堆疊",
-  "about.field_author": "維護者",
-  "about.field_license": "授權條款",
-  "about.field_repo": "程式碼倉庫",
-  "about.stack_hint": "主要第三方依賴，版本號取自 package.json"
+  "about.maintainer": "維護者",
+  "about.copyright": "版權"
 }

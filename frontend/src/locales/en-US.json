@@ -518,16 +518,6 @@
   "diag.latency": "{ms} ms",
 
   "about.title": "About",
-  "about.product": "Product",
-  "about.product_name": "xiaozhi-fde-talk",
-  "about.version": "Version",
-  "about.copyright": "Copyright",
-  "about.description": "A desktop-grade AI copilot for structured interviews: auto-capture, auto-follow-up, auto-report.",
-  "about.subtitle": "A desktop-grade AI copilot for structured interviews",
-  "about.section_product": "Product",
-  "about.section_stack": "Tech stack",
-  "about.field_author": "Maintainer",
-  "about.field_license": "License",
-  "about.field_repo": "Repository",
-  "about.stack_hint": "Key third-party dependencies; versions come from package.json"
+  "about.maintainer": "Maintainer",
+  "about.copyright": "Copyright"
 }

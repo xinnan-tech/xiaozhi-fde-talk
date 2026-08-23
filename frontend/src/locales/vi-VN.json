@@ -518,16 +518,6 @@
   "diag.latency": "{ms} ms",
 
   "about.title": "Giới thiệu",
-  "about.product": "Sản phẩm",
-  "about.product_name": "xiaozhi-fde-talk",
-  "about.version": "Phiên bản",
-  "about.copyright": "Bản quyền",
-  "about.description": "Trợ lý AI cấp desktop cho phỏng vấn có cấu trúc: tự động ghi, tự động theo dõi, tự động tạo báo cáo.",
-  "about.subtitle": "Trợ lý AI cấp desktop cho phỏng vấn có cấu trúc",
-  "about.section_product": "Thông tin sản phẩm",
-  "about.section_stack": "Ngăn xếp công nghệ",
-  "about.field_author": "Người bảo trì",
-  "about.field_license": "Giấy phép",
-  "about.field_repo": "Kho mã nguồn",
-  "about.stack_hint": "Các phụ thuộc chính; phiên bản lấy từ package.json"
+  "about.maintainer": "Người bảo trì",
+  "about.copyright": "Bản quyền"
 }

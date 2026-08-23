@@ -85,12 +85,6 @@ cp -rf frontend/dist/. backend/static/
 ```
 执行后，访问 http://localhost:8000 即可支持前后端交互
 
-## Security notes
-
-JWT 当前同时写入 `localStorage` 与 `js-cookie`（见 `frontend/src/utils/auth.ts:14,39-49`）：后端 `/auth/login` 与 `/auth/register` 当前以 JSON 返回 Bearer token，前端无 httpOnly cookie 可用，只能在 JS 域可读的位置落盘。任何 XSS（含 LLM 输出中的 `<img onerror>`、依赖链供应链等）都能读走 `accessToken`，等同于会话被完整接管。报告渲染侧的 markdown-it 已硬化为 `html:false`（详见 `frontend/src/views/report/index.vue` 同段注释），是第一道闸，但不是根治。
-
-计划迁移：后端 `/auth/login` 与 `/auth/register` 响应头追加 `Set-Cookie: authorized-token=...; HttpOnly; SameSite=Lax; Secure`，前端移除 localStorage / js-cookie 落盘并改读 `withCredentials` 请求；同时后端引入 CSRF token（双提交 cookie 或 synchronizer token pattern）应对跨站请求伪造。该迁移需后端配合，独立 issue 跟踪。
-
 ## 架构
 
 后端按 Clean Architecture 分四层，依赖单向 `transport → services → domain ← persistence`：
@@ -106,54 +100,3 @@ backend/app/
 ```
 
 `core/config_store` 是单一 KV 真源（DB `system_config` 表 + 内存缓存），LLM/ASR/OCR provider 通过订阅 `invalidate` 事件在配置变更时热重建实例。WebSocket 协议详见 [docs/websocket-protocol.md](docs/websocket-protocol.md)。
-
-## 配置
-
-启动时通过环境变量覆写（`backend/.env.example` 列了完整清单）。关键项：
-
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `ENV` | `dev` | `dev`/`test`/`prod`。prod 启动期强校验 DB 类型 |
-| `DB_URL` | `sqlite+aiosqlite:///./xiaozhi_fde_talk.db` | prod 必须切 MySQL/PG |
-| `CORS_ORIGINS` | dev 默认 `localhost:5173`，prod 必填 | 逗号分隔的白名单域名 |
-| `asr.ws_url`（系统配置项） | `wss://localhost:10096` | 在 admin 后台「⚙️ 后端配置」改；prod 部署后必须改成实际可达的 FunASR 地址 |
-| `JWT_SECRET` | 启动自动生成写入 DB | 无需手配；备份恢复时从 DB 读 |
-| `SERVE_FRONTEND` | `true` | true=同进程托管 SPA，false=纯 API |
-
-完整列表与每个变量的安全含义见 `backend/.env.example` 的逐项注释。
-
-## 部署
-
-### Docker Compose
-
-`docker-compose.yml` 提供两条服务：`funasr`（ASR）与 `app`（FastAPI + 前端 SPA）。`app` 服务用多阶段构建，第一阶段在 `node:20-alpine` 里编译 Vue 工程，第二阶段把 `dist/` 拷进 `python:3.12-alpine` 运行时。
-
-```bash
-docker compose up -d --build     # 构建并后台启动
-docker compose logs -f app       # 查看 app 启动日志
-docker compose ps                # 健康检查状态
-```
-
-健康检查端点 `http://localhost:8000/health` 每 30 秒探测一次，连续 3 次失败触发容器重启。
-
-环境变量可通过 `docker-compose.yml` 的 `app.environment` 覆写：
-
-- `ENV=dev` 是默认值；切到 `prod` 必须同时把 `DB_URL` 换成 `mysql+aiomysql://` 或 `postgresql+asyncpg://`，否则 `Settings._validate_prod` 会在启动期直接拒绝（prod 不允许 SQLite）。
-- `CORS_ORIGINS` 在 shell 里 `export CORS_ORIGINS=https://talk.your-company.com` 后再 `docker compose up` 即可生效；默认值 `http://localhost:5173` 仅供本地开发。
-- ASR 地址由系统配置 `asr.ws_url` 管理，不走环境变量。首次启动后到 admin
-  后台 → 「⚙️ 后端配置」把 `asr.ws_url` 改成 `ws://funasr:10095`（compose
-  网络名）即可生效；默认值 `wss://localhost:10096` 仅适合本机直起 FunASR。
-
-持久化：
-
-- `app_data` 卷挂到容器内 `/app/data`，存放 SQLite 文件。首次启动会在该目录自动创建 `xiaozhi_fde_talk.db`。
-- `app_exports` 卷挂到 `/app/data`，访谈报告导出文件。
-
-需要反代（nginx/Caddy）终止 HTTPS 时，把 `app.ports` 改成只暴露到内网（如 `"127.0.0.1:8000:8000"`），并在外层反代里透传 `Host` 与 `X-Forwarded-*`（uvicorn 已开 `--proxy-headers`）。
-
-## 截图
-
-| | |
-| :---: | :---: |
-| ![访谈工作台](docs/images/banner1.png) | ![项目 logo](docs/images/xiaozhi-logo.png) |
-| 访谈工作台：实时转写 + 智能提示 | 项目 logo |

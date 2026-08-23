@@ -41,7 +41,6 @@
   "system.field.min_interval_s": "Min interval (sec)",
   "system.field.llm_timeout_s": "LLM timeout (sec)",
   "system.field.jwt_expire_minutes": "Session length (min)",
-  "system.field.demo_username": "Demo username",
   "system.field.grace_period_s": "Grace period (sec)",
   "system.field.idle_timeout_s": "Idle timeout (sec)",
   "system.field.idle_check_interval_s": "Idle check interval (sec)",

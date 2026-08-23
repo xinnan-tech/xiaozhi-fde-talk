@@ -42,7 +42,6 @@
   "system.field.min_interval_s": "Khoảng cách tối thiểu (giây)",
   "system.field.llm_timeout_s": "Thời gian chờ LLM (giây)",
   "system.field.jwt_expire_minutes": "Thời hạn phiên (phút)",
-  "system.field.demo_username": "Tên đăng nhập demo",
   "system.field.grace_period_s": "Thời gian gia hạn (giây)",
   "system.field.idle_timeout_s": "Thời gian chờ rảnh (giây)",
   "system.field.idle_check_interval_s": "Chu kỳ kiểm tra rảnh (giây)",

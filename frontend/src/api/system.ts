@@ -29,7 +29,7 @@ export interface SystemConfig {
   };
   auth?: SystemConfigSection & {
     jwt_expire_minutes?: string | number;
-    demo_username?: string;
+    allow_registration?: boolean;
   };
   session?: SystemConfigSection & {
     grace_period_s?: string | number;

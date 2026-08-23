@@ -41,7 +41,6 @@
   "system.field.min_interval_s": "最小间隔（秒）",
   "system.field.llm_timeout_s": "LLM 超时（秒）",
   "system.field.jwt_expire_minutes": "登录有效期（分钟）",
-  "system.field.demo_username": "演示用户名",
   "system.field.grace_period_s": "宽限期（秒）",
   "system.field.idle_timeout_s": "空闲超时（秒）",
   "system.field.idle_check_interval_s": "空闲检查间隔（秒）",

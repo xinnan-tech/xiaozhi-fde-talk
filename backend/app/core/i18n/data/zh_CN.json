@@ -88,8 +88,6 @@
   "auth.password_mismatch": "两次输入的密码不一致",
   "auth.registration_disabled": "暂未开放用户注册",
   "auth.user_not_found": "用户不存在",
-  "settings.prod_asr_localhost": "生产环境的 ASR_WS_URL 不能指向 localhost/127.0.0.1，请填 FunASR 服务可达地址",
-  "settings.prod_asr_required": "生产环境必须配置 ASR_WS_URL，留空将导致运行期首请求失败",
   "auth.refresh_invalid": "refresh token 无效",
   "auth.refresh_expired": "refresh token 已过期",
   "auth.refresh_revoked": "refresh token 已被吊销",

@@ -64,10 +64,12 @@ async def _ensure_columns(conn: AsyncConnection) -> None:
 async def init_db() -> None:
     """建表 + 缺列自愈 + 窄清老种子 admin。lifespan 启动时调一次。
 
-    dev（默认）：Base.metadata.create_all + 缺列自愈（本地快速启动）
-    prod（APP_DB_USE_ALEMBIC=1）：走 alembic upgrade head（迁移式版本管理）
+    dev/test（默认）：Base.metadata.create_all + 缺列自愈（本地快速启动）
+    prod：强制 APP_DB_USE_ALEMBIC=1，走 alembic upgrade head——保留迁移历史，
+    避免 create_all 漏迁移 / 自愈忘了落迁移文件导致下次 prod 升级撞 schema drift。
     """
-    if os.environ.get("APP_DB_USE_ALEMBIC") == "1":
+    env = os.environ.get("APP_ENV", "dev")
+    if env == "prod" or os.environ.get("APP_DB_USE_ALEMBIC") == "1":
         backend_root = Path(__file__).resolve().parents[2]
         result = subprocess.run(
             ["alembic", "upgrade", "head"],

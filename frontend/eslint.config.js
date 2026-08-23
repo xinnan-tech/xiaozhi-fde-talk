@@ -151,7 +151,7 @@ export default defineConfig([
       ...pluginVue.configs.recommended.rules,
       "no-undef": "off",
       "no-unused-vars": "off",
-      "vue/no-v-html": "off",
+      "vue/no-v-html": "warn",
       "vue/require-default-prop": "off",
       "vue/require-explicit-emits": "off",
       "vue/multi-word-component-names": "off",

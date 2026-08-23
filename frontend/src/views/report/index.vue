@@ -29,8 +29,11 @@ const deleteIcon = useRenderIcon("ep:delete");
 const refreshIcon = useRenderIcon("ep:refresh");
 
 // 初始化 markdown-it
+// html:false 关闭原始 HTML 直通——LLM 报告里若被注入 <script> 或 <img onerror=…>，
+// markdown-it 默认会把 HTML 实体转义而不是放行，作为 v-html 渲染前的第一道闸。
+// markdown 自身的语法（**bold** / 列表 / 代码块）不需要 html:true，关闭无功能损失。
 const md = new MarkdownIt({
-  html: true,
+  html: false,
   linkify: true,
   typographer: true
 });
@@ -348,7 +351,9 @@ onMounted(async () => {
                   {{ t("report.reload") }}
                 </el-button>
               </div>
+              <!-- eslint-disable-next-line vue/no-v-html -->
               <div v-else class="report-content" v-html="renderedReport" />
+              <!-- v-html 是必需的：渲染 markdown-it 的产物为富文本。安全前提见同文件 md 配置注释（html:false + markdown-it 实体转义双层防护）。 -->
             </template>
             <!-- Transcript -->
             <div v-else-if="activeTab === 'transcript'" class="transcript-list">

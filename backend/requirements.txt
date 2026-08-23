@@ -24,6 +24,9 @@ alembic==1.14.0
 
 # 鉴权
 PyJWT==2.10.1
+# bcrypt >= 4.1: 4.0.x silent-truncates passwords > 72 bytes (UTF-8).
+# Earlier caps in password_policy.py mitigate but version bump removes
+# the silent failure mode entirely.
 bcrypt==4.2.1
 
 # 日志

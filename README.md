@@ -85,7 +85,40 @@ JWT 当前同时写入 `localStorage` 与 `js-cookie`（见 `frontend/src/utils/
 
 计划迁移：后端 `/auth/login` 与 `/auth/register` 响应头追加 `Set-Cookie: authorized-token=...; HttpOnly; SameSite=Lax; Secure`，前端移除 localStorage / js-cookie 落盘并改读 `withCredentials` 请求；同时后端引入 CSRF token（双提交 cookie 或 synchronizer token pattern）应对跨站请求伪造。该迁移需后端配合，独立 issue 跟踪。
 
-## Docker deployment
+## 架构
+
+后端按 Clean Architecture 分四层，依赖单向 `transport → services → domain ← persistence`：
+
+```
+backend/app/
+├── transport/    # FastAPI 路由 + WebSocket 连接层 + /health 健康检查
+├── services/     # 业务编排：访谈会话管理、模板加载、密码策略、JWT 签发
+├── domain/       # 纯领域模型与协议（不依赖 SQLAlchemy / FastAPI）
+├── persistence/  # SQLAlchemy 2 异步 ORM + Alembic 迁移 + Bootstrap 自愈
+├── adapters/     # LLM / ASR / OCR 第三方 provider 适配（可插拔工厂）
+└── core/         # 横切关注：settings、config_store、i18n、logging、password_policy
+```
+
+`core/config_store` 是单一 KV 真源（DB `system_config` 表 + 内存缓存），LLM/ASR/OCR provider 通过订阅 `invalidate` 事件在配置变更时热重建实例。WebSocket 协议详见 [docs/websocket-protocol.md](docs/websocket-protocol.md)。
+
+## 配置
+
+启动时通过环境变量覆写（`backend/.env.example` 列了完整清单）。关键项：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `ENV` | `dev` | `dev`/`test`/`prod`。prod 启动期强校验 DB 与 ASR 地址 |
+| `DB_URL` | `sqlite+aiosqlite:///./xiaozhi_fde_talk.db` | prod 必须切 MySQL/PG |
+| `CORS_ORIGINS` | dev 默认 `localhost:5173`，prod 必填 | 逗号分隔的白名单域名 |
+| `ASR_WS_URL` | `wss://localhost:10096` | prod 禁止指向 localhost |
+| `JWT_SECRET` | 启动自动生成写入 DB | 无需手配；备份恢复时从 DB 读 |
+| `SERVE_FRONTEND` | `true` | true=同进程托管 SPA，false=纯 API |
+
+完整列表与每个变量的安全含义见 `backend/.env.example` 的逐项注释。
+
+## 部署
+
+### Docker Compose
 
 `docker-compose.yml` 提供两条服务：`funasr`（ASR）与 `app`（FastAPI + 前端 SPA）。`app` 服务用多阶段构建，第一阶段在 `node:20-alpine` 里编译 Vue 工程，第二阶段把 `dist/` 拷进 `python:3.12-alpine` 运行时。
 
@@ -109,3 +142,10 @@ docker compose ps                # 健康检查状态
 - `app_exports` 卷挂到 `/app/data`，访谈报告导出文件。
 
 需要反代（nginx/Caddy）终止 HTTPS 时，把 `app.ports` 改成只暴露到内网（如 `"127.0.0.1:8000:8000"`），并在外层反代里透传 `Host` 与 `X-Forwarded-*`（uvicorn 已开 `--proxy-headers`）。
+
+## 截图
+
+| | |
+| :---: | :---: |
+| ![访谈工作台](docs/images/banner1.png) | ![项目 logo](docs/images/xiaozhi-logo.png) |
+| 访谈工作台：实时转写 + 智能提示 | 项目 logo |

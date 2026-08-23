@@ -105,6 +105,10 @@ backend/models/*
 exports/
 *.db
 *.sqlite3
+# SQLite 写入时的临时文件（-journal WAL -shm），不忽略会随 .db 一并落盘
+*.db-journal
+*.db-wal
+*.db-shm
 backend/data/
 
 # Logs

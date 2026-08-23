@@ -28,7 +28,7 @@ ALL_B_KEYS: list[str] = [
     "llm.type", "llm.base_url", "llm.api_key", "llm.model", "llm.output_language",
     "asr.type", "asr.language", "asr.sample_rate", "asr.ws_url", "asr.ws_verify_ssl",
     "coach.pause_s", "coach.max_pending_segments", "coach.min_interval_s", "coach.llm_timeout_s",
-    "auth.jwt_expire_minutes", "auth.demo_username",
+    "auth.jwt_expire_minutes", "auth.allow_registration",
     "session.grace_period_s",
     "session.idle_timeout_s",
     "session.idle_check_interval_s",
@@ -78,14 +78,30 @@ ENUM_KEYS: dict[str, set[str]] = {
     "ocr.type": {"openai", "baidu"},
 }
 
+# bool key 集合：写入前校验，只接受 "true" / "false"。
+# 坏值若放行，运行时 bool(value) 在 truthy/falsy 边界行为诡异（如 "yes"→True），
+# 注册开关注定踩坑。
+BOOL_KEYS: frozenset[str] = frozenset({
+    "auth.allow_registration",
+})
+
 
 def validate_value(key: str, value: str) -> None:
-    """key 写入校验：NUMERIC_KEYS 校验数值；ENUM_KEYS 校验枚举。其他 key 放行。
+    """key 写入校验：BOOL_KEYS / NUMERIC_KEYS / ENUM_KEYS 三类。其他 key 放行。
 
-    枚举分支走 I18nError(Keys.CONFIG_INVALID_ENUM_VALUE, http_status=400) 让
-    admin 配置页 / API 客户端拿到结构化的 code + params；
-    数值分支保留 ValueError（仅 admin 后台 CLI 路径，暂无对应 Keys）。
+    布尔与枚举分支都走 I18nError(code, http_status=400)，让 admin 配置页 / API
+    客户端拿到结构化的 code + params；数值分支保留 ValueError（仅 admin 后台
+    CLI 路径，暂无对应 Keys）。
     """
+    if key in BOOL_KEYS:
+        if value not in ("true", "false"):
+            raise I18nError(
+                Keys.CONFIG_INVALID_BOOL,
+                http_status=400,
+                key=key,
+                value=value,
+            )
+        return
     if key in ENUM_KEYS:
         allowed = ENUM_KEYS[key]
         if value not in allowed:
@@ -129,7 +145,7 @@ DEFAULTS: dict[str, str] = {
     "coach.min_interval_s": "10.0",
     "coach.llm_timeout_s": "45.0",
     "auth.jwt_expire_minutes": "1440",
-    "auth.demo_username": "admin",
+    "auth.allow_registration": "false",
     "session.grace_period_s": "60.0",
     "session.idle_timeout_s": "1800.0",
     "session.idle_check_interval_s": "30.0",
@@ -340,7 +356,7 @@ async def get_auth_runtime_config() -> dict[str, object]:
     s = get_config_store()
     return {
         "jwt_expire_minutes": int(await s.get("auth.jwt_expire_minutes") or "1440"),
-        "demo_username": await s.get("auth.demo_username") or "",
+        "allow_registration": (await s.get("auth.allow_registration") or "false") == "true",
     }
 
 

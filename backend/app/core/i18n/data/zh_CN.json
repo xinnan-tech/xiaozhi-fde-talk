@@ -87,5 +87,12 @@
   "password.too_short_min": "密码长度不足：要求 ≥ {min} 位，实际 {actual} 位",
   "password.too_long": "密码 UTF-8 字节数超过 bcrypt 上限：{byte_len} > {max}",
   "password.too_weak": "密码命中弱密码表（{count} 条），请更换",
-  "config.invalid_enum_value": "{field} 的取值无效：{value}（允许：{allowed}）"
+  "config.invalid_enum_value": "{field} 的取值无效：{value}（允许：{allowed}）",
+  "config.invalid_bool": "{key} 值必须是 true 或 false",
+
+  "auth.username_invalid_format": "用户名须为 4-32 位字母、数字、下划线或连字符",
+  "auth.username_taken": "该用户名已被占用",
+  "auth.password_mismatch": "两次输入的密码不一致",
+  "auth.registration_disabled": "暂未开放用户注册",
+  "auth.user_not_found": "用户不存在"
 }

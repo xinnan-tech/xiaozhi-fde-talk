@@ -88,6 +88,13 @@
   "password.too_long": "Password exceeds bcrypt limit: UTF-8 bytes {byte_len} > {max}",
   "password.too_weak": "Password is in the weak-password blacklist ({count} entries), please choose another",
   "config.invalid_enum_value": "Invalid value for {field}: {value} (allowed: {allowed})",
+  "config.invalid_bool": "{key} value must be true or false",
+
+  "auth.username_invalid_format": "Username must be 4-32 chars (letters, digits, underscore, hyphen)",
+  "auth.username_taken": "Username is already taken",
+  "auth.password_mismatch": "Passwords do not match",
+  "auth.registration_disabled": "User registration is currently disabled",
+  "auth.user_not_found": "User not found",
 
   "i18n.extract.directive.zh_cn": "Write all field values in 简体中文 (Simplified Chinese). Translate the source text to 简体中文 as needed.",
   "i18n.extract.directive.zh_tw": "Write all field values in 繁體中文 (Traditional Chinese). Translate the source text to 繁體中文 as needed.",

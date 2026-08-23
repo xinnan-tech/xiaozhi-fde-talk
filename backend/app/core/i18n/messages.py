@@ -115,6 +115,14 @@ class Keys(StrEnum):
 
     # ---- Config validation ----
     CONFIG_INVALID_ENUM_VALUE = "config.invalid_enum_value"
+    CONFIG_INVALID_BOOL = "config.invalid_bool"
+
+    # ---- Auth (registration / login) ----
+    AUTH_USERNAME_INVALID_FORMAT = "auth.username_invalid_format"
+    AUTH_USERNAME_TAKEN = "auth.username_taken"
+    AUTH_PASSWORD_MISMATCH = "auth.password_mismatch"
+    AUTH_REGISTRATION_DISABLED = "auth.registration_disabled"
+    AUTH_USER_NOT_FOUND = "auth.user_not_found"
 
 
 @lru_cache(maxsize=1)

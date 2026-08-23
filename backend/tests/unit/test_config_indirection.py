@@ -65,10 +65,69 @@ async def test_get_coach_config_parses_mixed_numbers(store_with_cache):
 async def test_get_auth_runtime_config_returns_two(store_with_cache):
     cfg = await get_auth_runtime_config()
     assert cfg["jwt_expire_minutes"] == 1440
-    assert cfg["demo_username"] == "admin"
+    assert cfg["allow_registration"] is False
     # P2-7: demo_password 不再走 ConfigStore（改密走 /admin/auth/password）
 
 
 async def test_get_session_runtime_config_returns_grace(store_with_cache):
     cfg = await get_session_runtime_config()
     assert cfg["grace_period_s"] == 60.0
+
+
+def test_all_b_keys_includes_allow_registration():
+    from app.core.config_store import ALL_B_KEYS
+    assert "auth.allow_registration" in ALL_B_KEYS
+
+
+def test_defaults_allow_registration_false():
+    from app.core.config_store import DEFAULTS
+    assert DEFAULTS["auth.allow_registration"] == "false"
+
+
+def test_validate_bool_true_false_accepted():
+    from app.core.config_store import validate_value
+    validate_value("auth.allow_registration", "true")  # 不抛
+    validate_value("auth.allow_registration", "false")  # 不抛
+
+
+def test_validate_bool_invalid_rejected():
+    import pytest
+    from app.core.i18n.errors import I18nError
+    from app.core.config_store import validate_value
+    with pytest.raises(I18nError):
+        validate_value("auth.allow_registration", "yes")
+
+
+async def test_set_allow_registration_round_trip_with_real_db(monkeypatch):
+    """端到端：真 sqlite 内存库走 ConfigStore.set → cache 写 + 校验 → get 读回。
+
+    全 mock 会漏掉 key 名 typo（catalog 与 DEFAULTS 不一致）、upsert SQL 拼接错误
+    等运行期才会暴露的问题。至少保留这一条走真 store。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.persistence.models import Base
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.core.config_store.SessionLocal", factory)
+
+    ConfigStore._instance = None
+    s = ConfigStore.instance()
+    await s.warm()
+    # warm 后默认 false
+    assert s.get_sync("auth.allow_registration") == "false"
+
+    # 合法 true → 写 + 缓存更新
+    await s.set("auth.allow_registration", "true")
+    assert s.get_sync("auth.allow_registration") == "true"
+
+    # 坏值应抛 I18nError，不动 cache
+    from app.core.i18n.errors import I18nError
+    with pytest.raises(I18nError):
+        await s.set("auth.allow_registration", "maybe")
+    assert s.get_sync("auth.allow_registration") == "true"
+
+    await engine.dispose()

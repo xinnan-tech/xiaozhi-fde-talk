@@ -30,8 +30,8 @@ def _req_and_request(username: str = "attacker"):
     """
     req = MagicMock()
     req.username = username
-    req.password = "Strong1!pwd"
-    req.confirm_password = "Strong1!pwd"
+    req.password = "StrongP@ssW0rd"
+    req.confirm_password = "StrongP@ssW0rd"
     request = MagicMock()
     request.headers.get = lambda k: None
     request.client.host = "1.2.3.4"

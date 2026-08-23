@@ -30,7 +30,7 @@ async def _wipe_users():
 async def test_register_normalizes_to_lowercase():
     async with SessionLocal() as db:
         async with db.begin():
-            u = await register_user(db, "ALICE", "Strong1!pwd")
+            u = await register_user(db, "ALICE", "StrongP@ssW0rd")
     assert u.username == "alice"
 
 
@@ -38,10 +38,10 @@ async def test_register_normalizes_to_lowercase():
 async def test_authenticate_case_insensitive_lookup():
     async with SessionLocal() as db:
         async with db.begin():
-            await register_user(db, "alice", "Strong1!pwd")
+            await register_user(db, "alice", "StrongP@ssW0rd")
     async with SessionLocal() as db:
         # 登录时输大写也应该成功（get_by_username 内部 .lower()）
-        result = await authenticate_user(db, "ALICE", "Strong1!pwd")
+        result = await authenticate_user(db, "ALICE", "StrongP@ssW0rd")
         assert result is not None
         assert result.username == "alice"
 
@@ -57,10 +57,10 @@ async def test_register_collapses_mixed_case_duplicate():
     await get_config_store().set("auth.allow_registration", "true")
     async with SessionLocal() as db:
         async with db.begin():
-            u1 = await register_user(db, "Alice", "Strong1!pwd")
+            u1 = await register_user(db, "Alice", "StrongP@ssW0rd")
         assert u1.username == "alice"
         # 同一事务外第二次注册——username .lower() 后撞 unique，IntegrityError 抛给调用方
         async with SessionLocal() as db2:
             with pytest.raises(IntegrityError):
                 async with db2.begin():
-                    await register_user(db2, "ALICE", "Strong1!pwd")
+                    await register_user(db2, "ALICE", "StrongP@ssW0rd")

@@ -132,6 +132,6 @@ async def test_reset_password_endpoint_requires_auth(_lifespan_app):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.post(
             "/api/v1/admin/users/nonexistent/password",
-            json={"new_password": "Strong1!pwd"},
+            json={"new_password": "StrongP@ssW0rd"},
         )
     assert r.status_code == 401

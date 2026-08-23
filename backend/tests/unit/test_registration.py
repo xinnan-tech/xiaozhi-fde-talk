@@ -76,13 +76,13 @@ async def empty_db(_lifespan_app):
 
 @pytest.mark.parametrize("u", ["alice", "Bob_1", "usr-9", "abcd"])
 def test_register_username_accepts_valid(u):
-    RegisterRequest(username=u, password="Strong1!pwd", confirm_password="Strong1!pwd")
+    RegisterRequest(username=u, password="StrongP@ssW0rd", confirm_password="StrongP@ssW0rd")
 
 
 @pytest.mark.parametrize("u", ["ab", "a" * 33, "alice bob", "张三", ""])
 def test_register_username_rejects_invalid(u):
     with pytest.raises(ValidationError):
-        RegisterRequest(username=u, password="Strong1!pwd", confirm_password="Strong1!pwd")
+        RegisterRequest(username=u, password="StrongP@ssW0rd", confirm_password="StrongP@ssW0rd")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ def test_register_username_rejects_invalid(u):
 async def test_register_first_user_becomes_admin(empty_db):
     async with SessionLocal() as db:
         async with db.begin():
-            current = await register_user(db, "alice", "Strong1!pwd")
+            current = await register_user(db, "alice", "StrongP@ssW0rd")
         assert current.role == "admin"
         assert current.username == "alice"
         assert current.user_id
@@ -123,7 +123,7 @@ async def test_register_blocked_when_disallowed(empty_db):
     async with SessionLocal() as db:
         with pytest.raises(I18nError) as ei:
             async with db.begin():
-                await register_user(db, "bob", "Strong1!pwd")
+                await register_user(db, "bob", "StrongP@ssW0rd")
         assert ei.value.code == Keys.AUTH_REGISTRATION_DISABLED.value
         assert ei.value.http_status == 403
 
@@ -140,8 +140,8 @@ async def test_register_endpoint_returns_login_response(empty_db):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.post("/api/v1/auth/register", json={
             "username": "alice",
-            "password": "Strong1!pwd",
-            "confirm_password": "Strong1!pwd",
+            "password": "StrongP@ssW0rd",
+            "confirm_password": "StrongP@ssW0rd",
         })
     assert r.status_code == 200, r.text
     body = r.json()
@@ -162,8 +162,8 @@ async def test_register_endpoint_password_mismatch_400(empty_db):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.post("/api/v1/auth/register", json={
             "username": "alice",
-            "password": "Strong1!pwd",
-            "confirm_password": "Different1!pwd",
+            "password": "StrongP@ssW0rd",
+            "confirm_password": "DifferentStr0ng!pwd",
         })
     assert r.status_code == 400, r.text
     body = r.json()
@@ -182,14 +182,14 @@ async def test_register_endpoint_duplicate_username_409(empty_db):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r1 = await c.post("/api/v1/auth/register", json={
             "username": "alice",
-            "password": "Strong1!pwd",
-            "confirm_password": "Strong1!pwd",
+            "password": "StrongP@ssW0rd",
+            "confirm_password": "StrongP@ssW0rd",
         })
         assert r1.status_code == 200, r1.text
         r2 = await c.post("/api/v1/auth/register", json={
             "username": "alice",
-            "password": "Another1!pwd",
-            "confirm_password": "Another1!pwd",
+            "password": "AnotherStr0ng!pwd",
+            "confirm_password": "AnotherStr0ng!pwd",
         })
     assert r2.status_code == 409, r2.text
     body = r2.json()

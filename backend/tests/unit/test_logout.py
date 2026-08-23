@@ -78,7 +78,7 @@ async def reset_state(_app):
 async def test_logout_revokes_refresh_token(reset_state):
     app = reset_state
     from app.core.security import hash_password_async
-    pwd_hash = await hash_password_async("Strong1!pwd")
+    pwd_hash = await hash_password_async("StrongP@ssW0rd")
     async with SessionLocal() as s:
         s.add(User(
             id=str(uuid.uuid4()), username="alice",
@@ -90,7 +90,7 @@ async def test_logout_revokes_refresh_token(reset_state):
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         # 1) 登录拿到 refresh_token
         r = await c.post("/api/v1/auth/login", json={
-            "username": "alice", "password": "Strong1!pwd",
+            "username": "alice", "password": "StrongP@ssW0rd",
         })
         refresh_token = r.json()["refresh_token"]
 
@@ -121,7 +121,7 @@ async def test_logout_with_already_revoked_token_returns_200(reset_state):
     """重复 logout 同一 token → 200，第二次什么都不做也不报错。"""
     app = reset_state
     from app.core.security import hash_password_async
-    pwd_hash = await hash_password_async("Strong1!pwd")
+    pwd_hash = await hash_password_async("StrongP@ssW0rd")
     async with SessionLocal() as s:
         s.add(User(
             id=str(uuid.uuid4()), username="alice",
@@ -132,7 +132,7 @@ async def test_logout_with_already_revoked_token_returns_200(reset_state):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post("/api/v1/auth/login", json={
-            "username": "alice", "password": "Strong1!pwd",
+            "username": "alice", "password": "StrongP@ssW0rd",
         })
         refresh_token = r.json()["refresh_token"]
 

@@ -108,7 +108,7 @@ async def test_login_returns_refresh_token(reset_state):
     app = reset_state
     # 种一个用户：直接写 DB 走 bcrypt 哈希
     from app.core.security import hash_password_async
-    pwd_hash = await hash_password_async("Strong1!pwd")
+    pwd_hash = await hash_password_async("StrongP@ssW0rd")
     async with SessionLocal() as s:
         s.add(User(
             id=str(uuid.uuid4()), username="alice",
@@ -119,7 +119,7 @@ async def test_login_returns_refresh_token(reset_state):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post("/api/v1/auth/login", json={
-            "username": "alice", "password": "Strong1!pwd",
+            "username": "alice", "password": "StrongP@ssW0rd",
         })
     assert r.status_code == 200, r.text
     body = r.json()
@@ -134,8 +134,8 @@ async def test_register_returns_refresh_token(reset_state):
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post("/api/v1/auth/register", json={
             "username": "alice",
-            "password": "Strong1!pwd",
-            "confirm_password": "Strong1!pwd",
+            "password": "StrongP@ssW0rd",
+            "confirm_password": "StrongP@ssW0rd",
         })
     assert r.status_code == 200, r.text
     body = r.json()
@@ -147,7 +147,7 @@ async def test_register_returns_refresh_token(reset_state):
 async def test_refresh_with_valid_refresh_token(reset_state):
     app = reset_state
     from app.core.security import hash_password_async
-    pwd_hash = await hash_password_async("Strong1!pwd")
+    pwd_hash = await hash_password_async("StrongP@ssW0rd")
     async with SessionLocal() as s:
         s.add(User(
             id=str(uuid.uuid4()), username="alice",
@@ -158,7 +158,7 @@ async def test_refresh_with_valid_refresh_token(reset_state):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post("/api/v1/auth/login", json={
-            "username": "alice", "password": "Strong1!pwd",
+            "username": "alice", "password": "StrongP@ssW0rd",
         })
         login_body = r.json()
         refresh_token = login_body["refresh_token"]
@@ -176,7 +176,7 @@ async def test_refresh_with_access_token_rejected(reset_state):
     """access token 投到 refresh 字段 → 必须 AUTH_REFRESH_INVALID（type 不对）。"""
     app = reset_state
     from app.core.security import hash_password_async
-    pwd_hash = await hash_password_async("Strong1!pwd")
+    pwd_hash = await hash_password_async("StrongP@ssW0rd")
     async with SessionLocal() as s:
         s.add(User(
             id=str(uuid.uuid4()), username="alice",
@@ -187,7 +187,7 @@ async def test_refresh_with_access_token_rejected(reset_state):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post("/api/v1/auth/login", json={
-            "username": "alice", "password": "Strong1!pwd",
+            "username": "alice", "password": "StrongP@ssW0rd",
         })
         access_token = r.json()["access_token"]
         r2 = await c.post("/api/v1/auth/refresh", json={"refresh_token": access_token})

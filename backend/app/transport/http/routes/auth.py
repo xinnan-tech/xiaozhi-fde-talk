@@ -200,13 +200,15 @@ async def register(
 # refresh token / logout 端点（Wave 3 P1 #23）
 # ─────────────────────────────────────────────────────────────────────
 
-def _decode_refresh_or_raise(token_str: str) -> dict:
-    """解析 refresh token：签名校验 + type=refresh + 未撤销。
+async def _decode_refresh_or_raise(token_str: str, db: AsyncSession) -> dict:
+    """解析 refresh token：签名 + type=refresh + 未撤销 + pwd_ver 仍有效。
 
-    失败统一抛 I18nError 让前端拿到结构化 code。三类错误区分：
+    失败统一抛 I18nError 让前端拿到结构化 code。四类错误区分：
     - 签名 / 类型错 → AUTH_REFRESH_INVALID
     - 过期 → AUTH_REFRESH_EXPIRED
     - 撤销 → AUTH_REFRESH_REVOKED
+    - pwd_ver 与 DB 不一致（改密后旧 refresh） → AUTH_REFRESH_REVOKED
+      （与 jti 撤销归同一类码，避免泄漏「改密」与「主动 logout」差异给攻击者）
     """
     try:
         payload = decode_token(token_str)
@@ -218,6 +220,18 @@ def _decode_refresh_or_raise(token_str: str) -> dict:
         raise I18nError(Keys.AUTH_REFRESH_INVALID, http_status=401)
     jti = payload.get("jti")
     if not jti or is_refresh_token_revoked(jti):
+        raise I18nError(Keys.AUTH_REFRESH_REVOKED, http_status=401)
+    # pwd_ver 核对：与 transport/base.py::get_current_user 同款——改密 → DB bump
+    # → 旧 refresh 的 pwd_ver claim 落后于 DB → 视为同 jti 撤销同处理。
+    # 否则改密后旧 refresh 还能换新 access，等于改密吊销绕过。
+    user_id = payload.get("sub", "")
+    pwd_ver_claim = payload.get("pwd_ver")
+    if not user_id or pwd_ver_claim is None:
+        raise I18nError(Keys.AUTH_REFRESH_INVALID, http_status=401)
+    pwd_changed_at = await user_repo.get_pwd_changed_at(user_id)
+    if pwd_changed_at is None:
+        raise I18nError(Keys.AUTH_REFRESH_REVOKED, http_status=401)
+    if int(pwd_changed_at.timestamp()) != int(pwd_ver_claim):
         raise I18nError(Keys.AUTH_REFRESH_REVOKED, http_status=401)
     return payload
 
@@ -234,12 +248,12 @@ async def refresh(
     """
     if not _refresh_limiter.try_acquire(_client_ip(request)):
         raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
-    payload = _decode_refresh_or_raise(body.refresh_token)
-    # 重新读 pwd_ver：DB 是真相源——避免 pwd_ver 自然增长而刷新 token 仍带旧值
-    # （改密 → pwd_ver bump → 旧 refresh 自然吊销；走的是 decode 时的 pwd_ver 核对）。
+    payload = await _decode_refresh_or_raise(body.refresh_token, db)
+    # _decode_refresh_or_raise 已经按 DB 当前 pwd_ver 验过签名 claim；
+    # 这里直接拿 payload 的 username/role 重签 access——refresh 自身 pwd_ver
+    # 与 DB 一致才能走到这一步，签出的 access 自然带新 pwd_ver。
     user_id = payload["sub"]
-    pwd_changed_at = await user_repo.get_pwd_changed_at(user_id)
-    cur_pwd_ver = int(pwd_changed_at.timestamp()) if pwd_changed_at else int(time.time())
+    cur_pwd_ver = int(payload["pwd_ver"])
     extra = {k: payload[k] for k in ("username", "role") if k in payload}
     new_access = await create_access_token(
         subject=user_id, pwd_ver=cur_pwd_ver, extra=extra,

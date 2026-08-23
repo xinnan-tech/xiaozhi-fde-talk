@@ -515,3 +515,44 @@ async def test_E2_other_users_token_unaffected_after_one_change(empty_db):
         assert r.status_code == 200, (
             f"alice token 应不被 bob 改密影响，实际 {r.status_code}：{r.text}"
         )
+
+
+async def test_E3_old_refresh_revoked_after_self_password_change(empty_db):
+    """bob 改密后**用旧 refresh**调 /auth/refresh 应 401（pwd_ver 核对）。
+
+    兜底回归：/auth/refresh 解码 refresh 后必须按 DB pwd_ver 核对，否则改密后
+    旧 refresh 仍能换新 access，新 access 自然带新 pwd_ver → 等于改密吊销被绕过。
+
+    本用例独立使用更长的强密码——文件顶部 _STRONG_PWD 仍为 11 字符以兼容其他用例
+    的「故意注入旧密码错」场景，本用例不能复用。
+    """
+    app = empty_db
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await _register(c, "admin1", password="AdminE3!Pwd1long")
+        await get_config_store().set("auth.allow_registration", "true")
+        bob_old_pwd = "BobE3!Old1pwd"
+        bob_new_pwd = "BobE3!New1pwd"
+        bob = await _register(c, "bobby", password=bob_old_pwd)
+        bob_refresh = bob.get("refresh_token", "")
+
+        # bob 改密
+        r = await c.post(
+            "/api/v1/auth/change-password",
+            headers={"Authorization": f"Bearer {bob['access_token']}"},
+            json={
+                "old_password": bob_old_pwd,
+                "new_password": bob_new_pwd,
+            },
+        )
+        assert r.status_code == 200, r.text
+
+        # 旧 refresh 调 /auth/refresh → 应 401（pwd_ver 不匹配，归 AUTH_REFRESH_REVOKED）
+        if bob_refresh:
+            r = await c.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": bob_refresh},
+            )
+            assert r.status_code == 401, (
+                f"改密后旧 refresh 调 /auth/refresh 应 401，实际 {r.status_code}：{r.text}"
+            )

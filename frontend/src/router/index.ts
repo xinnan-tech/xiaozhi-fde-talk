@@ -96,7 +96,7 @@ export function resetRouter() {
 }
 
 /** 路由白名单 */
-const whiteList = ["/home", "/login"];
+const whiteList = ["/home", "/login", "/about"];
 
 router.beforeEach((to: ToRouteType, _from, next) => {
   to.meta.loaded = loadedPaths.has(to.path);

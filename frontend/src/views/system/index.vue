@@ -83,7 +83,7 @@ const selfCheckResults = reactive<SelfCheckResult[]>([]);
 /** 敏感密码字段 */
 const sensitiveKeys = ["api_key"];
 /** 复选框字段 */
-const checkboxKeys = ["ws_verify_ssl"];
+const checkboxKeys = ["ws_verify_ssl", "allow_registration"];
 
 /** 是否已登录 */
 const isLoggedIn = computed(() => Boolean(userStore.accessToken));

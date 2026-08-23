@@ -4,17 +4,14 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import uuid
 from pathlib import Path
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.config_store import DEFAULTS
-from app.core.security import hash_password_async
 from app.domain.session import SessionStatus
 from app.persistence.db import SessionLocal, engine
-from app.persistence.models import Base, InterviewRecord, User
+from app.persistence.models import Base, InterviewRecord
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +19,12 @@ logger = logging.getLogger(__name__)
 # dev 自愈：现有表缺列时 ADD COLUMN。prod 走 Alembic，不需要这条。
 _SELF_HEAL_COLUMNS: list[tuple[str, str, str]] = [
     # (table, column, ddl_type_with_default)
+    # 注：用 DATETIME 而非 TIMESTAMP —— SQLite 不识别 TIMESTAMP，dev 模式（未跑 alembic）直接报 unrecognized type。
+    # DATETIME 在 MySQL/PG/SQLite 三方言下都有效，可空，无默认值。
     ("reports", "transcript_signature", "VARCHAR(64) DEFAULT ''"),
     ("reports", "output_language", "VARCHAR(16) DEFAULT ''"),
     ("interviews", "first_batch_generated", "BOOLEAN DEFAULT 0"),
+    ("users", "password_changed_at", "DATETIME"),
 ]
 
 
@@ -62,7 +62,7 @@ async def _ensure_columns(conn: AsyncConnection) -> None:
 
 
 async def init_db() -> None:
-    """建表 + 缺列自愈 + 种入演示账号。lifespan 启动时调一次。
+    """建表 + 缺列自愈 + 窄清老种子 admin。lifespan 启动时调一次。
 
     dev（默认）：Base.metadata.create_all + 缺列自愈（本地快速启动）
     prod（APP_DB_USE_ALEMBIC=1）：走 alembic upgrade head（迁移式版本管理）
@@ -83,42 +83,22 @@ async def init_db() -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             await _ensure_columns(conn)
-    await seed_dev_users()
+    await _drop_seed_admin()
 
 
-async def seed_dev_users() -> None:
-    """开发演示账号种入（仅 admin；其他用户由集成测试动态创建）。
+async def _drop_seed_admin() -> None:
+    """dev 自愈：清掉老 seed 灌入的 admin 账户（窄 WHERE），幂等。
 
-    注：直接读 DEFAULTS 而非 ConfigStore，因为 init_db 在 ConfigStore.warm() 之前调用。
-    P2-7: 必须显式设置 APP_ADMIN_PASSWORD env——不再生成随机密码打到日志，避免被
-    日志聚合系统收集泄露。无 env 直接抛 RuntimeError 拒启，docker/systemd 可见失败。
-    改密走 /admin/auth/password。
+    dev 模式不跑 alembic，此处镜像生产迁移的窄清理，避免旧种子 admin 残留
+    导致 registration-status 返回 allow_registration=false、首用户注册路径卡住。
     """
-    from app.core.settings import get_settings
-
-    settings = get_settings()
-    username = DEFAULTS["auth.demo_username"]
-    # password env 覆盖：dev/prod 都必须通过 APP_ADMIN_PASSWORD env 注入固定口令
-    # 走 Settings（pydantic-settings 自动读 .env + 环境变量），而不是裸 os.environ.get
-    password = settings.app_admin_password or ""
-    if not username:
-        return
-    if not password:
-        raise RuntimeError(
-            "未设置 APP_ADMIN_PASSWORD，请在 .env 或环境变量中显式配置后重启。"
-        )
     async with SessionLocal() as session:
-        existing = await session.execute(select(User).where(User.username == username))
-        row = existing.scalar_one_or_none()
-        if row is None:
-            session.add(User(
-                id=str(uuid.uuid4()),
-                username=username,
-                password_hash=await hash_password_async(password),
-                role="admin",
-            ))
-        elif row.role != "admin":
-            row.role = "admin"
+        await session.execute(
+            text("DELETE FROM users WHERE username = 'admin' AND role = 'admin'")
+        )
+        await session.execute(
+            text("DELETE FROM system_config WHERE key = 'auth.demo_username'")
+        )
         await session.commit()
 
 

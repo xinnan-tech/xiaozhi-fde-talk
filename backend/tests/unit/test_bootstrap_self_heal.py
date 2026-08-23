@@ -16,7 +16,7 @@ from app.persistence.bootstrap import _column_exists, _ensure_columns, _SELF_HEA
 
 @pytest.fixture
 async def fake_old_db_engine():
-    """造一个缺自愈列的老 dev DB：reports 缺 transcript_signature 与 output_language、interviews 缺 first_batch_generated。"""
+    """造一个缺自愈列的老 dev DB：reports 缺 transcript_signature 与 output_language、interviews 缺 first_batch_generated、users 缺 password_changed_at。"""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         # 对应 ORM 模型之外的最小字段集（不引入 Base.metadata，避免新表自带列）
@@ -35,6 +35,15 @@ async def fake_old_db_engine():
             "  template_id VARCHAR(64),"
             "  status VARCHAR(32),"
             "  goal TEXT"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE TABLE users ("
+            "  id VARCHAR(36) PRIMARY KEY,"
+            "  username VARCHAR(64),"
+            "  password_hash VARCHAR(255),"
+            "  role VARCHAR(16) DEFAULT 'user',"
+            "  created_at DATETIME"
             ")"
         ))
     yield engine

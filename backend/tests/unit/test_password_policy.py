@@ -94,19 +94,3 @@ def test_long_multibyte_password_raises():
     validate_password_strength("中" * 24)  # 72 字节
     with pytest.raises(PasswordTooLongError):
         validate_password_strength("中" * 25)  # 75 字节
-
-
-# ---------- init_db 缺 APP_ADMIN_PASSWORD 拒启 ----------
-
-def test_seed_dev_users_raises_runtime_when_password_missing(monkeypatch):
-    """APP_ADMIN_PASSWORD 缺省 → seed_dev_users 抛 RuntimeError（不允许静默启动
-    并把随机密码打到日志）。集成场景：monkeypatch settings 的 lru_cache。
-    """
-    from app.core import settings as settings_mod
-    from app.persistence.bootstrap import seed_dev_users
-
-    monkeypatch.setattr(settings_mod, "get_settings", lambda: settings_mod.Settings(
-        app_admin_password="",
-    ))
-    with pytest.raises(RuntimeError, match="APP_ADMIN_PASSWORD"):
-        asyncio.run(seed_dev_users())

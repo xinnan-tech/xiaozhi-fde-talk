@@ -23,6 +23,11 @@ class LoginResponse(BaseModel):
     user: UserInfo
 
 
+class RegistrationStatusResponse(BaseModel):
+    """注册开关状态。响应体仅暴露 allow_registration，不返 user_count / has_admin（防侦察）。"""
+    allow_registration: bool
+
+
 class AdminPasswordChangeRequest(BaseModel):
     """P2-7: admin 改指定用户密码（独立于 ConfigStore.demo_password）。"""
     username: str

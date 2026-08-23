@@ -71,18 +71,25 @@ class Settings(BaseSettings):
     def _validate_prod(self) -> "Settings":
         """生产环境强校验（DB_URL 必须为 MySQL/PostgreSQL；ASR_WS_URL 不能指向 localhost/127.0.0.1）。"""
         # 延迟导入：避免 settings 导入期拉起 i18n 子包（settings 被广泛 import）
+        from urllib.parse import urlparse
+
         from app.core.i18n.errors import I18nError
         from app.core.i18n.messages import Keys
         if self.env == "prod":
             if not self.db_url.startswith(("mysql+", "postgresql+")):
                 raise I18nError(Keys.SETTINGS_PROD_NO_SQLITE, http_status=400)
-            # prod 的 ASR 地址必须真实可达：localhost/127.0.0.1 在容器内永远指向容器自身。
-            # ws/wss 协议宿主部分做字符串检查即可——不同地址前缀的端口/路径被忽略，
-            # 只要主机标识命中 localhost / 127.0.0.1 / 0.0.0.0 就拒。
-            url = self.asr_ws_url.lower()
-            if url.startswith(("ws://localhost", "wss://localhost",
-                               "ws://127.0.0.1", "wss://127.0.0.1",
-                               "ws://0.0.0.0", "wss://0.0.0.0")):
+            # prod ASR 地址必须显式配置：空串会在运行期 asr 客户端首请求时炸，
+            # 与其在 worker 跑起来后才发现不如启动期拒。dev/test 留空由 adapters
+            # 兜底（localhost fallback）。
+            if not self.asr_ws_url.strip():
+                raise I18nError(Keys.SETTINGS_PROD_ASR_REQUIRED, http_status=400)
+            # 取 hostname 而非 startswith：避免 `*.localhost.example.com` /
+            # `*.local.prod` 这类「字符串命中但实际是合法外部域」误杀。
+            try:
+                host = (urlparse(self.asr_ws_url).hostname or "").lower()
+            except ValueError:
+                host = ""
+            if host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
                 raise I18nError(Keys.SETTINGS_PROD_ASR_LOCALHOST, http_status=400)
         return self
 

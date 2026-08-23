@@ -15,24 +15,19 @@
   如端口被占先杀掉。
 - FunASR @ `localhost:10096`（`docker compose up funasr`）
 - 默认 admin 账号：`admin` / `longenough1234`
-  （硬编码于 `playwright.config.ts` 与 `backend/tests/conftest.py::_TEST_ADMIN_PASSWORD`）
+  （与 `backend/tests/conftest.py::_TEST_ADMIN_PASSWORD` 兜底一致）
+- **CI 必须注入** `E2E_ADMIN_USER` / `E2E_ADMIN_PASSWORD`，避免仓库硬编码密钥泄漏
 
-## Conda 路径不对
+## Conda / Python 路径不对
 
-`playwright.config.ts` 默认指向：
-
-```
-/home/claw/miniconda3/envs/xiaozhi-fde-talk/bin/python
-```
-
-Conda 装在别处？覆盖：
+`playwright.config.ts` 默认走 `$PATH` 里的 `python`。conda / pyenv / 系统
+python 装在不同位置时覆盖 `E2E_PYTHON_BIN`：
 
 ```sh
 E2E_PYTHON_BIN=/your/path/to/python pnpm exec playwright test
 ```
 
-> 该 env var 需在 `playwright.config.ts` 改一次才会被读取；当前配置硬编码绝对路径，
-> 暂时手动改文件或创建符号链接到默认路径。
+未注入时 shell 用 `${E2E_PYTHON_BIN:-python}` 兜底到 `$PATH` 的 `python`。
 
 ## 跑命令
 

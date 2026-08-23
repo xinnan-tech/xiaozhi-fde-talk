@@ -1,7 +1,5 @@
 import { test, expect } from "@playwright/test"
-
-const ADMIN_USER = "admin"
-const ADMIN_PWD = "longenough1234"
+import { ADMIN_USER, ADMIN_PWD } from "./fixtures/auth"
 
 // login.spec.ts 必须从「空 storageState」起步，才能验证
 // 「未登录 → 触发登录框 → 提交 → 落 home」整条链路。

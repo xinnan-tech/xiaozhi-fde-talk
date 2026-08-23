@@ -1,9 +1,8 @@
 import { test, expect, request as playwrightRequest } from "@playwright/test"
+import { ADMIN_USER, ADMIN_PWD } from "./fixtures/auth"
 
 // 与 playwright.config.ts webServer[0].port=8001 对齐：前端 vite preview 把 /api 反代到 8001
 const E2E_API = "http://127.0.0.1:8001"
-const ADMIN_USER = "admin"
-const ADMIN_PWD = "longenough1234"
 
 // ─────────────────────────────────────────────────────────────────────
 // 共享 API 工具：直接打 backend，绕开前端 UI 做 DB 状态准备

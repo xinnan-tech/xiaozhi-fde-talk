@@ -1,7 +1,5 @@
 import { test, expect } from "@playwright/test"
-
-const ADMIN_USER = "admin"
-const ADMIN_PWD = "longenough1234"
+import { ADMIN_USER, ADMIN_PWD } from "./fixtures/auth"
 
 // 隐身新用户首访：浏览器 storage context 是全新的——没有 cookies / localStorage /
 // sessionStorage，对应用户的「隐身模式」/「首次访问」/「退出后清缓存再访问」场景。

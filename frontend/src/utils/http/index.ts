@@ -101,7 +101,13 @@ class PureHttp {
         const $error = error;
         $error.isCancelRequest = Axios.isCancel($error);
 
-        if ($error.response?.status === 401 && getToken()) {
+        // 401 分两类：
+        // - I18nError 业务 401（response.data.code 非空）：旧密码错、改密时用户被删等
+        //   → 不动 token，让具体调用方按业务文案展示。
+        // - 裸 HTTPException 401（response.data.code 为空）：JWT 过期 / 解码失败 / pwd_ver 不匹配
+        //   → 才视为「登录状态过期」，清理 token 并提示重新登录。
+        const hasCode = !!(error?.response?.data as { code?: string } | undefined)?.code;
+        if ($error.response?.status === 401 && getToken() && !hasCode) {
           removeToken();
           const userStore = useUserStoreHook();
           userStore.SET_ACCESS_TOKEN("");

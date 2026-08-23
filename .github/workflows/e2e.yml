@@ -56,11 +56,11 @@ jobs:
           conda activate xiaozhi-fde-talk
           pip install -r backend/requirements.txt
 
-      - name: Install Playwright browser
-        run: pnpm --dir frontend exec playwright install --with-deps chromium
-
       - name: pnpm install
         run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm --dir frontend exec playwright install --with-deps chromium
 
       - name: Build frontend
         run: pnpm --dir frontend build

@@ -18,6 +18,7 @@ import ReSegmented from "@/components/ReSegmented";
 import LayFooter from "@/layout/components/lay-footer/index.vue";
 import {
   endInterviewApi,
+  firstBatchInterviewApi,
   getInterviewDetailApi,
   ignoreInterviewItemApi,
   type InterviewDetailItem,
@@ -262,6 +263,7 @@ const mergeSuggestionCards = (items: SuggestionSourceItem[]) => {
 const suggestionListAnimationEnabled = ref(true);
 let suggestionMetricAnimationToken = 0;
 const isCoachingRecomputing = ref(false);
+const isFirstBatchPending = ref(false);
 const idleWarningSeconds = ref<number | null>(null);
 let idleWarningTimerId: number | null = null;
 
@@ -903,6 +905,49 @@ const handleEndInterview = async () => {
   router.push("/home");
 };
 
+const kickFirstBatchIfNeeded = (detail: InterviewDetailType) => {
+  // 与测试 harness (static/index_test_harness.html:865) 一致：首评未生成、访谈未开聊、未结束
+  // 时预热生成定制问题。LLM 同步调用可能耗时，fire-and-forget，不阻塞页面渲染。
+  // 回调里再校验当前 route.params，避免用户中途切访谈把旧结果写回。
+  if (
+    detail.first_batch_generated ||
+    (Array.isArray(detail.transcript) && detail.transcript.length > 0) ||
+    detail.status === "ended" ||
+    detail.status === "extracting" ||
+    detail.status === "done"
+  ) {
+    return;
+  }
+  const sessionId = detail.id;
+  isFirstBatchPending.value = true;
+  void (async () => {
+    try {
+      const g = await firstBatchInterviewApi(sessionId);
+      if (route.params.id !== sessionId) return;
+      if (g && g.generated && Array.isArray(g.items)) {
+        if (interviewDetail.value) {
+          interviewDetail.value.first_batch_generated = true;
+          interviewDetail.value.items = g.items;
+        }
+        suggestionCards.value = createSuggestionCards({
+          ...detail,
+          items: g.items,
+          first_batch_generated: true
+        });
+        ElMessage.success(t("msg.first_batch_done"));
+      } else {
+        ElMessage.warning(t("msg.first_batch_partial"));
+      }
+    } catch {
+      ElMessage.warning(t("msg.first_batch_partial"));
+    } finally {
+      if (route.params.id === sessionId) {
+        isFirstBatchPending.value = false;
+      }
+    }
+  })();
+};
+
 const getInterviewDetail = async () => {
   const id = route.params.id as string;
   if (!id) return;
@@ -911,6 +956,7 @@ const getInterviewDetail = async () => {
   suggestionCards.value = createSuggestionCards(res);
   transcriptEntries.value = createTranscriptEntries(res.transcript);
   void scrollTranscriptToTop();
+  kickFirstBatchIfNeeded(res);
 };
 
 onMounted(() => {
@@ -950,6 +996,12 @@ onMounted(() => {
                 class="panel-status panel-status-thinking"
               >
                 {{ $t("interview.panel.thinking") }}
+              </span>
+              <span
+                v-if="isFirstBatchPending"
+                class="panel-status panel-status-thinking"
+              >
+                {{ $t("msg.first_batch_running") }}
               </span>
               <span
                 v-if="idleWarningSeconds !== null"

@@ -146,6 +146,19 @@ export const getInterviewDetailApi = (id: string) => {
   );
 };
 
+export type FirstBatchResponse = {
+  generated: boolean;
+  items: InterviewDetailItem[];
+};
+
+/** 触发/获取首批评量（幂等：已生成/已开聊/已结束则直接返回当前清单）。 */
+export const firstBatchInterviewApi = (sessionId: string) => {
+  return http.request<FirstBatchResponse>(
+    "post",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/first-batch`)
+  );
+};
+
 /** 忽略访谈问题 */
 export const ignoreInterviewItemApi = (sessionId: string, itemId: string) => {
   return http.request<unknown>(

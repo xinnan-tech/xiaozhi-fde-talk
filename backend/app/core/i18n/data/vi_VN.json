@@ -87,7 +87,7 @@
   "auth.username_taken": "Username is already taken",
   "auth.password_mismatch": "Passwords do not match",
   "auth.registration_disabled": "User registration is currently disabled",
-  "auth.user_not_found": "User not found",
+  "auth.user_not_found": "Không tìm thấy người dùng",
   "settings.prod_asr_localhost": "ASR_WS_URL trong production không được trỏ tới localhost/127.0.0.1; hãy dùng địa chỉ FunASR có thể truy cập",
   "settings.prod_asr_required": "Production yêu cầu ASR_WS_URL được cấu hình; giá trị rỗng sẽ lỗi khi chạy",
   "auth.refresh_invalid": "refresh token không hợp lệ",

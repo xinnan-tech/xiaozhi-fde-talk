@@ -297,13 +297,10 @@ def validate_password_strength(password: str) -> None:
             byte_len=byte_len, max=_BCRYPT_MAX_BYTES,
         )
     if _char_class_count(password) < 3:
-        # 复用 PASSWORD_TOO_WEAK 路径而不引入新 Key 文案——admin 注册链路
-        # 已能区分「字符类不足」与「命中黑名单」用户体验，理论上后者更重
-        # 要但代码层统一归弱密码一类。
-        raise I18nError(
-            Keys.PASSWORD_TOO_WEAK, http_status=400,
-            count=len(_WEAK_PASSWORDS),
-        )
+        # 字符类不足与命中黑名单语义不同：前者是「形态不达标」后者是「词典命中」，
+        # 各自给独立文案而非共用 count 占位——共用会让 admin / 用户以为黑名单命中 N 条，
+        # 实际是字符类不足，导致排查方向跑偏。
+        raise I18nError(Keys.PASSWORD_CHARSET_INSUFFICIENT, http_status=400)
     if password.lower() in _WEAK_PASSWORDS:
         raise I18nError(
             Keys.PASSWORD_TOO_WEAK, http_status=400,

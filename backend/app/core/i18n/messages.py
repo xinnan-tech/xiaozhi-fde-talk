@@ -115,6 +115,7 @@ class Keys(StrEnum):
     PASSWORD_TOO_SHORT_MIN = "password.too_short_min"
     PASSWORD_TOO_LONG = "password.too_long"
     PASSWORD_TOO_WEAK = "password.too_weak"
+    PASSWORD_CHARSET_INSUFFICIENT = "password.charset_insufficient"
 
     # ---- Config validation ----
     CONFIG_INVALID_ENUM_VALUE = "config.invalid_enum_value"

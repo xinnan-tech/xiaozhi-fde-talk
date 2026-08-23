@@ -80,6 +80,7 @@
   "password.too_short_min": "Mật khẩu quá ngắn: yêu cầu ≥ {min} ký tự, hiện có {actual}",
   "password.too_long": "Mật khẩu vượt quá giới hạn bcrypt: UTF-8 bytes {byte_len} > {max}",
   "password.too_weak": "Mật khẩu nằm trong danh sách đen mật khẩu yếu ({count} mục), vui lòng chọn mật khẩu khác",
+  "password.charset_insufficient": "Mật khẩu phải có ít nhất 3 loại ký tự (thường/hoa/số/ký hiệu); hiện tại chưa đủ",
   "config.invalid_enum_value": "Giá trị không hợp lệ cho {field}: {value} (cho phép: {allowed})",
   "config.invalid_bool": "{key} value must be true or false",
   "auth.username_invalid_format": "Username must be 4-32 chars (letters, digits, underscore, hyphen)",

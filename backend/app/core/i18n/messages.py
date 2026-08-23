@@ -124,6 +124,9 @@ class Keys(StrEnum):
     AUTH_PASSWORD_MISMATCH = "auth.password_mismatch"
     AUTH_REGISTRATION_DISABLED = "auth.registration_disabled"
     AUTH_USER_NOT_FOUND = "auth.user_not_found"
+    AUTH_REFRESH_INVALID = "auth.refresh_invalid"
+    AUTH_REFRESH_EXPIRED = "auth.refresh_expired"
+    AUTH_REFRESH_REVOKED = "auth.refresh_revoked"
 
 
 @lru_cache(maxsize=1)

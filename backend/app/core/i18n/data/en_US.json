@@ -97,5 +97,8 @@
   "i18n.extract.directive.fr": "Write all field values in Français (French). Translate the source text to Français as needed.",
   "i18n.extract.directive.de": "Write all field values in Deutsch (German). Translate the source text to Deutsch as needed.",
   "i18n.extract.directive.es": "Write all field values in Español (Spanish). Translate the source text to Español as needed.",
-  "settings.prod_asr_localhost": "Production ASR_WS_URL must not point to localhost/127.0.0.1; use a reachable FunASR address"
+  "settings.prod_asr_localhost": "Production ASR_WS_URL must not point to localhost/127.0.0.1; use a reachable FunASR address",
+  "auth.refresh_invalid": "invalid refresh token",
+  "auth.refresh_expired": "refresh token expired",
+  "auth.refresh_revoked": "refresh token revoked"
 }

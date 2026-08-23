@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 
+import jwt as pyjwt
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
@@ -18,12 +19,21 @@ from app.persistence.db import get_db
 from app.persistence.models import User
 from app.persistence.repositories.user import user_repo
 from app.services.auth.service import authenticate_user, register_user as svc_register
-from app.services.auth.token import create_access_token
+from app.services.auth.token import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    is_refresh_token_revoked,
+    revoke_refresh_token,
+)
 from app.transport.http.dependencies import get_current_user
 from app.transport.http.schemas import (
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
+    LogoutRequest,
+    RefreshRequest,
+    RefreshResponse,
     RegisterRequest,
     RegistrationStatusResponse,
     UserInfo,
@@ -38,10 +48,14 @@ _login_limiter = RateLimiter(capacity=5, refill_per_hour=300)
 # （弱密码 / 两次密码不一致 / 重复 username）也消耗令牌——避免暴力扫 username
 # 与弱密码走绕过路径。
 _register_limiter = RateLimiter(capacity=3, refill_per_hour=60)
+# /auth/refresh 限流与 login 同款 bucket 大小，但不限 (ip, username) 而只按 ip——
+# refresh 通常由前端 axios 拦截器自动触发，频繁度高于登录；按用户限会把自动刷新
+# 路径锁死。纯 ip 限足够挡住外网滥用。
+_refresh_limiter = RateLimiter(capacity=30, refill_per_hour=600)
 
 
 def _reset_for_test() -> None:
-    """清空登录 / 注册限流桶。仅 settings.env in {"test","dev"} 时生效。
+    """清空登录 / 注册限流桶 + refresh token 撤销表。仅 settings.env in {"test","dev"} 时生效。
 
     单元/集成测试用例间需要隔离限流状态；模块级 RateLimiter 跨用例持续累加，
     不暴露 reset 的话测试要么 sleep 等令牌再生（慢），要么依赖运气。生产环境
@@ -53,6 +67,9 @@ def _reset_for_test() -> None:
         return
     _login_limiter._buckets.clear()
     _register_limiter._buckets.clear()
+    _refresh_limiter._buckets.clear()
+    from app.services.auth import token as _tok
+    _tok._reset_revoked_for_test()
 
 
 def _client_ip(request: Request) -> str:
@@ -78,13 +95,16 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     # 历史用户 password_changed_at 可能为 None（迁移前回填的边缘场景）；
     # 退化到当前时间——保证 token 必然签出，pwd_ver 与 DB 始终能比对。
     pwd_ver = int(pwd_changed_at.timestamp()) if pwd_changed_at else int(time.time())
-    token = await create_access_token(
-        subject=user.user_id,
-        pwd_ver=pwd_ver,
-        extra={"username": user.username, "role": user.role},
+    extra = {"username": user.username, "role": user.role}
+    access_token = await create_access_token(
+        subject=user.user_id, pwd_ver=pwd_ver, extra=extra,
+    )
+    refresh_token, _refresh_jti = await create_refresh_token(
+        subject=user.user_id, pwd_ver=pwd_ver, extra=extra,
     )
     return LoginResponse(
-        access_token=token,
+        access_token=access_token,
+        refresh_token=refresh_token,
         user=UserInfo(id=user.user_id, username=user.username, role=user.role),
     )
 
@@ -162,15 +182,89 @@ async def register(
     # 历史用户 password_changed_at 可能为 None；退化到当前时间——保证 token
     # 必然签出，pwd_ver 与 DB 始终能比对（login 路由同款）。
     pwd_ver = int(pwd_changed_at.timestamp()) if pwd_changed_at else int(time.time())
-    token = await create_access_token(
-        subject=current.user_id,
-        pwd_ver=pwd_ver,
-        extra={"username": current.username, "role": current.role},
+    extra = {"username": current.username, "role": current.role}
+    access_token = await create_access_token(
+        subject=current.user_id, pwd_ver=pwd_ver, extra=extra,
+    )
+    refresh_token, _refresh_jti = await create_refresh_token(
+        subject=current.user_id, pwd_ver=pwd_ver, extra=extra,
     )
     return LoginResponse(
-        access_token=token,
+        access_token=access_token,
+        refresh_token=refresh_token,
         user=UserInfo(id=current.user_id, username=current.username, role=current.role),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# refresh token / logout 端点（Wave 3 P1 #23）
+# ─────────────────────────────────────────────────────────────────────
+
+def _decode_refresh_or_raise(token_str: str) -> dict:
+    """解析 refresh token：签名校验 + type=refresh + 未撤销。
+
+    失败统一抛 I18nError 让前端拿到结构化 code。三类错误区分：
+    - 签名 / 类型错 → AUTH_REFRESH_INVALID
+    - 过期 → AUTH_REFRESH_EXPIRED
+    - 撤销 → AUTH_REFRESH_REVOKED
+    """
+    try:
+        payload = decode_token(token_str)
+    except pyjwt.ExpiredSignatureError:
+        raise I18nError(Keys.AUTH_REFRESH_EXPIRED, http_status=401)
+    except pyjwt.InvalidTokenError:
+        raise I18nError(Keys.AUTH_REFRESH_INVALID, http_status=401)
+    if payload.get("type") != "refresh":
+        raise I18nError(Keys.AUTH_REFRESH_INVALID, http_status=401)
+    jti = payload.get("jti")
+    if not jti or is_refresh_token_revoked(jti):
+        raise I18nError(Keys.AUTH_REFRESH_REVOKED, http_status=401)
+    return payload
+
+
+@router.post("/auth/refresh", response_model=RefreshResponse)
+async def refresh(
+    body: RefreshRequest, request: Request, db: AsyncSession = Depends(get_db),
+) -> RefreshResponse:
+    """用 refresh token 换新 access token（不签新 refresh，避免长期泄露放大）。
+
+    同一 refresh token 多次刷新：未撤销 + 未过期都返新 access，但 pwd_ver 不变
+    —— 之前用该 refresh 换出的 access 仍有效（允许并发的 WS 连接、避免尖刺
+    失败重连把已建立的会话断掉）。
+    """
+    if not _refresh_limiter.try_acquire(_client_ip(request)):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
+    payload = _decode_refresh_or_raise(body.refresh_token)
+    # 重新读 pwd_ver：DB 是真相源——避免 pwd_ver 自然增长而刷新 token 仍带旧值
+    # （改密 → pwd_ver bump → 旧 refresh 自然吊销；走的是 decode 时的 pwd_ver 核对）。
+    user_id = payload["sub"]
+    pwd_changed_at = await user_repo.get_pwd_changed_at(user_id)
+    cur_pwd_ver = int(pwd_changed_at.timestamp()) if pwd_changed_at else int(time.time())
+    extra = {k: payload[k] for k in ("username", "role") if k in payload}
+    new_access = await create_access_token(
+        subject=user_id, pwd_ver=cur_pwd_ver, extra=extra,
+    )
+    return RefreshResponse(access_token=new_access)
+
+
+@router.post("/auth/logout", status_code=200)
+async def logout(
+    body: LogoutRequest, request: Request, db: AsyncSession = Depends(get_db),
+) -> dict:
+    """撤销 refresh token jti；access token 不动（短 TTL 自然过期）。
+
+    即便 token 已过期 / 非法，也尝试 decode 提 jti 再撤销——避免攻击者拿合法
+    但刚过期的 refresh token 试出撤销路径差异；任何入参一律返 200。
+    """
+    _refresh_limiter.try_acquire(_client_ip(request))
+    try:
+        payload = decode_token(body.refresh_token)
+    except pyjwt.InvalidTokenError:
+        return {"ok": True}
+    jti = payload.get("jti")
+    if jti:
+        revoke_refresh_token(jti)
+    return {"ok": True}
 
 
 @router.post("/auth/change-password", status_code=200)

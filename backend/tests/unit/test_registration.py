@@ -149,6 +149,9 @@ async def test_register_endpoint_returns_login_response(empty_db):
     assert body["user"]["username"] == "alice"
     assert "access_token" in body
     assert body["access_token"]
+    # Wave 3 P1 #23 refresh token：register 路径同步返回
+    assert "refresh_token" in body
+    assert body["refresh_token"]
 
 
 @pytest.mark.asyncio

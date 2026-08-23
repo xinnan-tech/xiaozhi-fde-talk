@@ -22,9 +22,28 @@ class UserInfo(BaseModel):
 
 
 class LoginResponse(BaseModel):
+    # 双 token 模型：access 短 TTL 用于业务鉴权，refresh 长 TTL 用于换 access。
+    # 前端当前只解 access；refresh 等前端迁移到 httpOnly cookie 时再上。
     access_token: str
+    refresh_token: str = ""
     token_type: str = "bearer"
     user: UserInfo
+
+
+class RefreshRequest(BaseModel):
+    # extra="forbid" 防 access token 被误投到 refresh 字段、其它字段被注入形成静默越权路径
+    model_config = ConfigDict(extra="forbid")
+    refresh_token: str = Field(min_length=1)
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class LogoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    refresh_token: str = Field(min_length=1)
 
 
 class RegistrationStatusResponse(BaseModel):

@@ -28,7 +28,7 @@ ALL_B_KEYS: list[str] = [
     "llm.type", "llm.base_url", "llm.api_key", "llm.model", "llm.output_language",
     "asr.type", "asr.language", "asr.sample_rate", "asr.ws_url", "asr.ws_verify_ssl",
     "coach.pause_s", "coach.max_pending_segments", "coach.min_interval_s", "coach.llm_timeout_s",
-    "auth.jwt_expire_minutes", "auth.allow_registration",
+    "auth.jwt_expire_minutes", "auth.allow_registration", "auth.refresh_token_expire_days",
     "session.grace_period_s",
     "session.idle_timeout_s",
     "session.idle_check_interval_s",
@@ -52,6 +52,7 @@ NUMERIC_KEYS: dict[str, type] = {
     "asr.sample_rate": int,
     "coach.max_pending_segments": int,
     "auth.jwt_expire_minutes": int,
+    "auth.refresh_token_expire_days": int,
     "session.max_concurrent": int,
     "coach.pause_s": float,
     "coach.min_interval_s": float,
@@ -146,6 +147,7 @@ DEFAULTS: dict[str, str] = {
     "coach.llm_timeout_s": "45.0",
     "auth.jwt_expire_minutes": "1440",
     "auth.allow_registration": "false",
+    "auth.refresh_token_expire_days": "7",
     "session.grace_period_s": "60.0",
     "session.idle_timeout_s": "1800.0",
     "session.idle_check_interval_s": "30.0",
@@ -357,6 +359,7 @@ async def get_auth_runtime_config() -> dict[str, object]:
     return {
         "jwt_expire_minutes": int(await s.get("auth.jwt_expire_minutes") or "1440"),
         "allow_registration": (await s.get("auth.allow_registration") or "false") == "true",
+        "refresh_token_expire_days": int(await s.get("auth.refresh_token_expire_days") or "7"),
     }
 
 

@@ -2,6 +2,7 @@
 import { getSvgInfo } from "@pureadmin/utils";
 import { addIcon } from "@iconify/vue/dist/offline";
 
+// 已经写死的几张菜单 icon，沿用 ~icons 加载的形式（unplugin-icons 会在构建期把 svg 内联）
 // https://icon-sets.iconify.design/ep/?keyword=ep
 import EpHomeFilled from "~icons/ep/home-filled?raw";
 
@@ -21,3 +22,8 @@ const icons = [
 icons.forEach(([name, icon]) => {
   addIcon(name as string, getSvgInfo(icon as string));
 });
+
+// 自动生成的白名单：把所有 useRenderIcon("prefix:name") 形式的在线图标注册到离线 storage。
+// 内网环境访问不到 api.iconify.design 时，只要这张表里登记过就能正常渲染。
+// 文件由 scripts/build-offline-icons.py 重生成，不要手改。
+import "./offlineIconBundle.generated";

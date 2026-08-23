@@ -1,6 +1,6 @@
 import type { iconType } from "./types";
 import { h, defineComponent, type Component, markRaw } from "vue";
-import { FontIcon, IconifyIconOnline, IconifyIconOffline } from "../index";
+import { FontIcon, IconifyIconOffline } from "../index";
 
 /**
  * 支持 `iconfont`、自定义 `svg` 以及 `iconify` 中所有的图标
@@ -48,16 +48,18 @@ export function useRenderIcon(icon: any, attrs?: iconType): Component {
       })
     );
   } else {
-    // 通过是否存在 : 符号来判断是在线还是本地图标，存在即是在线图标，反之
+    // 字符串图标统一走离线通道（@iconify/vue/dist/offline）。
+    // 之前按 "包含冒号即在线" 路由会让内网用户拿不到头像 / 侧边栏图标，
+    // 因为前端访问不了 api.iconify.design，unisvg 镜像又时好时坏。
+    // 现在统一落到 @iconify/vue/dist/offline 的 storage 里——白名单走
+    // scripts/build-offline-icons.py 预生成 offlineIconBundle.generated.ts
+    // 给 storage 注册；找不到就返回 null，不再尝试网络。
     return markRaw(
       defineComponent({
         name: "Icon",
         render() {
           if (!icon) return;
-          const IconifyIcon = icon.includes(":")
-            ? IconifyIconOnline
-            : IconifyIconOffline;
-          return h(IconifyIcon, {
+          return h(IconifyIconOffline, {
             icon,
             ...attrs
           });

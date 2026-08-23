@@ -25,21 +25,12 @@ Object.keys(directives).forEach(key => {
   app.directive(key, (directives as { [key: string]: Directive })[key]);
 });
 
-// 全局注册@iconify/vue图标库
-import { addAPIProvider } from "@iconify/vue";
-import {
-  IconifyIconOffline,
-  IconifyIconOnline,
-  FontIcon
-} from "./components/ReIcon";
-// 把在线图标 API 重定向到国内镜像。官方 api.iconify.design 在国内不稳，
-// 导致右上角头像等 useRenderIcon("xxx:yyy") 走在线通道时空白。
-// 首个 URL 失败时按列表顺序自动 fallback。
-addAPIProvider("", {
-  resources: ["https://api.unisvg.com", "https://api.iconify.host"]
-});
+// 全局注册 @iconify/vue 图标库
+import { IconifyIconOffline, FontIcon } from "./components/ReIcon";
+// 不再注册 IconifyIconOnline：内网访问不到 api.iconify.design / unisvg，
+// 任何 useRenderIcon("prefix:name") 都交给离线 storage 处理；
+// 白名单由 scripts/build-offline-icons.py 生成到 offlineIconBundle.generated.ts。
 app.component("IconifyIconOffline", IconifyIconOffline);
-app.component("IconifyIconOnline", IconifyIconOnline);
 app.component("FontIcon", FontIcon);
 
 // 全局注册按钮级别权限组件

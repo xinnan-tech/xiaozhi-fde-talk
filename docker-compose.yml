@@ -12,6 +12,16 @@ services:
       - "10096:10095"
     volumes:
       - ./backend/models/funasr-runtime-resources:/workspace/models
+    # 健康检查：TCP 10095 在容器内可达即视为 ASR 服务就绪——脚本内是后台
+    # bash + tail -f，主进程退出码恒 0，docker 看不到真服务状态。显式建
+    # healthcheck 让 app depends_on 用 service_healthy 等真 ready，避免
+    # cold start 阶段 app 已启但 funasr 模型未下载完连不上导致死循环重启。
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/10095 && echo -e 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 120s
     # 使用分号隔离命令，确保 cd 和 touch 在主 shell 中按顺序生效
     command: >
       bash -c "cd FunASR/runtime;
@@ -60,14 +70,16 @@ services:
       - app_exports:/app/exports
     depends_on:
       funasr:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       # /health 是只读端点，不依赖 DB 写；用于容器健康检查
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 60s
+      # 60s 不够模型首冷启下载；funasr 模型拉满可达 90s+，app 启动前需
+      # 等 funasr 真 ready（service_healthy 兜底）。app 自己冷启 5s 即可。
+      start_period: 30s
 
 volumes:
   app_data:

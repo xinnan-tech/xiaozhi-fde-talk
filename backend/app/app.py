@@ -142,7 +142,16 @@ def create_app() -> FastAPI:
             await _engine.dispose()
             logger.info("应用已关闭")
 
-    app = FastAPI(title="XiaoZhi FDE Talk", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(
+        title="XiaoZhi FDE Talk",
+        version="1.0.0",
+        lifespan=lifespan,
+        # prod 关闭 Swagger UI / ReDoc / OpenAPI schema：避免把全部 API 形状
+        # （含 /api/v1/admin/* 路径与 DTO 结构）暴露给公网。dev/test 保留便于对接。
+        docs_url=None if get_settings().env == "prod" else "/docs",
+        redoc_url=None if get_settings().env == "prod" else "/redoc",
+        openapi_url=None if get_settings().env == "prod" else "/openapi.json",
+    )
 
     from fastapi.middleware.cors import CORSMiddleware
     settings = get_settings()

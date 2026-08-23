@@ -28,6 +28,35 @@ def test_cors_middleware_registered_once():
     assert len(cors) == 1, f"CORSMiddleware 注册了 {len(cors)} 次"
 
 
+# ---- OpenAPI/Swagger 暴露面：prod 必须关闭 /docs /redoc /openapi.json ----
+
+
+def test_docs_url_hidden_in_prod(monkeypatch):
+    """prod 模式：FastAPI 不暴露 Swagger/ReDoc/OpenAPI 任何端点。"""
+    import app.app as app_mod
+
+    monkeypatch.setattr(
+        app_mod, "get_settings",
+        lambda: SimpleNamespace(env="prod",
+                                cors_origins="https://talk.example.com",
+                                serve_frontend=False),
+    )
+    app = app_mod.create_app()
+    assert app.docs_url is None
+    assert app.redoc_url is None
+    assert app.openapi_url is None
+
+
+def test_docs_url_visible_in_dev():
+    """dev 模式：Swagger UI/ReDoc/OpenAPI 默认端点都可用，便于联调。"""
+    from app.app import create_app
+
+    app = create_app()
+    assert app.docs_url == "/docs"
+    assert app.redoc_url == "/redoc"
+    assert app.openapi_url == "/openapi.json"
+
+
 # ---- JWT：decode 必须校验 issuer（防止同密钥签发的其它系统 token 混入） ----
 # jwt_secret 由 lifespan 从 DB 注入，单测里为 None → patch 掉 settings
 

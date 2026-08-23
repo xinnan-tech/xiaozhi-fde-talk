@@ -28,6 +28,20 @@ class RegistrationStatusResponse(BaseModel):
     allow_registration: bool
 
 
+# 4-32 位字母/数字/下划线/连字符；与 User.username 列对齐。
+# 注意：service.register_user 内部还会 .lower() 归一，pydantic 这层只管形态校验。
+_USERNAME_RE = r"^[A-Za-z0-9_-]{4,32}$"
+
+
+class RegisterRequest(BaseModel):
+    """POST /auth/register 请求体。"""
+    username: str = Field(pattern=_USERNAME_RE)
+    # 8 是 password_policy.MIN_LENGTH，72 是 bcrypt 字节上限——超长静默截断或抛裸
+    # ValueError 都不友好，前置拒绝。
+    password: str = Field(min_length=8, max_length=72)
+    confirm_password: str = Field(min_length=8, max_length=72)
+
+
 class AdminPasswordChangeRequest(BaseModel):
     """P2-7: admin 改指定用户密码（独立于 ConfigStore.demo_password）。"""
     username: str

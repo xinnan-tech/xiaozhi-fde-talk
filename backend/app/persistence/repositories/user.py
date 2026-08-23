@@ -57,15 +57,26 @@ class UserRepository:
         _pwd_cache[user_id] = (time.monotonic(), value)
         return value
 
-    async def create(self, db: AsyncSession, username: str, password_hash: str) -> User:
+    async def create(
+        self, db: AsyncSession, username: str, password_hash: str, *, role: str = "user"
+    ) -> User:
+        """新建用户。
+
+        边界 .lower() 归一 username（与 get_by_username 对齐——防 MySQL 默认
+        collation 撞库 + 跨方言一致）。
+        不在内部 commit——由调用方控制事务边界（register_user 整段需要 dialect 锁
+        包住 count + insert，提前 commit 会让 PG pg_advisory_xact_lock 提前释放，
+        失去并发首注册双 admin 防护）。
+        """
         user = User(
             id=str(uuid.uuid4()),
-            username=username,
+            username=username.lower(),
             password_hash=password_hash,
             password_changed_at=datetime.now(timezone.utc),
+            role=role,
         )
         db.add(user)
-        await db.commit()
+        await db.flush()  # 让 INSERT 落库 + 触发 unique 约束（IntegrityError 抛给调用方）
         # 新建用户不在缓存中——无需主动失效；下次 get_pwd_changed_at 自然落库
         return user
 

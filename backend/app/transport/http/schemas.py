@@ -51,6 +51,16 @@ class AdminResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=72)
 
 
+class ChangePasswordRequest(BaseModel):
+    """普通用户自助改密：必须先验证旧密码。
+
+    不限 admin role——任何持有效 token 的登录用户都能改自己密码。
+    旧密码错误 → 401；新密码强度不通过 → 400（路由层 validate_password_strength）。
+    """
+    old_password: str = Field(min_length=1, max_length=72)
+    new_password: str = Field(min_length=8, max_length=72)
+
+
 class AdminUserInfo(BaseModel):
     """admin 列用户端点的响应项。显式不含 password_hash（防泄漏）。"""
     id: str

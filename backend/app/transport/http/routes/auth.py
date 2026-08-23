@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config_store import get_config_store
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
+from app.core.password_policy import validate_password_strength
 from app.core.retry import RateLimiter
+from app.core.security import verify_password_async
 from app.persistence.db import get_db
 from app.persistence.models import User
 from app.persistence.repositories.user import user_repo
@@ -19,6 +21,7 @@ from app.services.auth.service import authenticate_user, register_user as svc_re
 from app.services.auth.token import create_access_token
 from app.transport.http.dependencies import get_current_user
 from app.transport.http.schemas import (
+    ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
     RegisterRequest,
@@ -123,3 +126,29 @@ async def register(
         access_token=token,
         user=UserInfo(id=current.user_id, username=current.username, role=current.role),
     )
+
+
+@router.post("/auth/change-password", status_code=200)
+async def change_password(
+    body: ChangePasswordRequest,
+    current: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """普通用户自助改密：验证旧密码 + 写新密码 + bump password_changed_at。
+
+    不限 admin——任何持有效 token 的登录用户都能调。复用 user_repo.update_password_auto
+    （自带事务 + 失效 _pwd_cache）→ 旧 token 的 pwd_ver 不匹配 → 立即吊销。
+
+    旧密码错误 → 401；新密码强度不合规 → 400（validate_password_strength 抛 I18nError）。
+    """
+    user = await user_repo.get_by_id(db, current.user_id)
+    if user is None or not await verify_password_async(body.old_password, user.password_hash):
+        raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
+    validate_password_strength(body.new_password)
+    # 走 update_password_auto：独立 Session + 刷 password_changed_at + _pwd_cache.pop
+    # 复用 admin 改密端点同款路径，避免两条密码写路径并存导致行为漂移。
+    ok = await user_repo.update_password_auto(user.username, body.new_password)
+    if not ok:
+        # 极窄边界：token 解析成功但 user 在此期间被删；返 401 提示重新登录。
+        raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
+    return {"ok": True}

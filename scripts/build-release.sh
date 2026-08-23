@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-VERSION="${1:-$(grep -oP '(?<=version=")[^"]+' frontend/package.json | head -1)}"
+VERSION="${1:-$(python -c "import json,sys;print(json.load(open('frontend/package.json'))['version'])" 2>/dev/null || echo 0.1.0)}"
 OUT="xiaozhi-fde-talk-${VERSION}.tar.gz"
 
 echo "==> 生成 $OUT"

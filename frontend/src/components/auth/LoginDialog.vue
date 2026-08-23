@@ -3,29 +3,11 @@ import { computed, reactive, ref, watch } from "vue";
 import type { FormInstance, FormRules } from "element-plus/es/components/form";
 import { useI18n } from "vue-i18n";
 import { message } from "@/utils/message";
+import { extractBackendError } from "@/utils/error";
 import { useUserStoreHook } from "@/store/modules/user";
 import { registrationStatusApi } from "@/api/user";
 import User from "~icons/ep/user";
 import Lock from "~icons/ep/lock";
-
-// 后端错误响应里 detail 字段三种形态 → 用户可读句子数组：
-// - pydantic 422：[{loc:[...,field], msg, type}] 列表
-// - I18nError 4xx：已本地化字符串（直接返回）
-// - FastAPI HTTPException：字符串 detail
-// 取不到则返回空数组，由调用方走通用兜底文案。
-function extractReadableErrors(detail: unknown): string[] {
-  if (typeof detail === "string" && detail.trim()) return [detail];
-  if (Array.isArray(detail) && detail.length > 0) {
-    const out = detail
-      .map((d: { msg?: string; loc?: unknown[] }) => {
-        const field = Array.isArray(d?.loc) && d.loc.length > 1 ? String(d.loc[d.loc.length - 1]) : "";
-        return field ? `${field}: ${d.msg}` : d.msg;
-      })
-      .filter((m): m is string => typeof m === "string" && m.trim().length > 0);
-    return out;
-  }
-  return [];
-}
 
 defineOptions({ name: "LoginDialog" });
 
@@ -108,19 +90,17 @@ async function submit(formEl: FormInstance | undefined) {
     }
     emit("update:modelValue", false);
   } catch (e: unknown) {
-    // 后端两类可读错误：
-    // 1. pydantic 422 → detail 是 [{loc:[body,field],msg,type}] 列表
-    // 2. I18nError 4xx → detail 是已本地化的字符串（auth.username_taken 等）
-    // 优先把它们展示给用户；否则走通用「注册/登录失败」兜底。
-    if (mode.value === "register") {
-      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-      const messages = extractReadableErrors(detail);
-      if (messages.length) {
-        message(messages.join("；"), { type: "error" });
-        return;
-      }
-    }
-    message(mode.value === "login" ? t("auth.login_failed") : t("auth.register_failed"), { type: "error" });
+    // 后端 detail 三种形态（I18nError / pydantic 422 / HTTPException）见
+    // @/utils/error.ts；统一交给 extractBackendError 解析，取不到再走 i18n 兜底。
+    // 这里 login / register 都读 detail，避免「用户名或密码错误」被泛化为
+    // 「登录失败，请稍后重试」。
+    message(
+      extractBackendError(
+        e,
+        mode.value === "login" ? t("auth.login_failed") : t("auth.register_failed")
+      ),
+      { type: "error" }
+    );
   } finally {
     loading.value = false;
   }

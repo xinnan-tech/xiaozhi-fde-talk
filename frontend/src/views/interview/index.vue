@@ -16,6 +16,7 @@ import VideoPlay from "~icons/ep/video-play";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import ReSegmented from "@/components/ReSegmented";
 import LayFooter from "@/layout/components/lay-footer/index.vue";
+import { extractBackendError } from "@/utils/error";
 import {
   endInterviewApi,
   firstBatchInterviewApi,
@@ -724,9 +725,11 @@ const handleIgnoreSuggestion = (itemId: string) => {
       if (!websocket.ignoreCoachingItem(card.itemId)) {
         await ignoreInterviewItemApi(getInterviewSessionId(), card.itemId);
       }
-    } catch {
+    } catch (e: unknown) {
       restoreIgnoredSuggestion(itemId);
-      ElMessage.error(t("interview.suggestion.ignore_failed"));
+      ElMessage.error(
+        extractBackendError(e, t("interview.suggestion.ignore_failed"))
+      );
     }
   }, 3000);
 };
@@ -744,8 +747,10 @@ const handleUnignoreSuggestion = async (itemId: string) => {
   try {
     await unignoreInterviewItemApi(getInterviewSessionId(), itemId);
     restoreIgnoredSuggestion(itemId);
-  } catch {
-    ElMessage.error(t("interview.suggestion.unignore_failed"));
+  } catch (e: unknown) {
+    ElMessage.error(
+      extractBackendError(e, t("interview.suggestion.unignore_failed"))
+    );
   }
 };
 
@@ -892,8 +897,8 @@ const handleEndInterview = async () => {
 
   try {
     await endInterviewApi(getInterviewSessionId());
-  } catch {
-    ElMessage.error(t("interview.end_failed"));
+  } catch (e: unknown) {
+    ElMessage.error(extractBackendError(e, t("interview.end_failed")));
     return;
   }
 
@@ -938,8 +943,10 @@ const kickFirstBatchIfNeeded = (detail: InterviewDetailType) => {
       } else {
         ElMessage.warning(t("msg.first_batch_partial"));
       }
-    } catch {
-      ElMessage.warning(t("msg.first_batch_partial"));
+    } catch (e: unknown) {
+      ElMessage.warning(
+        extractBackendError(e, t("msg.first_batch_partial"))
+      );
     } finally {
       if (route.params.id === sessionId) {
         isFirstBatchPending.value = false;

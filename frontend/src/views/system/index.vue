@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { extractBackendError } from "@/utils/error";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { usePermissionStoreHook } from "@/store/modules/permission";
@@ -267,11 +268,8 @@ const openSelfCheck = () => {
 };
 
 const getErrorMessage = (error: unknown) => {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    return String(error.message);
-  }
-  return t("system.diagnostics.request_failed");
+  // 后端 I18nError 已在 detail 里返回精确文案；其它异常再退回到 message / 兜底。
+  return extractBackendError(error, t("system.diagnostics.request_failed"));
 };
 
 const getOrCreateResult = (key: SelfCheckResult["key"]) => {

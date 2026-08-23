@@ -3,6 +3,7 @@ import { computed, reactive, ref } from "vue";
 import type { FormInstance, FormRules } from "element-plus/es/components/form";
 import { useI18n } from "vue-i18n";
 import { message } from "@/utils/message";
+import { extractBackendError } from "@/utils/error";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { changePasswordApi } from "@/api/user";
@@ -73,13 +74,14 @@ async function submit(formEl: FormInstance | undefined) {
     dialogStore.openLogin();
     reset();
   } catch (e: unknown) {
-    // 401 → 旧密码错或 token 缺失；400 → 新密码强度不合规；其余走通用失败。
-    const status = (e as { response?: { status?: number } })?.response?.status;
-    if (status === 401) {
-      message(t("auth.change_password_old_wrong"), { type: "error" });
-    } else {
-      message(t("auth.change_password_failed"), { type: "error" });
-    }
+    // 后端 I18nError 已返回精确文案（"当前密码错误"/新密码强度不足等），
+    // 直接交给 helper 解析 detail；取不到再走 i18n 兜底。
+    // 401 业务错（response.data.code 非空）由 http 拦截器按业务 401 处理，
+    // 不会强制登出；裸 401（JWT 过期等）由拦截器清 token + 提示重登，
+    // 这里看到的 detail 仍是后端返回的字符串。
+    message(extractBackendError(e, t("auth.change_password_failed")), {
+      type: "error"
+    });
   } finally {
     loading.value = false;
   }

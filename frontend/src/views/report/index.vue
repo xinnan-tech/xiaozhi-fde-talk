@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import MarkdownIt from "markdown-it";
 import ReSegmented from "@/components/ReSegmented";
+import { extractBackendError } from "@/utils/error";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import {
   deleteInterviewApi,
@@ -167,9 +168,12 @@ const handleExportReport = async (
     link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
-  } catch {
+  } catch (e: unknown) {
     ElMessage.error(
-      t("report.export_failed", { extension: extension.toUpperCase() })
+      extractBackendError(
+        e,
+        t("report.export_failed", { extension: extension.toUpperCase() })
+      )
     );
   }
 };
@@ -196,7 +200,9 @@ const handleDeleteInterview = async () => {
     await router.push("/home");
   } catch (error) {
     if (error !== "cancel" && error !== "close") {
-      ElMessage.error(t("report.delete_failed"));
+      ElMessage.error(
+        extractBackendError(error, t("report.delete_failed"))
+      );
     }
   }
 };

@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { message, messageBox } from "@/utils/message";
+import { extractBackendError } from "@/utils/error";
 import { listUsersApi, resetPasswordApi, type AdminUserInfo } from "@/api/admin";
 import { registrationStatusApi } from "@/api/user";
 
@@ -56,8 +57,12 @@ async function submitReset() {
     await resetPasswordApi(resetTarget.value.id, resetForm.new_password);
     message(t("users.reset_password_success"), { type: "success" });
     resetDialogVisible.value = false;
-  } catch {
-    message(t("users.reset_password_failed"), { type: "error" });
+  } catch (e: unknown) {
+    // 后端 I18nError 已返回精确文案（用户不存在 / 新密码不合规等），
+    // 交给 helper 解析；取不到再走 i18n 兜底。
+    message(extractBackendError(e, t("users.reset_password_failed")), {
+      type: "error"
+    });
   } finally {
     resetting.value = false;
   }

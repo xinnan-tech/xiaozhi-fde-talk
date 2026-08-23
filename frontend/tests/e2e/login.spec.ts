@@ -40,10 +40,12 @@ test.describe("login flow", () => {
     await dialog.locator(".login-btn").click()
     // dialog 仍在（登录失败不会关闭）
     await expect(dialog).toBeVisible({ timeout: 5_000 })
-    // Element Plus error message：前端 locale 默认 zh-CN 是「登录失败，请稍后再试」，
-    // en-US 是 "Sign-in failed. Please try again later."——两条 regex 都覆盖
+    // 错误文案候选：后端 I18nError 在 zh-CN 是「用户名或密码错误」，
+    // en-US 是 "Username or password is incorrect"；旧的兜底 i18n
+    // 是「登录失败，请稍后重试」/ "Sign-in failed. Please try again later."。
+    // 只断言"出现了某个用户可见的错误"，不绑死具体文案。
     await expect(page.locator(".el-message")).toContainText(
-      /登录失败|登录|Sign-in failed|failed|失败|invalid|error/i,
+      /登录失败|登录|Sign-in failed|failed|失败|invalid|error|用户名或密码|Username or password/i,
       { timeout: 5_000 }
     )
   })

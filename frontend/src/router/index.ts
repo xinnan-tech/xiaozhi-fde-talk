@@ -3,6 +3,7 @@ import NProgress from "@/utils/progress";
 import { buildHierarchyTree } from "@/utils/tree";
 import remainingRouter from "./modules/remaining";
 import { usePermissionStoreHook } from "@/store/modules/permission";
+import { useUserStoreHook } from "@/store/modules/user";
 import { isUrl, openLink, cloneDeep, isAllEmpty } from "@pureadmin/utils";
 import {
   ascending,
@@ -95,7 +96,7 @@ export function resetRouter() {
 }
 
 /** 路由白名单 */
-const whiteList = ["/home", "/system", "/system/config"];
+const whiteList = ["/home", "/login"];
 
 router.beforeEach((to: ToRouteType, _from, next) => {
   to.meta.loaded = loadedPaths.has(to.path);
@@ -125,6 +126,15 @@ router.beforeEach((to: ToRouteType, _from, next) => {
     to.path === "/login" ? next(_from.fullPath || "/home") : next();
   }
   if (getToken()?.accessToken) {
+    // meta.roles 守卫：路由声明需要的角色，非授权用户跳 /403
+    const requiredRoles = (to.meta?.roles as string[] | undefined) ?? [];
+    if (requiredRoles.length > 0) {
+      const userRole = useUserStoreHook().role;
+      if (!requiredRoles.includes(userRole ?? "user")) {
+        next({ path: "/403" });
+        return;
+      }
+    }
     if (_from?.name) {
       // name为超链接
       if (externalLink) {

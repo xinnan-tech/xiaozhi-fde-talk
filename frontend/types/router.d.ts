@@ -102,6 +102,8 @@ declare global {
       showLink?: boolean;
       /** 菜单升序排序，值越高排的越后（只针对顶级路由）`可选` */
       rank?: number;
+      /** 页面级别权限设置（路由声明需要的角色，未授权用户跳 /403） `可选` */
+      roles?: Array<string>;
     };
     /** 子路由配置项 */
     children?: Array<RouteChildrenConfigsTable>;

@@ -9,7 +9,8 @@ export default {
     icon: "tabler:settings-filled",
     title: "系统配置",
     titleKey: "menu.system",
-    rank: 2
+    rank: 2,
+    roles: ["admin"]
   },
   children: [
     {
@@ -18,7 +19,8 @@ export default {
       component: () => import("@/views/system/index.vue"),
       meta: {
         title: "系统配置",
-        titleKey: "menu.system"
+        titleKey: "menu.system",
+        roles: ["admin"]
         // keepAlive: true // 开启缓存
       }
     }

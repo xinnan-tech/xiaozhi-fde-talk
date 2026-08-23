@@ -139,3 +139,63 @@ def test_asr_feed_fail_routes_to_server():
     r = _extract_asr_error(exc)
     assert r["code"] == "server"
     assert r["i18n_key"] == Keys.DIAG_ASR_INVOKE_FAIL_TYPED.value
+
+
+# ---------- regression: user-facing message must not leak I18nError debug repr ----------
+#
+# I18nError.__str__ 故意返回 "i18n:<code>{<params>}" 给日志看，
+# 之前 _extract_llm_error / _extract_asr_error 直接拿 str(exc) 拼进模板，
+# 会把内部字段名（last_err / snippet / retries 等）一起泄漏给前端。
+# 这些测试断言 message 字段对前端用户干净。
+
+def test_llm_retry_exhausted_message_does_not_leak_debug_repr():
+    exc = I18nError(Keys.LLM_RETRY_EXHAUSTED.value, http_status=502,
+                    retries=1, last_err="ConnectError: All connection attempts failed")
+    r = _extract_llm_error(exc)
+    assert r["code"] == "server"
+    msg = r["message"]
+    # 不应泄漏 I18nError 的调试串
+    assert "i18n:" not in msg
+    assert "{" not in msg or "{" not in msg.split("LLM 调用失败：", 1)[-1]
+    # 真实底层错误必须透出给前端
+    assert "ConnectError: All connection attempts failed" in msg
+
+
+def test_llm_not_configured_message_does_not_leak_debug_repr():
+    exc = I18nError(Keys.LLM_NOT_CONFIGURED.value, http_status=502,
+                    base_url="", api_key="", model="")
+    r = _extract_llm_error(exc)
+    assert r["code"] == "config_missing"
+    assert "i18n:" not in r["message"]
+
+
+def test_llm_timeout_message_does_not_leak_debug_repr():
+    exc = I18nError(Keys.LLM_TIMEOUT.value, http_status=504, budget=15)
+    r = _extract_llm_error(exc)
+    assert r["code"] == "unreachable"
+    assert "i18n:" not in r["message"]
+
+
+def test_llm_no_json_block_message_does_not_leak_debug_repr():
+    exc = I18nError(Keys.LLM_NO_JSON_BLOCK.value, http_status=502,
+                    snippet="model said lol")
+    r = _extract_llm_error(exc)
+    assert r["code"] == "server"
+    assert "i18n:" not in r["message"]
+    # snippet 应该透出
+    assert "model said lol" in r["message"]
+
+
+def test_asr_dead_message_does_not_leak_debug_repr():
+    exc = I18nError(Keys.ASR_DEAD.value, http_status=502)
+    r = _extract_asr_error(exc)
+    assert r["code"] == "server"
+    assert "i18n:" not in r["message"]
+
+
+def test_asr_feed_fail_message_does_not_leak_debug_repr():
+    exc = I18nError(Keys.ASR_FEED_FAIL.value, http_status=502, err="send timeout")
+    r = _extract_asr_error(exc)
+    assert r["code"] == "server"
+    assert "i18n:" not in r["message"]
+    assert "send timeout" in r["message"]

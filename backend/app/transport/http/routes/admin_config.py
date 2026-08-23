@@ -16,7 +16,7 @@ from app.transport.http.dependencies import require_admin
 
 router = APIRouter(prefix="/admin/config", tags=["admin"])
 
-_GROUPS = ("llm", "asr", "coach", "auth", "session", "ocr")
+_GROUPS = ("llm", "asr", "ocr", "coach", "auth", "session")
 
 
 @router.get("")

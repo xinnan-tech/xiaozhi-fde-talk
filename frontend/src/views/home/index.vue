@@ -328,7 +328,7 @@ watch(
         </div>
         <el-dropdown
           v-else
-          trigger="click"
+          trigger="hover"
           placement="bottom-end"
           class="user-avatar-dropdown"
           @command="handleAvatarCommand"

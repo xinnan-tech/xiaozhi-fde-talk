@@ -516,6 +516,14 @@
   "diag.latency": "{ms} ms",
 
   "about.title": "关于",
+  "about.product_name": "小智方糖xiaozhi-fde-talk",
+  "about.summary": "不只是录音转写，而是会\"听你聊、提示你问\"的 AI 访谈搭档",
+  "about.version": "当前版本",
+  "about.license": "开源协议",
   "about.maintainer": "维护者",
-  "about.copyright": "版权"
+  "about.copyright": "版权与许可",
+  "about.rights": "版权所有",
+  "about.repository": "代码仓库",
+  "about.license_detail": "协议详情",
+  "about.license_full": "Apache License, Version 2.0, January 2004"
 }

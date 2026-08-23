@@ -71,6 +71,20 @@ def _result(code: str, **kw: Any) -> dict:
     return out
 
 
+def _exc_detail(exc: I18nError, *preferred_keys: str, fallback: str = "") -> str:
+    """从 ``I18nError.params`` 里挑最有料的字段填进模板。
+
+    不能用 ``str(exc)``——``I18nError.__str__`` 故意返回调试串
+    ``i18n:<code>{<params>}``，直接拼进用户可见的 ``message`` 会把内部字段名
+    （``last_err`` / ``snippet`` 等）一并泄漏给前端。
+    """
+    for k in preferred_keys:
+        v = (exc.params or {}).get(k)
+        if v:
+            return str(v)[:200]
+    return fallback or exc.localized()
+
+
 # ---------- 错误归因 ----------
 
 def _extract_llm_error(exc: Exception) -> dict[str, Any]:
@@ -91,12 +105,17 @@ def _extract_llm_error(exc: Exception) -> dict[str, Any]:
         if code == Keys.LLM_NOT_CONFIGURED.value:
             return _result("config_missing",
                            key=Keys.DIAG_LLM_CONFIG_MISSING_RAW,
-                           key_params={"detail": str(exc)})
+                           key_params={"detail": _exc_detail(
+                               exc, "base_url", "api_key", "model",
+                               fallback=", ".join(
+                                   f"{k}={v!r}" for k, v in (exc.params or {}).items()
+                               ),
+                           )})
         if code == Keys.LLM_TIMEOUT.value:
             return _result("unreachable",
                            key=Keys.DIAG_LLM_UNREACHABLE_TYPED,
                            key_params={"type": "TimeoutError",
-                                       "detail": str(exc)})
+                                       "detail": _exc_detail(exc, "budget")})
         if code == Keys.LLM_NON_RETRYABLE.value:
             status = int(params.get("status", 0) or 0)
             snippet = (params.get("body") or "")[:200]
@@ -118,14 +137,16 @@ def _extract_llm_error(exc: Exception) -> dict[str, Any]:
         if code == Keys.LLM_RETRY_EXHAUSTED.value:
             return _result("server",
                            key=Keys.DIAG_LLM_INVOKE_FAIL,
-                           key_params={"detail": str(exc)})
+                           key_params={"detail": _exc_detail(exc, "last_err")})
         # JSON 解析 / 字段缺失 / schema 不匹配：归 server（provider 行为异常）
         if code in (Keys.LLM_NO_JSON_BLOCK.value,
                     Keys.LLM_INVALID_JSON.value,
                     Keys.LLM_SCHEMA_MISMATCH.value):
             return _result("server",
                            key=Keys.DIAG_LLM_INVOKE_FAIL,
-                           key_params={"detail": str(exc)})
+                           key_params={"detail": _exc_detail(
+                               exc, "snippet", "err", "json_str",
+                           )})
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
         body = exc.response.text or ""
@@ -185,12 +206,12 @@ def _extract_asr_error(exc: Exception) -> dict[str, Any]:
             return _result("server",
                            key=Keys.DIAG_ASR_DEAD,
                            key_params={"type": type(exc).__name__,
-                                       "detail": str(exc)[:200]})
+                                       "detail": _exc_detail(exc, "reason")})
         if code == Keys.ASR_FEED_FAIL.value:
             return _result("server",
                            key=Keys.DIAG_ASR_INVOKE_FAIL_TYPED,
                            key_params={"type": type(exc).__name__,
-                                       "detail": str(exc)[:200]})
+                                       "detail": _exc_detail(exc, "reason")})
     msg = str(exc)
     if isinstance(exc, asyncio.TimeoutError):
         return _result("unreachable", key=Keys.DIAG_ASR_TIMEOUT)

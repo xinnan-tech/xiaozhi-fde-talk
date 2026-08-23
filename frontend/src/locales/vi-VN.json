@@ -516,6 +516,14 @@
   "diag.latency": "{ms} ms",
 
   "about.title": "Giới thiệu",
+  "about.product_name": "xiaozhi-fde-talk",
+  "about.summary": "Không chỉ chuyển giọng nói thành văn bản — một trợ lý phỏng vấn AI biết lắng nghe và gợi ý câu hỏi tiếp theo.",
+  "about.version": "Phiên bản hiện tại",
+  "about.license": "Giấy phép mã nguồn mở",
   "about.maintainer": "Người bảo trì",
-  "about.copyright": "Bản quyền"
+  "about.copyright": "Bản quyền & Giấy phép",
+  "about.rights": "Đã đăng ký bản quyền",
+  "about.repository": "Kho mã nguồn",
+  "about.license_detail": "Chi tiết giấy phép",
+  "about.license_full": "Apache License, Version 2.0, January 2004"
 }

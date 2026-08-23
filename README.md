@@ -40,7 +40,8 @@ docker compose up -d funasr
 docker compose logs -f funasr
 ```
 
-后端默认 ASR 地址为 `wss://localhost:10096`，本地开发开箱即连。
+后端默认 ASR 地址为 `wss://localhost:10096`，由系统配置 `asr.ws_url` 提供
+（首次启动时自动种入默认值），不在 `.env` 里配——本地开发开箱即连。
 
 #### 1.2. 启动后端
 
@@ -112,10 +113,10 @@ backend/app/
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `ENV` | `dev` | `dev`/`test`/`prod`。prod 启动期强校验 DB 与 ASR 地址 |
+| `ENV` | `dev` | `dev`/`test`/`prod`。prod 启动期强校验 DB 类型 |
 | `DB_URL` | `sqlite+aiosqlite:///./xiaozhi_fde_talk.db` | prod 必须切 MySQL/PG |
 | `CORS_ORIGINS` | dev 默认 `localhost:5173`，prod 必填 | 逗号分隔的白名单域名 |
-| `ASR_WS_URL` | `wss://localhost:10096` | prod 禁止指向 localhost |
+| `asr.ws_url`（系统配置项） | `wss://localhost:10096` | 在 admin 后台「⚙️ 后端配置」改；prod 部署后必须改成实际可达的 FunASR 地址 |
 | `JWT_SECRET` | 启动自动生成写入 DB | 无需手配；备份恢复时从 DB 读 |
 | `SERVE_FRONTEND` | `true` | true=同进程托管 SPA，false=纯 API |
 
@@ -139,7 +140,9 @@ docker compose ps                # 健康检查状态
 
 - `ENV=dev` 是默认值；切到 `prod` 必须同时把 `DB_URL` 换成 `mysql+aiomysql://` 或 `postgresql+asyncpg://`，否则 `Settings._validate_prod` 会在启动期直接拒绝（prod 不允许 SQLite）。
 - `CORS_ORIGINS` 在 shell 里 `export CORS_ORIGINS=https://talk.your-company.com` 后再 `docker compose up` 即可生效；默认值 `http://localhost:5173` 仅供本地开发。
-- `ASR_WS_URL` 容器内默认连 `ws://funasr:10095`（compose 网络名），无需改。
+- ASR 地址由系统配置 `asr.ws_url` 管理，不走环境变量。首次启动后到 admin
+  后台 → 「⚙️ 后端配置」把 `asr.ws_url` 改成 `ws://funasr:10095`（compose
+  网络名）即可生效；默认值 `wss://localhost:10096` 仅适合本机直起 FunASR。
 
 持久化：
 

@@ -99,16 +99,27 @@ class TemplateListResponse(BaseModel):
 
 
 class InvokeSkillRequest(BaseModel):
+    # extra="forbid" 防止 inputs 里塞任意 key 被静默忽略——skill 执行器读 inputs
+    # 字段做 LLM 提示，恶意 key 可能引诱 LLM 偏离原提示词意图。
+    model_config = ConfigDict(extra="forbid")
+
     inputs: dict = {}
 
 
 class CreateInterviewRequest(BaseModel):
+    # extra="forbid" 防止 user_id / template_version 等隐字段被注入形成静默越权
+    # （路径已由 get_current_user 提供 user.user_id，body 重复 user_id 必拒）。
+    model_config = ConfigDict(extra="forbid")
+
     template_id: str
     base_info: dict = {}
     goal: Optional[str] = None
 
 
 class UpdateInterviewRequest(BaseModel):
+    # extra="forbid" 防止 user_id / status 等被注入改他人访谈或跳状态机。
+    model_config = ConfigDict(extra="forbid")
+
     base_info: Optional[dict] = None
     goal: Optional[str] = None
 
@@ -121,6 +132,10 @@ class InterviewStatisticsResponse(BaseModel):
 
 
 class ExtractRequest(BaseModel):
+    # extra="forbid" 防止 system_prompt / template_id 注入影响 LLM 行为
+    # （template_id 已被字段声明；多余 system_prompt 等会被 Pydantic 拒收）。
+    model_config = ConfigDict(extra="forbid")
+
     transcript: str
     template_id: str
     fields: list[str]
@@ -134,6 +149,9 @@ class ExtractResponse(BaseModel):
 
 
 class OCRRequest(BaseModel):
+    # extra="forbid" 防止 filename / user_id 等附加字段被注入（图片元数据污染）。
+    model_config = ConfigDict(extra="forbid")
+
     image_base64: str  # base64 编码的图片数据（不含 data URL 前缀）
 
 

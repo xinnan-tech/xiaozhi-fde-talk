@@ -181,8 +181,6 @@ function onKeydown(event: KeyboardEvent) {
               type="primary"
               @click="mode = 'register'"
             >{{ t("auth.go_register") }}</el-link>
-            <span v-if="registrationAvailable !== false" class="mx-2 text-[#ccc]">|</span>
-            <!-- 找回密码入口下线：改密走登录后头像菜单，旧入口隐藏。 -->
           </template>
           <template v-else>
             <el-link type="primary" @click="mode = 'login'">{{ t("auth.signin_instead") }}</el-link>

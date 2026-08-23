@@ -42,12 +42,26 @@ def mount(app: FastAPI) -> None:
         )
 
     if get_settings().env != "prod":
+        # ─────────────────────────────────────────────────────────────────
+        # ⚠️ 安全警告：本端点仅在 env != "prod" 时挂载。一旦 prod 部署误把
+        # ENV 设成 "dev" 或 "test"（_validate_prod 只检查 DB_URL + ASR_WS_URL，
+        # 不替 ENV 把关），/ws/v1/echo 0 鉴权直接对外可达。
+        # 硬保险：除 prod 不挂载外，连接期再判 ws.client.host，必须是 loopback
+        # （127.0.0.1 / ::1）。dev / test 也强制本机——若同事误把 ENV=dev 开放到
+        # 0.0.0.0 仍能挡。客户端能伪造 X-Forwarded-For，但 ws.client.host 是 socket
+        # 真实对端，X-Forwarded-* 拿不到（HTTP 层概念）。
+        # ─────────────────────────────────────────────────────────────────
         @app.websocket("/ws/v1/echo")
         async def ws_echo(ws: WebSocket):
             """最简 WS 回显，仅供联调测试。
 
-            零鉴权且无空闲超时，连接可被无限挂住——prod 不挂载本端点。
+            0 鉴权 + 无空闲超时。prod 不挂载；dev/test 还加 IP 锁：仅 loopback。
             """
+            client = ws.client.host if ws.client else "unknown"
+            if client not in {"127.0.0.1", "::1", "localhost"}:
+                logger.warning("/ws/v1/echo 非 loopback 接入拒绝：%s", client)
+                await ws.close(code=1008, reason="loopback only")
+                return
             await ws.accept()
             try:
                 while True:

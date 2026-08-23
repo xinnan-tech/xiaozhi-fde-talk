@@ -38,7 +38,7 @@ def _load_settings_or_exit():
     在 import 阶段抛出，绕过本函数的友好提示。
     """
     try:
-        return get_settings()
+        settings = get_settings()
     except Exception:  # noqa: BLE001
         print(
             f"\n[配置错误] {_startup_msg(Keys.STARTUP_CONFIG_INVALID)}\n",
@@ -46,6 +46,21 @@ def _load_settings_or_exit():
             flush=True,
         )
         os._exit(2)
+    # prod 模式额外扫一遍 env，拼错的 DATABSE_URL 等大写会被识别并拒启动。
+    # dev/test 不强制，方便本地临时覆盖 / CI 注入怪变量。
+    if settings.env == "prod":
+        try:
+            from app.core.settings import check_prod_no_typo_env
+            check_prod_no_typo_env(strict=True)
+        except Exception as e:  # noqa: BLE001
+            from app.core.i18n.errors import I18nError
+            if isinstance(e, I18nError):
+                msg = e.localized()
+            else:
+                msg = str(e)
+            print(f"\n[配置错误] {msg}\n", file=sys.stderr, flush=True)
+            os._exit(2)
+    return settings
 
 
 def main() -> None:

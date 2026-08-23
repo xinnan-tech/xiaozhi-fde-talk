@@ -90,5 +90,6 @@
   "settings.prod_asr_localhost": "生产环境的 ASR_WS_URL 不能指向 localhost/127.0.0.1，请填 FunASR 服务可达地址",
   "auth.refresh_invalid": "refresh token 无效",
   "auth.refresh_expired": "refresh token 已过期",
-  "auth.refresh_revoked": "refresh token 已被吊销"
+  "auth.refresh_revoked": "refresh token 已被吊销",
+  "settings.prod_typo_env": "生产环境检测到疑似拼写错的环境变量：{names}"
 }

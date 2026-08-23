@@ -8,6 +8,7 @@ system_config 表读取；缺失则自动生成并写回。
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Literal, Optional
 
@@ -84,6 +85,93 @@ class Settings(BaseSettings):
                                "ws://0.0.0.0", "wss://0.0.0.0")):
                 raise I18nError(Keys.SETTINGS_PROD_ASR_LOCALHOST, http_status=400)
         return self
+
+
+def _env_var_to_field_map() -> set[str]:
+    """Settings 类声明字段的「大写环境变量名」集合。
+
+    pydantic-settings 的字段名 + alias（如果有）都换成大写。prod 启动期检查
+    当前进程 env 里所有形如 ``FOO_BAR`` 的、且非空的值，是否都被 Settings 接住——
+    未接住（typo 如 ``DATABASE_URL`` 应是 ``DB_URL``）即拒启动。
+    """
+    out: set[str] = set()
+    for name, field in Settings.model_fields.items():
+        out.add(name.upper())
+        if isinstance(field.alias, str):
+            out.add(field.alias.upper())
+        # 多 alias 的情况：pydantic v2 用 validation_alias
+        va = getattr(field, "validation_alias", None)
+        if isinstance(va, str):
+            out.add(va.upper())
+    # 非 Settings 字段但被代码直接读 os.environ 的「隐性配置」——这些不在
+    # model_fields 里，但被 bootstrap / main.py / i18n 路径显式消费。
+    # 不收纳会让 prod 启动误报它们是 typo。
+    out.update({
+        "APP_ENV",                  # bootstrap.init_db(env=...) 主开关
+        "APP_DB_USE_ALEMBIC",       # bootstrap 兼容路径（prod 已强制）
+        "WEB_CONCURRENCY",          # uvicorn workers
+        "TESTING",                  # 未来 Pytest 全局钩子
+        "PYTEST_CURRENT_TEST",      # pytest 自身
+        "PYTEST_VERSION",
+    })
+    return out
+
+
+# 进程内 env 中与我们 Settings 同名/同前缀的「无关但合法」白名单：
+# 这些是被子进程 / shell / CI / docker compose 注入的全局变量，我们不强制接住
+# ——若强接每次升级都得维护白名单，跟「拒 typo」的初衷相违。策略：在 Pydantic
+# 走完 parse 后，比对 OS environ 里「大写」与已知字段名集合的差异——只取带下划线
+# 且全大写的疑似应用配置量；典型误拼如 ``DATABASE_URL``（应是 DB_URL）会被识别。
+_KNOWN_SYSTEM_ENV_PREFIXES = (
+    "PATH", "HOME", "USER", "SHELL", "LANG", "LC_", "PWD", "OLDPWD",
+    "TERM", "XDG_", "HOSTNAME", "LOGNAME", "MAIL", "EDITOR", "VISUAL",
+    "DISPLAY", "TMPDIR", "SSH_", "GIT_", "NIX_", "CARGO_", "GO",
+    "JAVA_", "NODE_", "PNPM_", "PIP_", "PYTHON", "VIRTUAL_ENV", "CONDA",
+    "LS_", "PROMPT", "KUBERNETES", "AWS_", "AZURE_", "GCP_", "GITHUB_",
+)
+
+
+def _is_app_setting_name(name: str) -> bool:
+    """粗筛：看起来像应用配置（带下划线 + 不在系统白名单）的 env 名。"""
+    if "_" not in name:
+        return False
+    # pytest / Python 解释器 / Claude Code / shell 内部状态等已知系统 / 工具变量直接放行
+    upper = name.upper()
+    for prefix in _KNOWN_SYSTEM_ENV_PREFIXES:
+        if upper.startswith(prefix):
+            return False
+    # Claude Code 与本机工具注入的大量 env（如 CLAUDE_CODE_SESSION_ID / ANTHROPIC_*）
+    # 与本应用无关——前缀白名单拦截即可。
+    if upper.startswith(("CLAUDE_", "ANTHROPIC_", "TAVILY_", "AI_", "AGENT_",
+                          "NIX_", "NVM_", "_CE_", "TMUX_", "DBUS_")):
+        return False
+    return True
+
+
+def check_prod_no_typo_env(strict: bool = False) -> list[str]:
+    """prod 模式：扫 OS environ，把不在 Settings 字段白名单的疑似应用配置 env 名列出。
+
+    返回值是「可能 typo 字段」清单。strict=True 时直接抛 I18nError 阻止启动；
+    strict=False 时仅打印警告，保留 dev 临时覆盖灵活性。
+    只在 settings.env == "prod" 时调用本函数。
+    """
+    from app.core.i18n.errors import I18nError
+    from app.core.i18n.messages import Keys
+
+    known = _env_var_to_field_map()
+    suspects: list[str] = []
+    for k in os.environ:
+        if not _is_app_setting_name(k):
+            continue
+        if k.upper() in known:
+            continue
+        suspects.append(k)
+    if not suspects:
+        return []
+    msg = f"未识别的 prod 环境变量（疑似拼写错）：{sorted(suspects)}"
+    if strict:
+        raise I18nError(Keys.SETTINGS_PROD_TYPO_ENV, http_status=400, names=msg)
+    return suspects
 
 
 @lru_cache(maxsize=1)

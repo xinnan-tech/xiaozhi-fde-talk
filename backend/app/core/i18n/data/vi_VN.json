@@ -90,5 +90,6 @@
   "settings.prod_asr_localhost": "ASR_WS_URL trong production không được trỏ tới localhost/127.0.0.1; hãy dùng địa chỉ FunASR có thể truy cập",
   "auth.refresh_invalid": "refresh token không hợp lệ",
   "auth.refresh_expired": "refresh token đã hết hạn",
-  "auth.refresh_revoked": "refresh token đã bị thu hồi"
+  "auth.refresh_revoked": "refresh token đã bị thu hồi",
+  "settings.prod_typo_env": "Production phát hiện biến môi trường nghi đánh sai chính tả: {names}"
 }

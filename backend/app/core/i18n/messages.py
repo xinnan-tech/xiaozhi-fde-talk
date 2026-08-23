@@ -106,6 +106,7 @@ class Keys(StrEnum):
     STARTUP_DATABASE_MIGRATION_FAIL = "startup.database_migration_fail"
     SETTINGS_PROD_NO_SQLITE = "settings.prod_no_sqlite"
     SETTINGS_PROD_ASR_LOCALHOST = "settings.prod_asr_localhost"
+    SETTINGS_PROD_TYPO_ENV = "settings.prod_typo_env"
     SECRET_RESOLVE_FAILED = "secret.resolve_failed"
 
     # ---- Password policy ----

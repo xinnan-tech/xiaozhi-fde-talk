@@ -100,5 +100,6 @@
   "settings.prod_asr_localhost": "Production ASR_WS_URL must not point to localhost/127.0.0.1; use a reachable FunASR address",
   "auth.refresh_invalid": "invalid refresh token",
   "auth.refresh_expired": "refresh token expired",
-  "auth.refresh_revoked": "refresh token revoked"
+  "auth.refresh_revoked": "refresh token revoked",
+  "settings.prod_typo_env": "Production detected suspected typo env vars: {names}"
 }

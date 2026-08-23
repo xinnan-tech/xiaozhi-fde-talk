@@ -20,6 +20,7 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 from app.adapters.asr.factory import invalidate as asr_invalidate
 from app.adapters.llm.factory import invalidate as llm_invalidate
 from app.adapters.ocr.factory import invalidate as ocr_invalidate
+from app import __version__
 from app.core.config_store import get_config_store
 from app.core.settings import get_settings
 
@@ -145,7 +146,20 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="XiaoZhi FDE Talk",
-        version="1.0.0",
+        version=__version__,
+        description=(
+            "面向 FDE、产品经理、售前、咨询师等需要频繁做客户访谈的角色："
+            "实时 AI 辅导 + 全程转写 + 自动结构化报告。"
+        ),
+        contact={
+            "name": "xinnan-tech",
+            "url": "https://github.com/xinnan-tech/xiaozhi-fde-talk/issues",
+        },
+        license_info={
+            "name": "Apache-2.0",
+            "url": "https://www.apache.org/licenses/LICENSE-2.0",
+        },
+        servers=[{"url": "/", "description": "Current host"}],
         lifespan=lifespan,
         # prod 关闭 Swagger UI / ReDoc / OpenAPI schema：避免把全部 API 形状
         # （含 /api/v1/admin/* 路径与 DTO 结构）暴露给公网。dev/test 保留便于对接。

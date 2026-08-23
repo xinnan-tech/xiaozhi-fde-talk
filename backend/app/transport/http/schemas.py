@@ -42,10 +42,12 @@ class RegisterRequest(BaseModel):
     confirm_password: str = Field(min_length=8, max_length=72)
 
 
-class AdminPasswordChangeRequest(BaseModel):
-    """P2-7: admin 改指定用户密码（独立于 ConfigStore.demo_password）。"""
-    username: str
-    # ≥8 位最低强度；72 是 bcrypt 输入上限，超长直接拒绝而不是静默截断
+class AdminResetPasswordRequest(BaseModel):
+    """admin 重置指定用户的密码。
+
+    仅持 admin token 才能调用，弱密码在路由层被 validate_password_strength
+    二次兜底（pydantic min/max 只管形态，长度合规的弱密码仍需黑名单拒）。
+    """
     new_password: str = Field(min_length=8, max_length=72)
 
 

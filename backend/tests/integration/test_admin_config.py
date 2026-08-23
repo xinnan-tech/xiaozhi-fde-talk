@@ -78,6 +78,16 @@ async def _db_get_hash(username: str) -> str | None:
         return row.password_hash if row else None
 
 
+async def _db_get_id(username: str) -> str | None:
+    """按 username 查 users.id（admin 改密端点按 user_id 路由）。"""
+    from app.persistence.models import User
+    async with SessionLocal() as session:
+        row = (await session.execute(
+            select(User).where(User.username == username)
+        )).scalars().first()
+        return row.id if row else None
+
+
 # ---------------------------------------------------------------------------
 # brief 行为测试
 # ---------------------------------------------------------------------------
@@ -100,7 +110,7 @@ async def test_get_config_admin_returns_all_groups(client, login):
     assert set(body.keys()) == {"llm", "asr", "coach", "auth", "session"}
     # 敏感字段为 null
     assert body["llm"]["api_key"] is None
-    # P2-7: demo_password 不再在 ConfigStore；改密走 /admin/auth/password
+    # P2-7: demo_password 不再在 ConfigStore；改密走 /admin/users/{id}/password
     # 非敏感字段有值
     assert body["llm"]["model"] == "qwen-plus"
 
@@ -185,13 +195,14 @@ async def test_non_admin_cannot_modify_config(client, login, create_non_admin_on
 
 
 async def test_non_admin_cannot_change_admin_password(client, login, create_non_admin_once):
-    """Bob (non-admin) POST /admin/auth/password → 403 AND password unchanged."""
+    """Bob (non-admin) POST /admin/users/{id}/password → 403 AND password unchanged."""
     bob_token = await login(client, "bob", "bob")
     original_pw = await _db_get_hash("admin")
+    admin_id = await _db_get_id("admin")
     r = await client.post(
-        "/api/v1/admin/auth/password",
+        f"/api/v1/admin/users/{admin_id}/password",
         headers={"Authorization": f"Bearer {bob_token}"},
-        json={"username": "admin", "new_password": "pwned"},
+        json={"new_password": "pwned"},
     )
     assert r.status_code == 403
     assert await _db_get_hash("admin") == original_pw

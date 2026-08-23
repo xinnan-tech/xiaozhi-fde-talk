@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
 
     # --- admin 启动密码 ---
-    # 仅在首次启动（DB 无 admin 用户）时生效；之后改密走 /admin/auth/password。
+    # 仅在首次启动（DB 无 admin 用户）时生效；之后改密走 /admin/users/{id}/password。
     # 空 = bootstrap 拒启；非空 = 必须 ≥ 8 位、UTF-8 字节数 ≤ 72、不在弱密码表中。
     app_admin_password: str = ""
 

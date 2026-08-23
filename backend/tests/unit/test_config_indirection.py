@@ -66,7 +66,7 @@ async def test_get_auth_runtime_config_returns_two(store_with_cache):
     cfg = await get_auth_runtime_config()
     assert cfg["jwt_expire_minutes"] == 1440
     assert cfg["allow_registration"] is False
-    # P2-7: demo_password 不再走 ConfigStore（改密走 /admin/auth/password）
+    # P2-7: demo_password 不再走 ConfigStore（改密走 /admin/users/{id}/password）
 
 
 async def test_get_session_runtime_config_returns_grace(store_with_cache):

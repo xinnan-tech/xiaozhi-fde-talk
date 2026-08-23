@@ -6,7 +6,6 @@ from fastapi import APIRouter
 from app.transport.http.routes.admin_config import router as admin_config_router
 from app.transport.http.routes.admin_users import router as admin_users_router
 from app.transport.http.routes.auth import router as auth_router
-from app.transport.http.routes.auth_password import router as auth_password_router
 from app.transport.http.routes.diagnostics import router as diagnostics_router
 from app.transport.http.routes.interviews import router as interviews_router
 from app.transport.http.routes.reports import router as reports_router
@@ -21,7 +20,6 @@ router.include_router(reports_router)
 router.include_router(skills_router)
 router.include_router(admin_config_router)
 router.include_router(admin_users_router)
-router.include_router(auth_password_router)
 router.include_router(diagnostics_router)
 
 __all__ = ["router"]

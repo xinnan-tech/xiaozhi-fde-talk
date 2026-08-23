@@ -13,7 +13,7 @@ def test_keys_is_str_enum():
 
 def test_supported_and_default():
     assert DEFAULT == "zh-CN"
-    assert SUPPORTED == frozenset({"zh-CN", "zh-TW", "en-US"})
+    assert SUPPORTED == frozenset({"zh-CN", "zh-TW", "en-US", "vi-VN"})
 
 
 def test_catalogs_load_for_every_supported():

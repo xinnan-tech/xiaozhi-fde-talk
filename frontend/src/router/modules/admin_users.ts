@@ -1,9 +1,7 @@
-const Layout = () => import("@/layout/index.vue");
-
 export default {
   path: "/admin/users",
   name: "AdminUsers",
-  component: Layout,
+  component: () => import("@/views/admin/users/index.vue"),
   meta: {
     icon: "tabler:users",
     title: "用户管理",
@@ -13,17 +11,5 @@ export default {
     // 管理员关闭 allow_registration 时，「用户管理」菜单直接不渲染；
     // 重置密码入口随之消失，关闭注册后管理员也无需再管账号。
     requiresRegistrationAllowed: true
-  },
-  children: [
-    {
-      path: "",
-      name: "AdminUsersList",
-      component: () => import("@/views/admin/users/index.vue"),
-      meta: {
-        title: "用户管理",
-        titleKey: "menu.users",
-        roles: ["admin"]
-      }
-    }
-  ]
+  }
 } satisfies RouteConfigsTable;

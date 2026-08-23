@@ -83,7 +83,70 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       AutoImport({
         resolvers: [ElementPlusResolver()]
       }),
-      ...getPluginsList(VITE_COMPRESSION)
+      ...getPluginsList(VITE_COMPRESSION),
+      // 生产构建剥除 console.* 调试调用：避免调试日志 / 报错信息泄露到用户控制台
+      // （Vue 路由 / 麦克风错误堆栈可能含本地路径、内部组件名等侦察信号）。
+      // 仅 build 模式生效（dev 仍保留 console）。整段 console.X(...) 用自平衡
+      // 括号定位右边界，整段替换为 `void 0` —— 保留合法 expression 形态，让
+      // `return console.error(...)`、`if (x) console.log(...)` 之类嵌入调用
+      // 语法结构不破。后续 `;` / `\n` 不动，避免吞到下一条语句开头（曾因此踩坑：
+      // strip 掉 `\n` 后 `return const` 解析失败）。
+      {
+        name: "strip-console",
+        apply: "build",
+        transform(code, id) {
+          if (id.includes("node_modules")) return null;
+          if (!/console\.(log|debug|info|warn|error)\s*\(/.test(code)) return null;
+          const out: string[] = [];
+          const re = /console\.(log|debug|info|warn|error)\s*\(/g;
+          let last = 0;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(code)) !== null) {
+            out.push(code.slice(last, m.index));
+            // 从开括号向后扫描，自平衡括号 / 单引号 / 双引号 / 反引号模板串
+            // / 行注释 / 块注释，遇到匹配的右括号停下。
+            let depth = 1;
+            let i = m.index + m[0].length;
+            const src = code;
+            while (i < src.length && depth > 0) {
+              const c = src[i];
+              if (c === "'" || c === '"' || c === "`") {
+                // 跳过字符串字面量（不解析转义——保持简单且够用）
+                const quote = c;
+                i++;
+                while (i < src.length && src[i] !== quote) {
+                  if (src[i] === "\\") i++;
+                  i++;
+                }
+                i++;
+                continue;
+              }
+              if (c === "/" && src[i + 1] === "/") {
+                // 行注释
+                while (i < src.length && src[i] !== "\n") i++;
+                continue;
+              }
+              if (c === "/" && src[i + 1] === "*") {
+                i += 2;
+                while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+                i += 2;
+                continue;
+              }
+              if (c === "(") depth++;
+              else if (c === ")") depth--;
+              i++;
+            }
+            // 整段 console.X(...) 替换为 void 0（合法 expression），不动尾部。
+            out.push("void 0");
+            last = i;
+            re.lastIndex = i;
+          }
+          out.push(code.slice(last));
+          const stripped = out.join("");
+          if (stripped === code) return null;
+          return { code: stripped, map: null };
+        }
+      }
     ],
     // https://cn.vitejs.dev/config/dep-optimization-options.html#dep-optimization-options
     optimizeDeps: {

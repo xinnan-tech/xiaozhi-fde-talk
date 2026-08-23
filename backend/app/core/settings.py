@@ -55,7 +55,10 @@ class Settings(BaseSettings):
     # --- ASR（可插拔；adapters/asr/factory.py 按 asr_type 实例化）---
     asr_type: Literal["funasr_server"] = "funasr_server"
     asr_sample_rate: int = 16000
-    asr_ws_url: str = "wss://localhost:10096"
+    # 默认空串：prod 由 _validate_prod 拒绝 localhost/127.0.0.1，dev/test 时
+    # 由 adapters/asr/factory 给出 localhost fallback 或显式 env 注入。
+    # 历史默认 wss://localhost:10096 在容器内 prod 部署被解析到容器自身，ASR 静默挂。
+    asr_ws_url: str = ""
 
     # --- 会话运行时 ---
     session_grace_period_s: float = 60.0
@@ -65,12 +68,21 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_prod(self) -> "Settings":
-        """生产环境强校验（DB_URL 必须为 MySQL/PostgreSQL）。"""
+        """生产环境强校验（DB_URL 必须为 MySQL/PostgreSQL；ASR_WS_URL 不能指向 localhost/127.0.0.1）。"""
         # 延迟导入：避免 settings 导入期拉起 i18n 子包（settings 被广泛 import）
         from app.core.i18n.errors import I18nError
         from app.core.i18n.messages import Keys
-        if self.env == "prod" and not self.db_url.startswith(("mysql+", "postgresql+")):
-            raise I18nError(Keys.SETTINGS_PROD_NO_SQLITE, http_status=400)
+        if self.env == "prod":
+            if not self.db_url.startswith(("mysql+", "postgresql+")):
+                raise I18nError(Keys.SETTINGS_PROD_NO_SQLITE, http_status=400)
+            # prod 的 ASR 地址必须真实可达：localhost/127.0.0.1 在容器内永远指向容器自身。
+            # ws/wss 协议宿主部分做字符串检查即可——不同地址前缀的端口/路径被忽略，
+            # 只要主机标识命中 localhost / 127.0.0.1 / 0.0.0.0 就拒。
+            url = self.asr_ws_url.lower()
+            if url.startswith(("ws://localhost", "wss://localhost",
+                               "ws://127.0.0.1", "wss://127.0.0.1",
+                               "ws://0.0.0.0", "wss://0.0.0.0")):
+                raise I18nError(Keys.SETTINGS_PROD_ASR_LOCALHOST, http_status=400)
         return self
 
 

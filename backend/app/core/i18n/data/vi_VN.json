@@ -7,7 +7,6 @@
   "http.session.unknown_status": "Trạng thái không xác định: {value}",
   "http.report.not_ready": "Báo cáo chưa sẵn sàng",
   "http.report.format_unsupported": "Định dạng xuất không được hỗ trợ: {fmt}. Có sẵn: {supported}",
-
   "ws.internal": "Lỗi máy chủ nội bộ, vui lòng thử lại hoặc liên hệ quản trị viên",
   "ws.handshake.timeout": "Không nhận được hello trong vòng 5 giây",
   "ws.bad_handshake": "Bắt tay không hợp lệ",
@@ -27,14 +26,11 @@
   "ws.audio.low_level": "Mức âm thanh quá thấp, vui lòng di chuyển lại gần micro hơn",
   "ws.close.session_ended": "Phỏng vấn đã kết thúc",
   "ws.close.suspended": "Phỏng vấn đã tạm dừng",
-
   "session.concurrent_limit": "Đã đạt giới hạn phỏng vấn đang hoạt động ({limit})",
   "session.illegal_transition": "Chuyển trạng thái không hợp lệ: {from_state} → {to_state}",
   "session.edit_forbidden": "Phỏng vấn ở trạng thái {state} không thể sửa",
   "session.delete_forbidden": "Phỏng vấn ở trạng thái {state} không thể xóa",
-
   "report.format_not_implemented": "Định dạng {fmt!r} chưa được triển khai",
-
   "llm.not_configured": "LLM chưa được cấu hình (LLM_BASE_URL / LLM_API_KEY / LLM_MODEL)",
   "llm.non_retryable": "Lệnh gọi LLM không thể thử lại: HTTP {status} {body}",
   "llm.retry_exhausted": "Lệnh gọi LLM vẫn thất bại sau {retries} lần thử: {last_err}",
@@ -42,12 +38,10 @@
   "llm.invalid_json": "LLM trả về JSON không hợp lệ: {err}; raw: {json_str}",
   "llm.schema_mismatch": "Đầu ra LLM không khớp schema: {err}; raw: {json_str}",
   "llm.timeout": "chat_text đã hết thời gian chờ (> {budget:.0f}s)",
-
   "asr.url_not_configured": "ASR_WS_URL chưa được cấu hình",
   "asr.connect_fail": "Kết nối nhận dạng giọng nói (ASR) thất bại: {ws_url} ({reason}). Vui lòng kiểm tra asr.ws_url trong '⚙️ Cấu hình Backend' và đảm bảo dịch vụ ASR đang chạy.",
   "asr.dead": "Kết nối ASR bị ngắt (funasr dead)",
   "asr.feed_fail": "ASR feed thất bại: {err}",
-
   "diag.llm.config_missing_raw": "Thiếu cấu hình LLM: {detail}",
   "diag.llm.config_missing": "LLM chưa được cấu hình (thiếu: {missing}), vui lòng điền trong '⚙️ Cấu hình Backend'",
   "diag.llm.unreachable": "Không thể kết nối dịch vụ LLM: {detail}",
@@ -78,7 +72,6 @@
   "diag.ocr.timeout": "Lệnh gọi OCR đã hết thời gian chờ",
   "diag.ocr.bad_image": "Không đọc được ảnh kiểm tra: {detail}",
   "diag.ocr.ok": "Kết nối OCR bình thường (dịch vụ khả dụng)",
-
   "startup.config_invalid": "Cấu hình khởi động không hợp lệ, hãy kiểm tra .env hoặc biến môi trường và khởi động lại",
   "startup.database_migration_fail": "alembic upgrade head thất bại:\n{stdout}\n{stderr}",
   "settings.prod_no_sqlite": "SQLite không được phép trong production, phải dùng MySQL/PostgreSQL",
@@ -89,10 +82,10 @@
   "password.too_weak": "Mật khẩu nằm trong danh sách đen mật khẩu yếu ({count} mục), vui lòng chọn mật khẩu khác",
   "config.invalid_enum_value": "Giá trị không hợp lệ cho {field}: {value} (cho phép: {allowed})",
   "config.invalid_bool": "{key} value must be true or false",
-
   "auth.username_invalid_format": "Username must be 4-32 chars (letters, digits, underscore, hyphen)",
   "auth.username_taken": "Username is already taken",
   "auth.password_mismatch": "Passwords do not match",
   "auth.registration_disabled": "User registration is currently disabled",
-  "auth.user_not_found": "User not found"
+  "auth.user_not_found": "User not found",
+  "settings.prod_asr_localhost": "ASR_WS_URL trong production không được trỏ tới localhost/127.0.0.1; hãy dùng địa chỉ FunASR có thể truy cập"
 }

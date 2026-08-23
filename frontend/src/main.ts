@@ -26,11 +26,18 @@ Object.keys(directives).forEach(key => {
 });
 
 // 全局注册@iconify/vue图标库
+import { addAPIProvider } from "@iconify/vue";
 import {
   IconifyIconOffline,
   IconifyIconOnline,
   FontIcon
 } from "./components/ReIcon";
+// 把在线图标 API 重定向到国内镜像。官方 api.iconify.design 在国内不稳，
+// 导致右上角头像等 useRenderIcon("xxx:yyy") 走在线通道时空白。
+// 首个 URL 失败时按列表顺序自动 fallback。
+addAPIProvider("", {
+  resources: ["https://api.unisvg.com", "https://api.iconify.host"]
+});
 app.component("IconifyIconOffline", IconifyIconOffline);
 app.component("IconifyIconOnline", IconifyIconOnline);
 app.component("FontIcon", FontIcon);

@@ -49,6 +49,17 @@ class AdminPasswordChangeRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=72)
 
 
+class AdminUserInfo(BaseModel):
+    """admin 列用户端点的响应项。显式不含 password_hash（防泄漏）。"""
+    id: str
+    username: str
+    role: str
+    # ISO 8601 字符串（DB 存带时区的 datetime，序列化前 .isoformat()）
+    created_at: str
+    # 可空：新老用户混跑期间旧行此列为 NULL
+    password_changed_at: str | None = None
+
+
 class TemplateSummary(BaseModel):
     id: str
     name: str

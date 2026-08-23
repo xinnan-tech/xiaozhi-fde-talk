@@ -28,6 +28,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22.13.0"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -41,20 +43,18 @@ jobs:
             libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
             libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxext6 \
             libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
-            libasound2t64
+            libasound2t64 \
+            netcat-openbsd
 
-      - name: Setup conda
-        uses: conda-incubator/setup-miniconda@v3
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          miniconda-version: latest
-          python-version: "3.11"
-          activate-environment: xiaozhi-fde-talk
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install Python deps
-        shell: bash -el {0}
-        run: |
-          conda activate xiaozhi-fde-talk
-          pip install -r backend/requirements.txt
+        run: pip install -r backend/requirements.txt
 
       - name: pnpm install
         run: pnpm --dir frontend install --frozen-lockfile
@@ -71,7 +71,7 @@ jobs:
       - name: Wait for FunASR
         run: |
           for i in $(seq 1 60); do
-            if (echo > /dev/tcp/127.0.0.1/10096) 2>/dev/null; then
+            if nc -z 127.0.0.1 10096 2>/dev/null; then
               echo "FunASR ready"
               exit 0
             fi
@@ -86,6 +86,7 @@ jobs:
         run: pnpm --dir frontend run test:e2e
         env:
           CI: "true"
+          PYTHONUNBUFFERED: "1"
           # e2e 专属环境：开 allow_registration 让多 spec 注册普通用户；其余保持 dev 默认。
           APP_ENV: "test"
 

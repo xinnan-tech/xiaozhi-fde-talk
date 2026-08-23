@@ -49,7 +49,6 @@ jobs:
           miniconda-version: latest
           python-version: "3.11"
           activate-environment: xiaozhi-fde-talk
-          environment-file: backend/environment.yml
 
       - name: Install Python deps
         shell: bash -el {0}
@@ -87,6 +86,12 @@ jobs:
         run: pnpm --dir frontend run test:e2e
         env:
           CI: "true"
+          # FunASR 容器把内部 10095 映射到 runner 127.0.0.1:10096（docker-compose.yml:12）。
+          # backend webServer 必须显式连该地址，否则默认空串被 prod 校验拒 / dev 走到 localhost
+          # 解析成 runner 自身 127.0.0.1 而不是 funasr 容器 → ASR 握手必败。
+          ASR_WS_URL: "ws://127.0.0.1:10096"
+          # e2e 专属环境：开 allow_registration 让多 spec 注册普通用户；其余保持 dev 默认。
+          APP_ENV: "test"
 
       - name: Upload playwright report
         if: always()

@@ -69,7 +69,7 @@ async def _db_get(key: str) -> str | None:
 
 
 async def _db_get_hash(username: str) -> str | None:
-    """P2-7: 直查 users.password_hash。"""
+    """直查 users.password_hash。"""
     from app.persistence.models import User
     async with SessionLocal() as session:
         row = (await session.execute(
@@ -110,7 +110,7 @@ async def test_get_config_admin_returns_all_groups(client, login):
     assert set(body.keys()) == {"llm", "asr", "coach", "auth", "session"}
     # 敏感字段为 null
     assert body["llm"]["api_key"] is None
-    # P2-7: demo_password 不再在 ConfigStore；改密走 /admin/users/{id}/password
+    # demo_password 不再在 ConfigStore；改密走 /admin/users/{id}/password
     # 非敏感字段有值
     assert body["llm"]["model"] == "qwen-plus"
 

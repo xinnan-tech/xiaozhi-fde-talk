@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -116,11 +116,12 @@ async def register(
     限流先于任何校验：防止扫 username / 撞首注册。桶与登录同款
     `_client_ip(request):req.username`，失败校验也消耗令牌。
 
-    SQLite 并发安全说明：SQLAlchemy 2 AsyncSession 不暴露 `execution_options`
-    在依赖注入的 session 上（autobegin 后 isolation_level 不可改）；aiosqlite
-    也不接受 SQLAlchemy 的 isolation_level 字面量。SQLite 路径靠 username
-    unique 约束收口（duplicate → IntegrityError → 409）；"两请求都见 count=0"
-    的双 admin 窗口极窄，生产建议 PG/MySQL。
+    首用户 admin 并发安全（SQLite）：
+    AsyncSession.autobegin 默认发 BEGIN DEFERRED，仅在首次写操作时升级为写锁
+    ——对 SELECT COUNT + INSERT 双请求竞争（都见 count=0 → 都成 admin）太晚。
+    本路由显式 BEGIN IMMEDIATE 抢写锁首跳串行化：注册限流 + 写锁 + username
+    unique 约束三层兜底。PG/MySQL 由默认隔离级别（REPEATABLE READ /
+    READ COMMITTED）+ unique 约束的 INSERT 排他锁自然收口，无须此 hack。
 
     弱密码校验移到 service.register_user（保证 CLI / admin 代注册同受约束），
     本路由只做 confirm_password 比对。
@@ -133,12 +134,28 @@ async def register(
     if req.password != req.confirm_password:
         raise I18nError(Keys.AUTH_PASSWORD_MISMATCH, http_status=400)
 
+    bind = db.get_bind()
+    is_sqlite = bind is not None and bind.dialect.name == "sqlite"
+    # SQLite 路径：禁用 autobegin → 显式 BEGIN IMMEDIATE 抢写锁首跳
+    # PG/MySQL 路径：依赖默认隔离级别 + username unique 约束串行化
+    if is_sqlite:
+        db.autobegin = False
+        await db.execute(text("BEGIN IMMEDIATE"))
+
     try:
-        async with db.begin():
-            current = await svc_register(db, req.username, req.password)
-    except IntegrityError:
-        await db.rollback()
-        raise I18nError(Keys.AUTH_USERNAME_TAKEN, http_status=409)
+        try:
+            if is_sqlite:
+                current = await svc_register(db, req.username, req.password)
+                await db.commit()
+            else:
+                async with db.begin():
+                    current = await svc_register(db, req.username, req.password)
+        except IntegrityError:
+            await db.rollback()
+            raise I18nError(Keys.AUTH_USERNAME_TAKEN, http_status=409)
+    finally:
+        if is_sqlite:
+            db.autobegin = True
 
     # 签发 token（含 pwd_ver，参考 login 路由 + Task 2 改密吊销约定）
     pwd_changed_at = await user_repo.get_pwd_changed_at(current.user_id)

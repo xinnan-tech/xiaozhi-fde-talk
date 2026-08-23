@@ -56,10 +56,9 @@ class Settings(BaseSettings):
     # --- ASR（可插拔；adapters/asr/factory.py 按 asr_type 实例化）---
     asr_type: Literal["funasr_server"] = "funasr_server"
     asr_sample_rate: int = 16000
-    # 默认空串：prod 由 _validate_prod 拒绝 localhost/127.0.0.1，dev/test 时
-    # 由 adapters/asr/factory 给出 localhost fallback 或显式 env 注入。
-    # 历史默认 wss://localhost:10096 在容器内 prod 部署被解析到容器自身，ASR 静默挂。
-    asr_ws_url: str = ""
+    # asr.ws_url 不再走 .env：运行时唯一来源是系统配置 store（admin 后台可改），
+    # 由 adapters/asr/factory / funasr_server 直接读 DB，未配时首请求即抛
+    # ASRProviderError(ASR_URL_NOT_CONFIGURED, 502)。
 
     # --- 会话运行时 ---
     session_grace_period_s: float = 60.0
@@ -69,28 +68,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_prod(self) -> "Settings":
-        """生产环境强校验（DB_URL 必须为 MySQL/PostgreSQL；ASR_WS_URL 不能指向 localhost/127.0.0.1）。"""
-        # 延迟导入：避免 settings 导入期拉起 i18n 子包（settings 被广泛 import）
-        from urllib.parse import urlparse
+        """生产环境强校验（DB_URL 必须为 MySQL/PostgreSQL）。
 
+        ASR 地址不在此处校验：asr.ws_url 由系统配置 store 承载，未配置时
+        adapters/asr 在首次 ASR 请求抛 ASRProviderError(ASR_URL_NOT_CONFIGURED, 502)，
+        fail-fast 留给业务路径而不是启动期——方便 dev/test 默认值兜底。
+        """
+        # 延迟导入：避免 settings 导入期拉起 i18n 子包（settings 被广泛 import）
         from app.core.i18n.errors import I18nError
         from app.core.i18n.messages import Keys
         if self.env == "prod":
             if not self.db_url.startswith(("mysql+", "postgresql+")):
                 raise I18nError(Keys.SETTINGS_PROD_NO_SQLITE, http_status=400)
-            # prod ASR 地址必须显式配置：空串会在运行期 asr 客户端首请求时炸，
-            # 与其在 worker 跑起来后才发现不如启动期拒。dev/test 留空由 adapters
-            # 兜底（localhost fallback）。
-            if not self.asr_ws_url.strip():
-                raise I18nError(Keys.SETTINGS_PROD_ASR_REQUIRED, http_status=400)
-            # 取 hostname 而非 startswith：避免 `*.localhost.example.com` /
-            # `*.local.prod` 这类「字符串命中但实际是合法外部域」误杀。
-            try:
-                host = (urlparse(self.asr_ws_url).hostname or "").lower()
-            except ValueError:
-                host = ""
-            if host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
-                raise I18nError(Keys.SETTINGS_PROD_ASR_LOCALHOST, http_status=400)
         return self
 
 

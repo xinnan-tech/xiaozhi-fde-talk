@@ -18,7 +18,7 @@ def _isolate(monkeypatch):
     """清空 env 中所有可能冲突的键。"""
     for key in (
         "DATABASE_URL", "DATABSE_URL", "DB_UR", "DB_URL",
-        "CORS_ORIGINS", "ENV", "APP_ENV", "ASR_WS_URL",
+        "CORS_ORIGINS", "ENV", "APP_ENV",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -53,7 +53,7 @@ def test_known_fields_pass_through(monkeypatch):
         "HOST", "PORT", "LOG_LEVEL", "LOG_FILE",
         "DB_URL", "DB_ECHO", "ENV", "HOST", "JWT_ALGORITHM",
         "SERVE_FRONTEND", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL",
-        "ASR_TYPE", "ASR_WS_URL", "CORS_ORIGINS",
+        "ASR_TYPE", "CORS_ORIGINS",
         "APP_DB_USE_ALEMBIC", "WEB_CONCURRENCY", "APP_ENV",
     ):
         monkeypatch.setenv(key, "x")
@@ -63,7 +63,7 @@ def test_known_fields_pass_through(monkeypatch):
         "HOST", "PORT", "LOG_LEVEL", "LOG_FILE",
         "DB_URL", "DB_ECHO", "ENV", "JWT_ALGORITHM",
         "SERVE_FRONTEND", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL",
-        "ASR_TYPE", "ASR_WS_URL", "CORS_ORIGINS",
+        "ASR_TYPE", "CORS_ORIGINS",
         "APP_DB_USE_ALEMBIC", "WEB_CONCURRENCY", "APP_ENV",
     )]
     assert known_violations == [], \

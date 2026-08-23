@@ -67,11 +67,21 @@ def main() -> int:
                 body.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
             )
             parts = [f"body: `{escaped}`"]
-            if icon.get("width") is not None:
-                parts.append(f"width: {icon['width']}")
-            if icon.get("height") is not None:
-                parts.append(f"height: {icon['height']}")
-            entries.append(f'  ["{prefix}:{name}", {{ ' + ", ".join(parts) + " }}],")
+            # iconify 的 width/height 通常挂在 icon set 顶层（每个 icon 默认继承），
+            # 单个 icon 单独覆写时才用 icon 自己的值。漏写会让 @iconify/vue/dist/offline
+            # 退回到内置 16×16 viewBox，而 body 仍按 24×24/48×48 等原始坐标画，
+            # 导致下半 / 右半被裁掉，看起来像"图标溢出容器"。
+            width = icon.get("width")
+            if width is None:
+                width = data.get("width")
+            height = icon.get("height")
+            if height is None:
+                height = data.get("height")
+            if width is not None:
+                parts.append(f"width: {width}")
+            if height is not None:
+                parts.append(f"height: {height}")
+            entries.append(f'  ["{prefix}:{name}", {{ {", ".join(parts)} }}],')
 
     if missing:
         sys.stderr.write("missing icons:\n")

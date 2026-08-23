@@ -14,20 +14,56 @@ services:
       - ./backend/models/funasr-runtime-resources:/workspace/models
     # 使用分号隔离命令，确保 cd 和 touch 在主 shell 中按顺序生效
     command: >
-      bash -c "cd FunASR/runtime; 
-      touch log.txt; 
-      bash run_server_2pass.sh 
-      --download-model-dir /workspace/models 
-      --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx 
-      --model-dir iic/SenseVoiceSmall-onnx  
-      --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx  
-      --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx 
-      --lm-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst 
-      --itn-dir thuduj12/fst_itn_zh 
-      --hotword /workspace/models/hotwords.txt > log.txt 2>&1 & 
-      sleep 1; 
+      bash -c "cd FunASR/runtime;
+      touch log.txt;
+      bash run_server_2pass.sh
+      --download-model-dir /workspace/models
+      --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx
+      --model-dir iic/SenseVoiceSmall-onnx
+      --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx
+      --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx
+      --lm-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst
+      --itn-dir thuduj12/fst_itn_zh
+      --hotword /workspace/models/hotwords.txt > log.txt 2>&1 &
+      sleep 1;
       tail -f log.txt"
 
   # ================================================================
-  # TODO: 小智方糖主应用
+  # 小智方糖主应用（FastAPI + 前端 SPA 单镜像）
+  # ENV=dev + SQLite 是当前 compose 默认值；上公网必须改 ENV=prod
+  # 并把 DB_URL 换成 MySQL/PostgreSQL，否则 Settings._validate_prod 拒启。
   # ================================================================
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: xiaozhi_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - ENV=dev
+      - DB_URL=sqlite+aiosqlite:////app/data/xiaozhi_fde_talk.db
+      - LOG_LEVEL=INFO
+      - SERVE_FRONTEND=true
+      - ASR_WS_URL=ws://funasr:10095
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+    volumes:
+      - app_data:/app/data
+      - app_exports:/app/exports
+    depends_on:
+      funasr:
+        condition: service_started
+    healthcheck:
+      # /health 是只读端点，不依赖 DB 写；用于容器健康检查
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  app_data:
+  app_exports:

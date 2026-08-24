@@ -19,6 +19,13 @@ class Keys(StrEnum):
     HTTP_UNKNOWN_STATUS = "http.session.unknown_status"
     HTTP_REPORT_NOT_READY = "http.report.not_ready"
     HTTP_REPORT_FORMAT_UNSUPPORTED = "http.report.format_unsupported"
+    HTTP_ADMIN_REQUIRED = "http.admin.required"
+    HTTP_ADMIN_CONFIG_GROUP_NOT_FOUND = "http.admin.config_group_not_found"
+    HTTP_ADMIN_CONFIG_UNKNOWN_KEYS = "http.admin.config_unknown_keys"
+    HTTP_ADMIN_STUB_LLM_FORBIDDEN = "http.admin.stub_llm_forbidden"
+    HTTP_SKILL_INVOKE_FAILED = "http.skill.invoke_failed"
+    HTTP_OCR_IMAGE_BASE64_INVALID = "http.ocr.image_base64_invalid"
+    HTTP_OCR_IMAGE_TOO_LARGE = "http.ocr.image_too_large"
 
     # ---- WebSocket frames ----
     WS_INTERNAL = "ws.internal"
@@ -64,6 +71,11 @@ class Keys(StrEnum):
     ASR_CONNECT_FAIL = "asr.connect_fail"
     ASR_DEAD = "asr.dead"
     ASR_FEED_FAIL = "asr.feed_fail"
+
+    # ---- OCR adapter ----
+    OCR_NOT_CONFIGURED = "ocr.not_configured"
+    OCR_INVOKE_FAILED = "ocr.invoke_failed"
+    OCR_BAD_RESPONSE = "ocr.bad_response"
 
     # ---- Diagnostics (LLM) ----
     DIAG_LLM_CONFIG_MISSING = "diag.llm.config_missing"

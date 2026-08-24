@@ -18,7 +18,9 @@ from typing import Optional
 
 import httpx
 
-from app.adapters.ocr.base import OCRError, OCRProvider
+from app.adapters.ocr.base import OCRProvider
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +74,12 @@ class BaiduOCRProvider(OCRProvider):
 
         # 需要刷新
         if not self._api_key or not self._secret_key:
-            raise OCRError(
-                "Baidu OCR 未配置：请提供 ocr.api_key（API Key）和 ocr.secret_key（Secret Key）"
-                "以自动换取 access_token，或直接提供已获得的 access_token（较长字符串）。"
+            raise I18nError(
+                Keys.OCR_NOT_CONFIGURED, http_status=502,
+                err=(
+                    "Baidu OCR 未配置：请提供 ocr.api_key（API Key）和 ocr.secret_key（Secret Key）"
+                    "以自动换取 access_token，或直接提供已获得的 access_token（较长字符串）。"
+                ),
             )
         self._access_token = await self._refresh_token()
         self._token_expires_at = time.time() + _TOKEN_EXPIRES_IN
@@ -90,11 +95,17 @@ class BaiduOCRProvider(OCRProvider):
         }
         resp = await self._client.post(url, params=params)
         if resp.status_code != 200:
-            raise OCRError(f"Baidu access_token 获取失败 HTTP {resp.status_code}：{resp.text}")
+            raise I18nError(
+                Keys.OCR_INVOKE_FAILED, http_status=502,
+                err=f"Baidu access_token 获取失败 HTTP {resp.status_code}：{resp.text}",
+            )
         data = resp.json()
         token = data.get("access_token")
         if not token:
-            raise OCRError(f"Baidu access_token 获取失败（空响应）：{data}")
+            raise I18nError(
+                Keys.OCR_INVOKE_FAILED, http_status=502,
+                err=f"Baidu access_token 获取失败（空响应）：{data}",
+            )
         logger.info("Baidu OCR: 已刷新 access_token")
         return token
 
@@ -109,10 +120,16 @@ class BaiduOCRProvider(OCRProvider):
         resp = await self._client.post(url, headers=headers, data=body,
                                         params={"access_token": token})
         if resp.status_code != 200:
-            raise OCRError(f"百度 OCR 请求失败 HTTP {resp.status_code}：{resp.text}")
+            raise I18nError(
+                Keys.OCR_INVOKE_FAILED, http_status=502,
+                err=f"百度 OCR 请求失败 HTTP {resp.status_code}：{resp.text}",
+            )
         data = resp.json()
         if "error_code" in data:
-            raise OCRError(f"百度 OCR 错误 {data.get('error_code')}：{data.get('error_msg', '')}")
+            raise I18nError(
+                Keys.OCR_INVOKE_FAILED, http_status=502,
+                err=f"百度 OCR 错误 {data.get('error_code')}：{data.get('error_msg', '')}",
+            )
         # 百度返回 {"words_result": [{"words": "文本行1"}, ...], "words_result_num": N}
         words = data.get("words_result", [])
         lines = [item.get("words", "") for item in words]

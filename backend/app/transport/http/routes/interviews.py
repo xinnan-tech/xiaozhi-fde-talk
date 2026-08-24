@@ -420,29 +420,37 @@ async def recognize_image(
 ):
     """接收 base64 编码的图片，用后端视觉模型提取文字。
 
-    前端「拍名片」先用 canvas 拍图 → 转 base64 → 送本接口 → 返回文字，
-    再调 /extract 填字段。
+    错误响应统一走 I18nError：
+    - base64 解码失败 → 422 + code=http.ocr.image_base64_invalid
+    - 图片 > 10MB      → 413 + code=http.ocr.image_too_large
+    - OCR 未配置        → 502（adapter 抛 Keys.OCR_NOT_CONFIGURED）
+    - OCR 调用失败      → 502（adapter 抛 Keys.OCR_INVOKE_FAILED）
     """
+    from app.adapters.ocr.factory import get_ocr
+    from app.core.i18n.errors import I18nError
+
     import base64 as _b64
 
     try:
         image_bytes = _b64.b64decode(req.image_base64)
     except Exception:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "图片 base64 解码失败")
+        raise I18nError(Keys.HTTP_OCR_IMAGE_BASE64_INVALID, http_status=422)
 
     if len(image_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "图片超过 10MB")
-
-    try:
-        from app.adapters.ocr.factory import get_ocr
-        ocr = get_ocr()
-        if not ocr.configured:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "OCR 未配置，请到「⚙️ 后端配置」填写 ocr.base_url / ocr.api_key / ocr.model")
-        text = await ocr.recognize(
-            image_bytes,
-            prompt=OCR_PROMPT,
+        raise I18nError(
+            Keys.HTTP_OCR_IMAGE_TOO_LARGE, http_status=413,
+            size_mb=len(image_bytes) / (1024 * 1024),
         )
-    except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"OCR 识别失败：{e}") from e
 
+    ocr = get_ocr()
+    if not ocr.configured:
+        # 不在路由层拼字符串 — 直接让 adapter 自己抛 Keys.OCR_NOT_CONFIGURED。
+        # 但 factory.get_ocr() 已经返回 provider 实例了，recognize() 内部会判
+        # configured；这里只防御性短路（factory 不会返未配置的实例，但语义更清晰）。
+        raise I18nError(Keys.OCR_NOT_CONFIGURED, http_status=502)
+
+    # 不再 try/except Exception 转换 — adapter 层已经抛 I18nError(Keys.OCR_*, 502)，
+    # 由 app.py 的全局 handler 转 {detail, code} 响应。其他真异常（KeyError、
+    # ValueError 等 programming error）走 FastAPI 兜底 500，由告警系统捕获。
+    text = await ocr.recognize(image_bytes, prompt=OCR_PROMPT)
     return OCRResponse(text=text or "")

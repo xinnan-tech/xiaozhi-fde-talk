@@ -1,16 +1,19 @@
 """OCR 抽象接口（可插拔端口）。
 
-目前支持 OpenAI 兼容视觉模型（qwen-vl-plus / gpt-4o / gemini 等）。
+目前支持 OpenAI 兼容视觉模型（qwen-vl-plus / gpt-4o / gemini 等）
+和百度 OCR。
 """
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from app.core.i18n.errors import I18nError
 from app.core.i18n.ocr_prompts import OCR_PROMPT
 
-
-class OCRError(Exception):
-    pass
+# Aliased: OCRError = I18nError. Existing `raise OCRError(...)` 与 `except OCRError`
+# 在改造期间继续工作；改造完成后 provider 实现层统一改 raise I18nError(Keys.OCR_*,
+# http_status=502, ...) 直接冒泡到 FastAPI I18nError handler。
+OCRError = I18nError
 
 
 class OCRProvider(ABC):

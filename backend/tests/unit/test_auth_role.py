@@ -10,14 +10,16 @@ def test_current_user_defaults_role_user():
 
 
 async def test_require_admin_rejects_non_admin(monkeypatch):
-    """require_admin 对 role != admin 抛 403。"""
+    """require_admin 对 role != admin 抛 I18nError(http.admin.required, 403)。"""
+    from app.core.i18n.errors import I18nError
     from app.transport.http import dependencies as dep
     non_admin = CurrentUser(user_id="u1", username="bob", role="user")
 
-    # require_admin 是依赖函数，直接以非 admin 调用应抛 HTTPException(403)
-    with pytest.raises(Exception) as ei:
+    # require_admin 是依赖函数，直接以非 admin 调用应抛 I18nError(http_status=403)
+    with pytest.raises(I18nError) as ei:
         await dep.require_admin(user=non_admin)
-    assert getattr(ei.value, "status_code", None) == 403
+    assert ei.value.http_status == 403
+    assert ei.value.code == "http.admin.required"
 
 
 async def test_require_admin_accepts_admin():

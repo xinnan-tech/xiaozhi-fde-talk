@@ -1,8 +1,10 @@
 """skill 路由（Phase 10 MVP）。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
 from app.services.skill.executor import invoke_skill
 from app.services.skill.registry import list_public_skills
@@ -30,5 +32,8 @@ async def invoke_internal_skill(
     """
     result = await invoke_skill(skill_id, req.inputs)
     if not result.ok:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, result.error)
+        raise I18nError(
+            Keys.HTTP_SKILL_INVOKE_FAILED, http_status=404,
+            reason=result.error or "",
+        )
     return result.to_dict()

@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
 from app.core.password_policy import validate_password_strength
 from app.domain.auth import CurrentUser
 from app.persistence.db import SessionLocal, get_db
@@ -60,9 +62,9 @@ async def reset_password(
     async with SessionLocal() as s:
         row = await s.get(User, user_id)
         if row is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+            raise I18nError(Keys.AUTH_USER_NOT_FOUND, http_status=404)
         # 复用 update_password_auto：自带事务 + 写 password_changed_at + 失效缓存
         ok = await user_repo.update_password_auto(row.username, body.new_password)
     if not ok:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+        raise I18nError(Keys.AUTH_USER_NOT_FOUND, http_status=404)
     return {"ok": True}

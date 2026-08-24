@@ -2,10 +2,15 @@
 import { computed, nextTick, reactive, ref, watch, markRaw } from "vue";
 import type { FormInstance, FormRules } from "element-plus/es/components/form";
 import { useI18n } from "vue-i18n";
+import { message } from "@/utils/message";
+import { extractBackendError } from "@/utils/error";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import {
+  extractInterviewFieldsApi,
   getInterviewsTemplatesApi,
+  getInterviewTemplateDetailApi,
   type CreateInterviewForm,
+  type TemplateBaseField,
   type TemplateItem
 } from "@/api/interview";
 
@@ -36,6 +41,9 @@ const selectedInputMethod = ref("");
 const goalError = ref("");
 const interviewTemplates = ref<TemplateItem[]>([]);
 const interviewTemplatesLoading = ref(false);
+const templateFields = ref<TemplateBaseField[]>([]);
+const templateFieldsTemplateId = ref("");
+const clipboardExtracting = ref(false);
 const createDefaultForm = (): CreateInterviewForm => ({
   base_info: {
     title: "欣南科技公司售前业务洽谈助手",
@@ -49,6 +57,8 @@ const createDefaultForm = (): CreateInterviewForm => ({
   template_id: ""
 });
 const form = reactive<CreateInterviewForm>(createDefaultForm());
+const clipboardInputVisible = ref(false);
+const clipboardText = ref("");
 
 const rules = computed<FormRules>(() => ({
   "base_info.title": [
@@ -148,9 +158,148 @@ const resetForm = async () => {
   Object.assign(form, createDefaultForm());
   form.template_id = interviewTemplates.value[0]?.id ?? "";
   selectedInputMethod.value = "";
+  clipboardInputVisible.value = false;
+  clipboardText.value = "";
+  clipboardExtracting.value = false;
   goalError.value = "";
   await nextTick();
   formRef.value?.clearValidate();
+};
+
+const selectInputMethod = (methodKey: string) => {
+  selectedInputMethod.value = methodKey;
+  clipboardInputVisible.value = methodKey === "clipboard";
+};
+
+const loadTemplateFields = async (templateId: string) => {
+  if (!templateId || templateFieldsTemplateId.value === templateId) {
+    return templateFields.value;
+  }
+
+  const template = await getInterviewTemplateDetailApi(templateId);
+  templateFields.value = template.session?.base_fields ?? [];
+  templateFieldsTemplateId.value = templateId;
+  return templateFields.value;
+};
+
+const normalizeExtractedValue = (key: string, value: string) => {
+  if (key === "duration") {
+    const source = Number.parseInt(value, 10);
+    if (!Number.isFinite(source)) return "";
+    return durationOptions.value.reduce((closest, option) => {
+      return Math.abs(Number(option.value) - source) <
+        Math.abs(Number(closest) - source)
+        ? option.value
+        : closest;
+    }, durationOptions.value[0]?.value ?? "");
+  }
+
+  if (key === "start_time" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
+    return value.replace("T", " ") + ":00";
+  }
+
+  return value;
+};
+
+const extractClipboardText = async () => {
+  // 只提交有实际内容的文本
+  const transcript = clipboardText.value.trim();
+  if (!transcript) {
+    message(t("create.dialog.clipboard_empty"), { type: "warning" });
+    return;
+  }
+
+  clipboardExtracting.value = true;
+  try {
+    // 模板详情提供字段名称和字段类型
+    const fields = await loadTemplateFields(form.template_id);
+    const fieldLabels: Record<string, string> = {};
+    const fieldTypes: Record<string, string> = {};
+    const fieldKeys = fields.map(field => {
+      fieldLabels[field.key] = field.label || field.key;
+      fieldTypes[field.key] = field.type || "text";
+      return field.key;
+    });
+
+    // 访谈名称和目标不属于模板基础字段
+    fieldKeys.push("title", "goal");
+    fieldLabels.title = t("create.dialog.interview_name");
+    fieldLabels.goal = t("create.dialog.goal");
+
+    // 已填写的值会作为上下文传给后端
+    const currentValues: Record<string, string> = {};
+    const baseInfo = form.base_info as Record<string, string>;
+    for (const key of fieldKeys) {
+      const value =
+        key === "title"
+          ? form.base_info.title
+          : key === "goal"
+            ? form.goal
+            : baseInfo[key];
+      if (value) currentValues[key] = String(value);
+    }
+
+    // 后端根据文本和字段定义返回提取结果
+    const response = await extractInterviewFieldsApi({
+      transcript,
+      template_id: form.template_id,
+      fields: fieldKeys,
+      field_labels: fieldLabels,
+      field_types: fieldTypes,
+      current_values: currentValues
+    });
+
+    // 将提取结果写回表单控件
+    let filled = 0;
+    for (const [key, rawValue] of Object.entries(response.values ?? {})) {
+      if (!rawValue) continue;
+      const value = normalizeExtractedValue(key, String(rawValue));
+      if (!value) continue;
+
+      if (key === "title") {
+        form.base_info.title = value;
+      } else if (key === "goal") {
+        form.goal = value;
+        goalError.value = "";
+      } else if (key in form.base_info) {
+        baseInfo[key] = value;
+      } else {
+        continue;
+      }
+      filled += 1;
+    }
+
+    message(
+      filled > 0
+        ? t("create.dialog.clipboard_success", { count: filled })
+        : t("create.dialog.clipboard_no_fields"),
+      { type: filled > 0 ? "success" : "warning" }
+    );
+    if (filled > 0) {
+      formRef.value?.clearValidate([
+        "base_info.title",
+        "base_info.project",
+        "base_info.interviewee",
+        "base_info.start_time",
+        "base_info.duration",
+        "goal"
+      ]);
+    }
+    clipboardText.value = "";
+    clipboardInputVisible.value = false;
+    selectedInputMethod.value = "";
+  } catch (error) {
+    message(extractBackendError(error, t("create.dialog.clipboard_failed")), {
+      type: "error"
+    });
+  } finally {
+    clipboardExtracting.value = false;
+  }
+};
+
+const backFromClipboardInput = () => {
+  clipboardInputVisible.value = false;
+  selectedInputMethod.value = "";
 };
 
 const loadInterviewTemplates = async () => {
@@ -159,6 +308,8 @@ const loadInterviewTemplates = async () => {
     const response = await getInterviewsTemplatesApi();
     interviewTemplates.value = response.items;
     form.template_id = response.items[0]?.id ?? "";
+    templateFields.value = [];
+    templateFieldsTemplateId.value = "";
   } catch {
     interviewTemplates.value = [];
     form.template_id = "";
@@ -379,27 +530,61 @@ watch(
         <div class="section-title">
           <h3>{{ $t("create.dialog.quick_input") }}</h3>
         </div>
-        <div class="input-method-list">
-          <button
-            v-for="method in inputMethods"
-            :key="method.key"
-            type="button"
-            class="input-method"
-            :class="{ selected: selectedInputMethod === method.key }"
-            @click="selectedInputMethod = method.key"
-          >
-            <span
-              class="method-icon"
-              :style="{ color: method.color, background: method.background }"
-            >
-              <component :is="method.icon" />
-            </span>
-            <span class="method-copy">
-              <strong>{{ method.title }}</strong>
-              <small>{{ method.description }}</small>
-            </span>
-            <span class="method-arrow">→</span>
-          </button>
+        <div class="quick-input-stage">
+          <Transition name="clipboard-panel" mode="out-in">
+            <div v-if="clipboardInputVisible" class="clipboard-input-panel">
+              <el-input
+                v-model="clipboardText"
+                type="textarea"
+                :rows="3"
+                :disabled="clipboardExtracting"
+                :placeholder="$t('create.dialog.clipboard_placeholder')"
+              />
+              <div class="clipboard-actions">
+                <el-button
+                  type="primary"
+                  :loading="clipboardExtracting"
+                  :disabled="clipboardExtracting"
+                  @click="extractClipboardText"
+                >
+                  {{ $t("create.dialog.clipboard_extract") }}
+                </el-button>
+                <el-button
+                  plain
+                  :disabled="clipboardExtracting"
+                  @click="backFromClipboardInput"
+                >
+                  {{ $t("create.dialog.back") }}
+                </el-button>
+              </div>
+            </div>
+
+            <div v-else class="input-method-list">
+              <button
+                v-for="method in inputMethods"
+                :key="method.key"
+                type="button"
+                class="input-method"
+                :class="{ selected: selectedInputMethod === method.key }"
+                @click="selectInputMethod(method.key)"
+              >
+                <span
+                  class="method-icon"
+                  :style="{
+                    color: method.color,
+                    background: method.background
+                  }"
+                >
+                  <component :is="method.icon" />
+                </span>
+                <span class="method-copy">
+                  <strong>{{ method.title }}</strong>
+                  <small>{{ method.description }}</small>
+                </span>
+                <span class="method-arrow">→</span>
+              </button>
+            </div>
+          </Transition>
         </div>
       </section>
     </el-form>
@@ -571,7 +756,7 @@ watch(
       padding: 10px 12px;
       resize: vertical;
       border: 0;
-      border-radius: 9px;
+      border-radius: 8px;
       box-shadow: 0 0 0 1px #e4e8ed inset;
     }
 
@@ -617,10 +802,84 @@ watch(
     }
 
     .quick-input-section {
+      width: 100%;
       padding-bottom: 10px;
     }
 
+    .quick-input-stage {
+      position: relative;
+      display: block;
+      width: 100%;
+      height: 112px;
+    }
+
+    .clipboard-panel-enter-active,
+    .clipboard-panel-leave-active {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      transition:
+        transform 0.28s ease,
+        opacity 0.28s ease;
+    }
+
+    .clipboard-panel-enter-from.clipboard-input-panel {
+      opacity: 0;
+      transform: translateX(100%);
+    }
+
+    .clipboard-panel-enter-from.input-method-list {
+      opacity: 0;
+      transform: translateX(-100%);
+    }
+
+    .clipboard-panel-leave-to.clipboard-input-panel {
+      opacity: 0;
+      transform: translateX(100%);
+    }
+
+    .clipboard-panel-leave-to.input-method-list {
+      opacity: 0;
+      transform: translateX(-100%);
+    }
+
+    .clipboard-input-panel {
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+      width: 100%;
+      height: 100%;
+
+      .el-textarea {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .el-textarea__inner {
+        height: 100%;
+        resize: none;
+      }
+
+      .clipboard-actions {
+        display: flex;
+        flex: 0 0 90px;
+        flex-direction: column;
+        gap: 8px;
+        justify-content: center;
+
+        .el-button {
+          width: 100%;
+          height: 32px;
+          margin: 0;
+          border-radius: 8px;
+        }
+      }
+    }
+
     .input-method-list {
+      position: absolute;
+      inset: 0;
+      width: 100%;
       display: grid;
       grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
       grid-template-rows: repeat(2, minmax(52px, auto));
@@ -831,8 +1090,19 @@ watch(
       }
 
       .input-method-list {
+        height: 172px;
         grid-template-columns: 1fr;
         grid-template-rows: none;
+      }
+
+      .quick-input-stage {
+        height: 172px;
+      }
+
+      .clipboard-input-panel {
+        .clipboard-actions {
+          flex-basis: 88px;
+        }
       }
 
       .input-method:first-child {

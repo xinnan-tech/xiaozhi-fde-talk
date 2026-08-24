@@ -50,6 +50,18 @@ export type TemplateItem = {
   version: string;
 };
 
+export type TemplateBaseField = {
+  key: string;
+  label: string;
+  type?: string;
+};
+
+export type InterviewTemplateDetail = TemplateItem & {
+  session?: {
+    base_fields?: TemplateBaseField[];
+  };
+};
+
 export type TemplateListType = {
   items: TemplateItem[];
 };
@@ -79,6 +91,36 @@ export const getInterviewsApi = () => {
 /** 获取访谈模板列表 */
 export const getInterviewsTemplatesApi = () => {
   return http.request<TemplateListType>("get", baseUrlApi("/api/v1/templates"));
+};
+
+/** 获取模板详情，用于提取接口的字段定义 */
+export const getInterviewTemplateDetailApi = (templateId: string) => {
+  return http.request<InterviewTemplateDetail>(
+    "get",
+    baseUrlApi(`/api/v1/templates/${templateId}`)
+  );
+};
+
+export type ExtractInterviewRequest = {
+  transcript: string;
+  template_id: string;
+  fields: string[];
+  field_labels: Record<string, string>;
+  field_types: Record<string, string>;
+  current_values: Record<string, string>;
+};
+
+export type ExtractInterviewResponse = {
+  values: Record<string, string>;
+};
+
+/** 从粘贴文本中提取访谈表单字段 */
+export const extractInterviewFieldsApi = (data: ExtractInterviewRequest) => {
+  return http.request<ExtractInterviewResponse>(
+    "post",
+    baseUrlApi("/api/v1/interviews/extract"),
+    { data }
+  );
 };
 
 /** 创建访谈 */

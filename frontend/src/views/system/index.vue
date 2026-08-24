@@ -889,7 +889,7 @@ watch(locale, () => {
       align-self: flex-start;
       height: fit-content;
       min-height: 0;
-      margin-bottom: 6px;
+      margin-bottom: 24px;
       padding: 18px 0;
       position: sticky;
       top: 24px;
@@ -907,7 +907,7 @@ watch(locale, () => {
 
       :deep(.el-scrollbar__view) {
         padding: 0 8px 0 16px;
-        margin-bottom: 6px;
+        margin-bottom: 24px;
       }
     }
 

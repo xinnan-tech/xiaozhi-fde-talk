@@ -41,7 +41,7 @@ const createDefaultForm = (): CreateInterviewForm => ({
     title: "欣南科技公司售前业务洽谈助手",
     project: "欣南科技售前",
     interviewee: "彭经理",
-    start_time: "2026-08-18 16:00:00",
+    start_time: "",
     duration: "45",
     end_time: ""
   },

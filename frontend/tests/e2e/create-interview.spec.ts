@@ -19,7 +19,7 @@ test.describe("create interview", () => {
 
     // 3. 等 el-form 内的字段可见。el-form-item 的 prop 绑定到 label，
     //    playwright 的 getByLabel 能匹配 .el-form-item__label 文本。
-    //    表单打开时 createDefaultForm 已经填了 title/project/interviewee/start_time/duration/goal，
+    //    表单打开时 createDefaultForm 已经填了 title/project/interviewee/duration/goal，
     //    但 template_id 默认就是后端返回的第一项（dialog 打开时 loadInterviewTemplates 自动选），
     //    所以这里只把 title 改成唯一值，避免与历史 run 的同名冲突。
     const titleField = page.getByLabel(/访谈名称|interview.*name/i).first()
@@ -27,6 +27,11 @@ test.describe("create interview", () => {
 
     const uniqueTitle = `e2e-test-${Date.now()}`
     await titleField.fill(uniqueTitle)
+
+    await page
+      .getByLabel(/访谈时间|Interview time/i)
+      .first()
+      .fill("2026-08-18 16:00:00")
 
     // 4. 点 submit：footer 按钮文案「创建访谈」/「Create interview」
     await page

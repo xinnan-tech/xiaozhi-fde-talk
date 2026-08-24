@@ -6,10 +6,10 @@ export const longpress: Directive = {
   mounted(el: HTMLElement, binding: DirectiveBinding<Function>) {
     const cb = binding.value;
     if (cb && isFunction(cb)) {
-      let timer = null;
-      let interTimer = null;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let interTimer: ReturnType<typeof setInterval> | null = null;
       let num = 500;
-      let interNum = null;
+      let interNum: number | null = null;
       const isInter = binding?.arg?.includes(":") ?? false;
 
       if (isInter) {
@@ -33,7 +33,7 @@ export const longpress: Directive = {
       const onDownInter = (ev: PointerEvent) => {
         ev.preventDefault();
         if (interTimer === null) {
-          interTimer = setInterval(() => cb(), interNum);
+          interTimer = setInterval(() => cb(), interNum ?? 0);
         }
       };
 

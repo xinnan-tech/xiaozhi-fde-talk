@@ -17,6 +17,7 @@ import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import ReSegmented from "@/components/ReSegmented";
 import LayFooter from "@/layout/components/lay-footer/index.vue";
 import { extractBackendError } from "@/utils/error";
+import { ElMessage, ElMessageBox } from "element-plus";
 import {
   endInterviewApi,
   firstBatchInterviewApi,
@@ -944,9 +945,7 @@ const kickFirstBatchIfNeeded = (detail: InterviewDetailType) => {
         ElMessage.warning(t("msg.first_batch_partial"));
       }
     } catch (e: unknown) {
-      ElMessage.warning(
-        extractBackendError(e, t("msg.first_batch_partial"))
-      );
+      ElMessage.warning(extractBackendError(e, t("msg.first_batch_partial")));
     } finally {
       if (route.params.id === sessionId) {
         isFirstBatchPending.value = false;

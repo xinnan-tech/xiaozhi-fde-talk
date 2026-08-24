@@ -152,7 +152,7 @@ export const handleTree = (
 
   const childrenListMap: any = {};
   const nodeIds: any = {};
-  const tree = [];
+  const tree: any[] = [];
 
   for (const d of data) {
     const parentId = d[config.parentId];
@@ -178,8 +178,9 @@ export const handleTree = (
     if (childrenListMap[o[config.id]] !== null) {
       o[config.childrenList] = childrenListMap[o[config.id]];
     }
-    if (o[config.childrenList]) {
-      for (const c of o[config.childrenList]) {
+    const children = o[config.childrenList] as any[] | undefined;
+    if (children) {
+      for (const c of children) {
         adaptToChildrenList(c);
       }
     }

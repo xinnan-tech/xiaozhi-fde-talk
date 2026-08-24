@@ -55,9 +55,9 @@ export function useNav() {
 
   /** 动态title */
   function changeTitle(meta: routeMetaType) {
-    const Title = getConfig().Title;
+    const Title = getConfig().Title ?? "";
     if (Title) document.title = `${meta.title} | ${Title}`;
-    else document.title = meta.title;
+    else document.title = meta.title ?? "";
   }
 
   /** 退出登录 */
@@ -66,7 +66,8 @@ export function useNav() {
   }
 
   function backTopMenu() {
-    router.push(getTopMenu()?.path);
+    const topPath = getTopMenu()?.path;
+    if (topPath) router.push(topPath);
   }
 
   function toggleSideBar() {

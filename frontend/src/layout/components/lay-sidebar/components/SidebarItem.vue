@@ -28,7 +28,8 @@ const { layout, isCollapse, tooltipEffect, getDivStyle } = useNav();
 
 const props = defineProps({
   item: {
-    type: Object as PropType<menuType>
+    type: Object as PropType<menuType>,
+    required: true
   },
   isNest: {
     type: Boolean,
@@ -69,9 +70,9 @@ const textClass = computed(() => {
   if (
     layout.value !== "horizontal" &&
     isCollapse.value &&
-    !toRaw(item.meta.icon) &&
+    !toRaw(item.meta?.icon) &&
     ((layout.value === "vertical" && item.parentId === null) ||
-      (layout.value === "mix" && item.pathList.length === 2))
+      (layout.value === "mix" && item.pathList?.length === 2))
   ) {
     return `${baseClass} min-w-[54px]! text-center! px-3!`;
   }
@@ -121,7 +122,7 @@ function resolvePath(routePath) {
 }
 
 function getMenuTitle(item: menuType) {
-  return item.meta?.titleKey ? t(item.meta.titleKey) : item.meta?.title;
+  return item.meta?.titleKey ? t(item.meta?.titleKey) : item.meta?.title;
 }
 </script>
 
@@ -143,26 +144,26 @@ function getMenuTitle(item: menuType) {
       v-bind="attrs"
     >
       <div
-        v-if="toRaw(item.meta.icon)"
+        v-if="toRaw(item.meta?.icon)"
         class="sub-menu-icon"
         :style="getSubMenuIconStyle"
       >
         <component
           :is="
             useRenderIcon(
-              toRaw(onlyOneChild.meta.icon) ||
-                (item.meta && toRaw(item.meta.icon))
+              toRaw(onlyOneChild.meta?.icon) ||
+                (item.meta && toRaw(item.meta?.icon))
             )
           "
         />
       </div>
       <el-text
         v-if="
-          (!item?.meta.icon &&
+          (!item.meta?.icon &&
             isCollapse &&
             layout === 'vertical' &&
             item?.pathList?.length === 1) ||
-          (!onlyOneChild.meta.icon &&
+          (!onlyOneChild.meta?.icon &&
             isCollapse &&
             layout === 'mix' &&
             item?.pathList?.length === 2)
@@ -184,7 +185,7 @@ function getMenuTitle(item: menuType) {
           >
             {{ getMenuTitle(onlyOneChild) }}
           </ReText>
-          <SidebarExtraIcon :extraIcon="onlyOneChild.meta.extraIcon" />
+          <SidebarExtraIcon :extraIcon="onlyOneChild.meta?.extraIcon" />
         </div>
       </template>
     </el-menu-item>
@@ -198,20 +199,20 @@ function getMenuTitle(item: menuType) {
   >
     <template #title>
       <div
-        v-if="toRaw(item.meta.icon)"
+        v-if="toRaw(item.meta?.icon)"
         :style="getSubMenuIconStyle"
         class="sub-menu-icon"
       >
-        <component :is="useRenderIcon(item.meta && toRaw(item.meta.icon))" />
+        <component :is="useRenderIcon(item.meta && toRaw(item.meta?.icon))" />
       </div>
       <ReText
         v-if="
-          layout === 'mix' && toRaw(item.meta.icon)
+          layout === 'mix' && toRaw(item.meta?.icon)
             ? !isCollapse || item?.pathList?.length !== 2
             : !(
                 layout === 'vertical' &&
                 isCollapse &&
-                toRaw(item.meta.icon) &&
+                toRaw(item.meta?.icon) &&
                 item.parentId === null
               )
         "
@@ -223,11 +224,14 @@ function getMenuTitle(item: menuType) {
       >
         {{ getMenuTitle(item) }}
       </ReText>
-      <SidebarExtraIcon v-if="!isCollapse" :extraIcon="item.meta.extraIcon" />
+      <SidebarExtraIcon
+        v-if="!isCollapse && item?.meta?.extraIcon"
+        :extraIcon="item.meta?.extraIcon"
+      />
     </template>
 
     <sidebar-item
-      v-for="child in item.children"
+      v-for="child in item?.children ?? []"
       :key="child.path"
       :is-nest="true"
       :item="child"

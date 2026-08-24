@@ -60,6 +60,9 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : undefined;
+      if (!mediaStream.value) {
+        throw new Error("麦克风流丢失，请重试");
+      }
       mediaRecorder.value = new MediaRecorder(
         mediaStream.value,
         mimeType ? { mimeType } : undefined
@@ -76,9 +79,10 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
       mediaRecorder.value.start(200);
       error.value = null;
       isRecording.value = true;
+      const stream = mediaStream.value;
       console.info("[useAudioRecorder] 麦克风已开启", {
-        stream: mediaStream.value,
-        tracks: mediaStream.value.getAudioTracks().map(track => ({
+        stream,
+        tracks: stream.getAudioTracks().map(track => ({
           id: track.id,
           label: track.label,
           enabled: track.enabled,

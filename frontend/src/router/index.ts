@@ -34,7 +34,7 @@ const modules: Record<string, any> = import.meta.glob(
 );
 
 /** 原始静态路由（未做任何处理） */
-const routes = [];
+const routes: any[] = [];
 
 Object.keys(modules).forEach(key => {
   routes.push(modules[key].default);

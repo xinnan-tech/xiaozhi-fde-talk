@@ -38,7 +38,7 @@ class StorageProxy implements ProxyStorage {
    * @description 从离线仓库中获取对应键名的值
    * @param k 键名
    */
-  public async getItem<T>(k: string): Promise<T> {
+  public async getItem<T>(k: string): Promise<T | null> {
     return new Promise((resolve, reject) => {
       this.storage
         .getItem(k)

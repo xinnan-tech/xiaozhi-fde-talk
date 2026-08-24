@@ -1,7 +1,6 @@
 import {
   type RouterHistory,
   type RouteRecordRaw,
-  type RouteComponent,
   createWebHistory,
   createWebHashHistory
 } from "vue-router";
@@ -32,26 +31,26 @@ function handRank(routeInfo: any) {
 }
 
 /** 按照路由中meta下的rank等级升序来排序路由 */
-function ascending(arr: any[]) {
-  arr.forEach((v, index) => {
+function ascending(arr: any[]): any[] {
+  arr.forEach((v: any, index: number) => {
     // 当rank不存在时，根据顺序自动创建，首页路由永远在第一位
     if (handRank(v)) v.meta.rank = index + 2;
   });
   return arr.sort(
     (a: { meta: { rank: number } }, b: { meta: { rank: number } }) => {
-      return a?.meta.rank - b?.meta.rank;
+      return (a?.meta?.rank ?? 0) - (b?.meta?.rank ?? 0);
     }
   );
 }
 
 /** 过滤meta中showLink为false的菜单 */
-function filterTree(data: RouteComponent[]) {
+function filterTree(data: any[]): any[] {
   const newTree = cloneDeep(data).filter(
-    (v: { meta: { showLink: boolean } }) => v.meta?.showLink !== false
+    (v: any) => v?.meta?.showLink !== false
   );
-  newTree.forEach(
-    (v: { children }) => v.children && (v.children = filterTree(v.children))
-  );
+  newTree.forEach((v: any) => {
+    if (v?.children) v.children = filterTree(v.children);
+  });
   return newTree;
 }
 
@@ -86,11 +85,9 @@ function findRouteByPath(path: string, routes: RouteRecordRaw[]) {
     return isProxy(res) ? toRaw(res) : res;
   } else {
     for (let i = 0; i < routes.length; i++) {
-      if (
-        routes[i].children instanceof Array &&
-        routes[i].children.length > 0
-      ) {
-        res = findRouteByPath(path, routes[i].children);
+      const child = routes[i].children;
+      if (child instanceof Array && child.length > 0) {
+        res = findRouteByPath(path, child);
         if (res) {
           return isProxy(res) ? toRaw(res) : res;
         }
@@ -160,7 +157,8 @@ function formatTwoStageRoutes(routesList: RouteRecordRaw[]) {
         children: []
       });
     } else {
-      newRoutesList[0]?.children.push({ ...v });
+      const top = newRoutesList[0];
+      if (top?.children) top.children.push({ ...v });
     }
   });
   return newRoutesList;
@@ -207,7 +205,7 @@ function addAsyncRoutes(arrRoutes: Array<RouteRecordRaw>) {
   const modulesRoutesKeys = Object.keys(modulesRoutes);
   arrRoutes.forEach((v: RouteRecordRaw) => {
     // 将backstage属性加入meta，标识此路由为后端返回路由
-    v.meta.backstage = true;
+    if (v.meta) v.meta.backstage = true;
     // 父级的redirect属性取值：如果子级存在且父级的redirect属性不存在，默认取第一个子级的path；如果子级存在且父级的redirect属性存在，取存在的redirect属性，会覆盖默认值
     if (v?.children && v.children.length && !v.redirect)
       v.redirect = v.children[0].path;
@@ -251,6 +249,7 @@ function getHistoryMode(routerHistory): RouterHistory {
       return createWebHistory(rightMode);
     }
   }
+  return createWebHistory("");
 }
 
 /** 获取当前页面按钮级别的权限 */
@@ -270,10 +269,12 @@ function hasAuth(value: string | Array<string>): boolean {
   return isAuths ? true : false;
 }
 
-function handleTopMenu(route) {
+function handleTopMenu(route: any): any {
   if (route?.children && route.children.length > 1) {
     if (route.redirect) {
-      return route.children.filter(cur => cur.path === route.redirect)[0];
+      return route.children.filter(
+        (cur: any) => cur.path === route.redirect
+      )[0];
     } else {
       return route.children[0];
     }
@@ -285,7 +286,7 @@ function handleTopMenu(route) {
 /** 获取所有菜单中的第一个菜单（顶级菜单）*/
 function getTopMenu(): menuType {
   const topMenu = handleTopMenu(
-    usePermissionStoreHook().wholeMenus[0]?.children[0]
+    usePermissionStoreHook().wholeMenus[0]?.children?.[0]
   );
   return topMenu;
 }

@@ -62,12 +62,15 @@ class PureHttp {
         }
         /** 请求白名单，放置一些不需要`token`的接口（通过设置请求白名单，防止`token`过期后再请求造成的死循环问题） */
         const whiteList = ["/api/v1/auth/login"];
-        return whiteList.some(url => config.url.endsWith(url))
+        return whiteList.some(url => config.url?.endsWith(url) ?? false)
           ? config
           : new Promise(resolve => {
               const data = getToken();
               if (data) {
-                config.headers["Authorization"] = formatToken(data.accessToken);
+                if (config.headers)
+                  config.headers["Authorization"] = formatToken(
+                    data.accessToken
+                  );
                 resolve(config);
               } else {
                 resolve(config);
@@ -106,7 +109,9 @@ class PureHttp {
         //   → 不动 token，让具体调用方按业务文案展示。
         // - 裸 HTTPException 401（response.data.code 为空）：JWT 过期 / 解码失败 / pwd_ver 不匹配
         //   → 才视为「登录状态过期」，清理 token 并提示重新登录。
-        const hasCode = !!(error?.response?.data as { code?: string } | undefined)?.code;
+        const hasCode = !!(
+          error?.response?.data as { code?: string } | undefined
+        )?.code;
         if ($error.response?.status === 401 && getToken() && !hasCode) {
           removeToken();
           const userStore = useUserStoreHook();
@@ -141,9 +146,9 @@ class PureHttp {
     // 单独处理自定义请求/响应回调
     return new Promise((resolve, reject) => {
       PureHttp.axiosInstance
-        .request(config)
-        .then((response: undefined) => {
-          resolve(response);
+        .request<PureHttpResponse, unknown>(config)
+        .then((response: PureHttpResponse) => {
+          resolve(response.data as T);
         })
         .catch(error => {
           reject(error);

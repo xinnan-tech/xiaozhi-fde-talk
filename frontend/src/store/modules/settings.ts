@@ -3,7 +3,7 @@ import { type setType, store, getConfig } from "../utils";
 
 export const useSettingStore = defineStore("pure-setting", {
   state: (): setType => ({
-    title: getConfig().Title,
+    title: getConfig().Title ?? "",
     hiddenSideBar: false
   }),
   getters: {

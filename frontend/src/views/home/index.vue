@@ -10,6 +10,7 @@ import { useInterviewStoreHook } from "@/store/modules/interview";
 import ReSegmented from "@/components/ReSegmented";
 import ChangePasswordDialog from "@/components/auth/ChangePasswordDialog.vue";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
+import { ElMessage } from "element-plus";
 import { isSupportedLocale, setLocale, type SupportedLocale } from "@/i18n";
 import {
   type InterviewItem,

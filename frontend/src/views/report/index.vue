@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import MarkdownIt from "markdown-it";
 import ReSegmented from "@/components/ReSegmented";
 import { extractBackendError } from "@/utils/error";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import {
   deleteInterviewApi,
@@ -200,9 +201,7 @@ const handleDeleteInterview = async () => {
     await router.push("/home");
   } catch (error) {
     if (error !== "cancel" && error !== "close") {
-      ElMessage.error(
-        extractBackendError(error, t("report.delete_failed"))
-      );
+      ElMessage.error(extractBackendError(error, t("report.delete_failed")));
     }
   }
 };

@@ -2,6 +2,7 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { extractBackendError } from "@/utils/error";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { usePermissionStoreHook } from "@/store/modules/permission";
@@ -10,6 +11,7 @@ import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import {
   systemConfigApi,
   type SystemConfig,
+  type SystemConfigSection,
   type SystemConfigValue,
   systemDiagnosticsApi,
   systemAsrDiagnosticsApi,
@@ -108,8 +110,8 @@ const isLoggedIn = computed(() => Boolean(userStore.accessToken));
 
 /** 是否为配置分组 */
 const isConfigSection = (
-  value: SystemConfigValue | SystemConfig["llm"]
-): value is Record<string, SystemConfigValue> =>
+  value: SystemConfigSection | SystemConfigValue | undefined | null
+): value is SystemConfigSection =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 /** 将后端值转换为表单可编辑的值 */
@@ -127,8 +129,8 @@ const buildConfigGroups = (data: SystemConfig) => {
   const loadedConfig: Record<string, Record<string, ConfigValue>> = {};
 
   /** 根据实际响应动态生成分组，因此后端缺少或新增分组时页面都能正常展示。 */
-  const groups = Object.entries(data).filter(([, section]) =>
-    isConfigSection(section)
+  const groups = Object.entries(data).flatMap(([groupKey, section]) =>
+    isConfigSection(section) ? [[groupKey, section] as const] : []
   );
 
   configGroups.value = groups.map(([groupKey, section]) => {

@@ -44,7 +44,7 @@ const transitionMain = defineComponent({
         appear: true
       },
       {
-        default: () => [this.$slots.default()]
+        default: () => [this.$slots.default?.() ?? []]
       }
     );
   }
@@ -83,7 +83,11 @@ const transitionMain = defineComponent({
                 <transitionMain :route="route">
                   <div class="main-content">
                     <keep-alive
-                      :include="usePermissionStoreHook().cachePageList"
+                      :include="
+                        usePermissionStoreHook().cachePageList.filter(
+                          (name): name is string => typeof name === 'string'
+                        )
+                      "
                     >
                       <component
                         :is="Comp"

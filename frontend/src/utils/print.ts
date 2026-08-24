@@ -5,7 +5,7 @@ interface PrintFunction {
   toPrint: Function;
 }
 
-const Print = function (dom, options?: object): PrintFunction {
+const Print = function (dom, options?: object): PrintFunction | void {
   options = options || {};
   // @ts-expect-error
   if (!(this instanceof Print)) return new Print(dom, options);
@@ -121,7 +121,7 @@ Print.prototype = {
       img.src = imageURL;
       img.setAttribute("style", "max-width: 100%;");
       img.className = "isNeedRemove";
-      canvass[k4].parentNode.insertBefore(img, canvass[k4].nextElementSibling);
+      canvass[k4].parentNode?.insertBefore(img, canvass[k4].nextElementSibling);
     }
 
     return this.dom.outerHTML;
@@ -141,17 +141,17 @@ Print.prototype = {
     );
 
     // eslint-disable-next-line prefer-const
-    w = f.contentWindow || f.contentDocument;
+    w = f.contentWindow ?? f.contentDocument ?? document;
 
     // eslint-disable-next-line prefer-const
-    doc = f.contentDocument || f.contentWindow.document;
+    doc = f.contentDocument ?? f.contentWindow?.document ?? document;
     doc.open();
     doc.write(content);
     doc.close();
 
     const removes = document.querySelectorAll(".isNeedRemove");
     for (let k = 0; k < removes.length; k++) {
-      removes[k].parentNode.removeChild(removes[k]);
+      removes[k].parentNode?.removeChild(removes[k]);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-this-alias

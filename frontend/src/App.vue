@@ -10,6 +10,7 @@ import { usePermissionStoreHook } from "@/store/modules/permission";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { useInterviewStoreHook } from "@/store/modules/interview";
+import { ElMessage } from "element-plus";
 import { ReDialog } from "@/components/ReDialog";
 import CreateInterviewDialog from "@/components/interview/CreateInterviewDialog.vue";
 import LoginDialog from "@/components/auth/LoginDialog.vue";
@@ -75,9 +76,13 @@ onMounted(() => {
 
 // 用户角色变化（登录 / 登出 / 注册）→ 重新过滤菜单。
 // 监听 role 而非整个 userStore：role 之外字段（username / avatar）变化不需要重算。
-watch(userRole, () => {
-  permissionStore.applyMenuFilter();
-});
+watch(
+  () => userRole?.value,
+  newRole => {
+    if (newRole === undefined) return;
+    permissionStore.applyMenuFilter();
+  }
+);
 
 defineExpose({ fetchRegistrationStatus });
 </script>
@@ -105,4 +110,3 @@ defineExpose({ fetchRegistrationStatus });
     <ReDialog />
   </el-config-provider>
 </template>
-

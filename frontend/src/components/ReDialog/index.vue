@@ -20,7 +20,7 @@ const fullscreen = ref(false);
 
 const footerButtons = computed(() => {
   return (options: DialogOptions) => {
-    return options?.footerButtons?.length > 0
+    return (options.footerButtons?.length ?? 0) > 0
       ? options.footerButtons
       : ([
           {
@@ -156,19 +156,19 @@ function handleClose(
         </i>
       </div>
       <component
-        :is="options?.headerRenderer({ close, titleId, titleClass })"
-        v-else
+        :is="options.headerRenderer({ close, titleId, titleClass })"
+        v-else-if="options?.headerRenderer"
       />
     </template>
     <component
       v-bind="options?.props"
-      :is="options.contentRenderer({ options, index })"
+      :is="options.contentRenderer?.({ options, index })"
       @close="args => handleClose(options, index, args)"
     />
     <!-- footer -->
     <template v-if="!options?.hideFooter" #footer>
       <template v-if="options?.footerRenderer">
-        <component :is="options?.footerRenderer({ options, index })" />
+        <component :is="options.footerRenderer({ options, index })" />
       </template>
       <span v-else>
         <template v-for="(btn, key) in footerButtons(options)" :key="key">
@@ -176,7 +176,7 @@ function handleClose(
             v-if="btn.popconfirm"
             v-bind="btn.popconfirm"
             @confirm="
-              btn.btnClick({
+              btn.btnClick?.({
                 dialog: { options, index },
                 button: { btn, index: key }
               })
@@ -191,7 +191,7 @@ function handleClose(
             v-bind="btn"
             :loading="key === 1 && sureBtnMap[index]?.loading"
             @click="
-              btn.btnClick({
+              btn.btnClick?.({
                 dialog: { options, index },
                 button: { btn, index: key }
               })

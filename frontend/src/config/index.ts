@@ -12,22 +12,25 @@ const getConfig = (key?: string): PlatformConfigs => {
   if (typeof key === "string") {
     const arr = key.split(".");
     if (arr && arr.length) {
-      let data = config;
+      let data = config as PlatformConfigs;
       arr.forEach(v => {
-        if (data && typeof data[v] !== "undefined") {
-          data = data[v];
+        if (
+          data &&
+          typeof (data as Record<string, unknown>)[v] !== "undefined"
+        ) {
+          data = (data as Record<string, PlatformConfigs>)[v];
         } else {
-          data = null;
+          data = {} as PlatformConfigs;
         }
       });
       return data;
     }
   }
-  return config;
+  return config as PlatformConfigs;
 };
 
 /** 获取项目动态全局配置 */
-export const getPlatformConfig = async (app: App): Promise<undefined> => {
+export const getPlatformConfig = async (app: App): Promise<PlatformConfigs> => {
   app.config.globalProperties.$config = getConfig();
   return axios({
     method: "get",

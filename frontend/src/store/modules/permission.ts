@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import type { RouteRecordName } from "vue-router";
 import {
   type cacheType,
   store,
@@ -50,18 +51,18 @@ export const usePermissionStore = defineStore("pure-permission", {
     // 静态路由生成的菜单
     constantMenus,
     // 整体路由生成的菜单（静态、动态）
-    wholeMenus: [],
+    wholeMenus: [] as any[],
     // 整体路由（一维数组格式）
-    flatteningRoutes: [],
+    flatteningRoutes: [] as any[],
     // 缓存页面keepAlive
-    cachePageList: [],
+    cachePageList: [] as RouteRecordName[],
     // allow_registration 当前值：从 /api/v1/auth/registration-status 拉取，
     // 用于过滤「用户管理」菜单——管理员开启注册时才显示。
     registrationAllowed: false
   }),
   getters: {
     currentRole(): string {
-      return useUserStoreHook().role;
+      return useUserStoreHook().role ?? "user";
     }
   },
   actions: {

@@ -5,7 +5,7 @@ import compressPlugin from "vite-plugin-compression";
 export const configCompressPlugin = (
   compress: ViteCompression
 ): Plugin | Plugin[] => {
-  if (compress === "none") return null;
+  if (compress === "none") return [];
 
   const gz = {
     // 生成的压缩包后缀

@@ -60,6 +60,10 @@ declare global {
     activePath?: string;
     /** 当前页面是否已经加载过 */
     loaded?: boolean;
+    /** 菜单升序排序，值越高排的越后（只针对顶级路由）`可选` */
+    rank?: number;
+    /** 是否要求后端开启注册才显示（用于按运行时开关过滤菜单） `可选` */
+    requiresRegistrationAllowed?: boolean;
   }
 
   /**
@@ -91,20 +95,7 @@ declare global {
     component?: RouteComponent;
     /** 路由重定向 `可选` */
     redirect?: string;
-    meta?: {
-      /** 菜单名称（兼容国际化、非国际化，如何用国际化的写法就必须在根目录的`locales`文件夹下对应添加）`必填` */
-      title: string;
-      /** 菜单国际化键，设置后优先使用当前语言显示 */
-      titleKey?: string;
-      /** 菜单图标 `可选` */
-      icon?: string | FunctionalComponent;
-      /** 是否在菜单中显示（默认`true`）`可选` */
-      showLink?: boolean;
-      /** 菜单升序排序，值越高排的越后（只针对顶级路由）`可选` */
-      rank?: number;
-      /** 页面级别权限设置（路由声明需要的角色，未授权用户跳 /403） `可选` */
-      roles?: Array<string>;
-    };
+    meta?: CustomizeRouteMeta;
     /** 子路由配置项 */
     children?: Array<RouteChildrenConfigsTable>;
   }

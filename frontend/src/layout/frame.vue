@@ -65,6 +65,7 @@ watch(
     if (props.frameInfo?.fullPath === path && isRedirect) {
       loading.value = true;
       clearFallbackTimer();
+      if (!props.frameInfo?.frameSrc) return;
       const url = new URL(props.frameInfo.frameSrc, window.location.origin);
       const joinChar = url.search ? "&" : "?";
       frameSrc.value = `${props.frameInfo.frameSrc}${joinChar}t=${Date.now()}`;

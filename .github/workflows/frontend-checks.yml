@@ -14,11 +14,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22.13.0"
-          cache: "pnpm"
-          cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: pnpm/action-setup@v4
         with:
           version: 9
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend typecheck
       - run: pnpm --dir frontend build

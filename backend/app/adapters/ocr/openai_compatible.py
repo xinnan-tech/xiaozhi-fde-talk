@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -12,7 +13,9 @@ from typing import Optional
 
 import httpx
 
-from app.adapters.ocr.base import OCRError, OCRProvider
+from app.adapters.ocr.base import OCRProvider
+from app.core.i18n.errors import I18nError
+from app.core.i18n.messages import Keys
 from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.core.retry import BackoffPolicy
 
@@ -63,7 +66,7 @@ class OpenAICompatibleOCRProvider(OCRProvider):
     async def _request(self, body: dict, retries: int) -> str:
         """POST chat/completions（视觉模式），返回 content 文本。"""
         if not self.configured:
-            raise OCRError("OCR 未配置（ocr.base_url / ocr.api_key / ocr.model）")
+            raise I18nError(Keys.OCR_NOT_CONFIGURED, http_status=502)
         url = f"{self._base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
         backoff = BackoffPolicy(base_delay=1.0, max_delay=10.0, factor=2.0)
@@ -86,15 +89,21 @@ class OpenAICompatibleOCRProvider(OCRProvider):
                         logger.info("OCR 调用成功：model=%s 耗时 %.2fs", self._model, elapsed_s)
                         return content
                 if 400 <= status < 500 and status not in (408, 429):
-                    raise OCRError(f"OCR 调用不可重试：HTTP {status} {resp.text[:200]}")
+                    raise I18nError(
+                        Keys.OCR_INVOKE_FAILED, http_status=502,
+                        err=f"OCR 调用不可重试：HTTP {status} {resp.text[:200]}",
+                    )
                 last_err = f"HTTP {status}: {resp.text[:200]}"
                 logger.warning("OCR 调用第 %d/%d 次失败：%s", attempt + 1, retries + 1, last_err)
             except (httpx.ConnectError, httpx.TimeoutException, ConnectionError, OSError) as e:
                 last_err = f"{type(e).__name__}: {e}"
                 logger.warning("OCR 网络错第 %d/%d 次：%s", attempt + 1, retries + 1, last_err)
             if attempt < retries:
-                await time.sleep(backoff.delay_for(attempt))
-        raise OCRError(f"OCR 调用 {retries + 1} 次仍失败：{last_err}")
+                await asyncio.sleep(backoff.delay_for(attempt))
+        raise I18nError(
+            Keys.OCR_INVOKE_FAILED, http_status=502,
+            err=f"OCR 调用 {retries + 1} 次仍失败：{last_err}",
+        )
 
     async def recognize(self, image_bytes: bytes, prompt: str = OCR_PROMPT) -> str:
         """调用视觉模型识别名片图片，返回提取的文本。"""

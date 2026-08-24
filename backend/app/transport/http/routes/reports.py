@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Response, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Response
 
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
-from app.services.reports.exporter import FormatNotImplementedError, export as export_report
+from app.services.reports.exporter import export as export_report
 from app.services.reports.generator import get_or_generate
 from app.services.sessions.manager import manager
 from app.services.sessions.runtime import registry
@@ -54,19 +53,22 @@ async def export_interview_report(
     format: str = "md",
     user: CurrentUser = Depends(get_current_user),
 ):
-    """导出报告：format = md / html / word（pdf 后加）。"""
+    """导出报告：format = md / html / word（pdf 后加）。
+
+    错误响应统一走 I18nError：
+    - FormatNotImplementedError (继承 I18nError, http_status=501)
+    - ValueError           → HTTP_REPORT_FORMAT_UNSUPPORTED (http_status=400)
+    - 其他 I18nError       → 直接冒泡
+    """
     await _own_session_or_404(session_id, user)
     status_str, md = await get_or_generate(session_id)
     if status_str != "ready" or not md:
         raise I18nError(Keys.HTTP_REPORT_NOT_READY, http_status=409)
     try:
         data, media_type = await asyncio.to_thread(export_report, md, format)
-    except FormatNotImplementedError as e:
-        return JSONResponse(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            content={"ok": False, "code": "not_implemented", "format": e.fmt},
-        )
     except I18nError:
+        # FormatNotImplementedError (501) / 其它已结构化的 I18nError 直接冒泡，
+        # 由 app.py:239 的 I18nError handler 转 {detail, code} 响应。
         raise
     except ValueError as e:
         raise I18nError(

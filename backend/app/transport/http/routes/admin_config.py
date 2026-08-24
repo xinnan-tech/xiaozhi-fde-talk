@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
 from app.core.config_store import ALL_B_KEYS, get_config_store
+from app.core.i18n import Keys
+from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
 from app.transport.http.dependencies import require_admin
 
@@ -33,7 +35,9 @@ async def get_group_config(
     _admin: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
     if group not in _GROUPS:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
+        raise I18nError(
+            Keys.HTTP_ADMIN_CONFIG_GROUP_NOT_FOUND, http_status=404, group=group,
+        )
     return await get_config_store().get_group(group)
 
 
@@ -44,14 +48,16 @@ async def put_group_config(
     _admin: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
     if group not in _GROUPS:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
+        raise I18nError(
+            Keys.HTTP_ADMIN_CONFIG_GROUP_NOT_FOUND, http_status=404, group=group,
+        )
 
     allowed_keys = {k.split(".", 1)[1] for k in ALL_B_KEYS if k.startswith(group + ".")}
     unknown = set(body.keys()) - allowed_keys
     if unknown:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"unknown keys: {sorted(unknown)}; allowed: {sorted(allowed_keys)}",
+        raise I18nError(
+            Keys.HTTP_ADMIN_CONFIG_UNKNOWN_KEYS, http_status=422,
+            unknown=sorted(unknown), allowed=sorted(allowed_keys),
         )
 
     # stub LLM 仅供 e2e/单测使用：prod 模式下任何 admin PUT llm.type=stub
@@ -60,9 +66,8 @@ async def put_group_config(
     if group == "llm" and body.get("type") == "stub":
         from app.core.settings import get_settings
         if get_settings().env == "prod":
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "stub LLM provider is test-only; cannot be enabled when env=prod",
+            raise I18nError(
+                Keys.HTTP_ADMIN_STUB_LLM_FORBIDDEN, http_status=403,
             )
 
     # 转换为 full key；None 当成空串（敏感字段空串会被 set_many 跳过）
@@ -71,6 +76,9 @@ async def put_group_config(
         await get_config_store().set_many(full_items)
     except ValueError as e:
         # 未知 key / 数值 key 的坏值（如 jwt_expire_minutes="abc"）在落库前拒绝
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from e
+        raise I18nError(
+            Keys.CONFIG_INVALID_ENUM_VALUE, http_status=422,
+            field=group, value=str(e), allowed=sorted(allowed_keys),
+        ) from e
 
     return {"ok": True, "group": group}

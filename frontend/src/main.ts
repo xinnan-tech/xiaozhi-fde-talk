@@ -6,7 +6,6 @@ import { MotionPlugin } from "@vueuse/motion";
 import { createApp, type Directive } from "vue";
 import { injectResponsiveStorage } from "@/utils/responsive";
 import { i18n } from "@/i18n";
-import "element-plus/dist/index.css";
 
 // 引入重置样式
 import "./style/reset.scss";

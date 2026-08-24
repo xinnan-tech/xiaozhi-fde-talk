@@ -9,6 +9,8 @@
   "lang.en_us": "English",
   "lang.vi_vn": "越南语",
 
+  "msg.session_expired": "登录状态已过期，请重新登录",
+
   "menu.home": "访谈主页",
   "menu.system": "系统配置",
   "menu.users": "用户管理",

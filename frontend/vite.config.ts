@@ -61,13 +61,11 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       strictPort: true,
       proxy: {
         "/api": {
-          target:
-            process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
+          target: process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
           changeOrigin: true
         },
         "/ws": {
-          target:
-            process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
+          target: process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
           changeOrigin: true,
           ws: true
         }
@@ -96,7 +94,8 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
         apply: "build",
         transform(code, id) {
           if (id.includes("node_modules")) return null;
-          if (!/console\.(log|debug|info|warn|error)\s*\(/.test(code)) return null;
+          if (!/console\.(log|debug|info|warn|error)\s*\(/.test(code))
+            return null;
           const out: string[] = [];
           const re = /console\.(log|debug|info|warn|error)\s*\(/g;
           let last = 0;
@@ -128,7 +127,11 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
               }
               if (c === "/" && src[i + 1] === "*") {
                 i += 2;
-                while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+                while (
+                  i < src.length &&
+                  !(src[i] === "*" && src[i + 1] === "/")
+                )
+                  i++;
                 i += 2;
                 continue;
               }
@@ -172,9 +175,7 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
             "element-plus-dialog",
             "element-plus-button"
           ];
-          return deps.filter((dep) =>
-            whitelist.some((w) => dep.includes(w))
-          );
+          return deps.filter(dep => whitelist.some(w => dep.includes(w)));
         }
       },
       rollupOptions: {
@@ -189,21 +190,21 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
           // 拆 vendor：主入口单点 > 1MB 会拉长首屏 JS parse 时间，
           // 把大体积依赖按类别拆到独立 chunk，配合浏览器长缓存复用。
           manualChunks(id) {
-            if (!id.includes("node_modules")) return
+            if (!id.includes("node_modules")) return;
             // 不再硬塞 element-plus：让 unplugin 按组件自动拆，节省首屏 chunk
             if (
               id.match(/[\\/]vue[\\/]/) ||
               id.match(/[\\/]vue-router[\\/]/) ||
               id.match(/[\\/]pinia[\\/]/)
             ) {
-              return "vue-vendor"
+              return "vue-vendor";
             }
-            if (id.includes("echarts")) return "echarts"
-            if (id.includes("dayjs")) return "dayjs"
+            if (id.includes("echarts")) return "echarts";
+            if (id.includes("dayjs")) return "dayjs";
             // vueuse 跟 vue 运行时强耦合，独立 chunk 会触发跨 chunk TDZ（"Cannot access 'zt' before initialization"）
             // 跟 vue-vendor 合并避免循环依赖被 chunk 边界切断
-            if (id.includes("@vueuse")) return "vue-vendor"
-            if (id.includes("axios")) return "axios"
+            if (id.includes("@vueuse")) return "vue-vendor";
+            if (id.includes("axios")) return "axios";
             if (
               id.includes("sortablejs") ||
               id.includes("tippy.js") ||
@@ -217,15 +218,17 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
               id.includes("vue-i18n") ||
               id.includes("@intlify")
             ) {
-              return "utils-vendor"
+              return "utils-vendor";
             }
             // element-plus 子模块按组件拆 chunk（unplugin 已做精确路径 import）
-            const m = id.match(/[\\/]element-plus[\\/]es[\\/]components[\\/]([^\\/]+)/);
+            const m = id.match(
+              /[\\/]element-plus[\\/]es[\\/]components[\\/]([^\\/]+)/
+            );
             if (m) return `element-plus-${m[1]}`;
             // 兜底合并到 vue-vendor：element-plus 按需引入后，vendor 跟 vue-vendor
             // 之间出现循环依赖（chunk 边界切断执行顺序 → TDZ "Cannot access X before initialization"）。
             // 合并成一个 chunk 消除边界；首屏只多等一次 vue-vendor 下载，但 B3 已 modulepreload 它，无明显延迟。
-            return "vue-vendor"
+            return "vue-vendor";
           }
         }
       }

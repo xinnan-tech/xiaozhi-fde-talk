@@ -13,7 +13,8 @@ import { stringify } from "qs";
 import { getToken, formatToken, removeToken } from "@/utils/auth";
 import { useUserStoreHook } from "@/store/modules/user";
 import { message } from "@/utils/message";
-import { getCurrentLocale } from "@/i18n";
+import { getCurrentLocale, i18n } from "@/i18n";
+import { extractDetailText } from "@/utils/error";
 
 // 相关配置请参考：www.axios-js.com/zh-cn/docs/#axios-request-config-1
 const defaultConfig: AxiosRequestConfig = {
@@ -103,24 +104,41 @@ class PureHttp {
       (error: PureHttpError) => {
         const $error = error;
         $error.isCancelRequest = Axios.isCancel($error);
+        const response = $error.response;
+        const responseData = response?.data;
+        const responseBody =
+          typeof responseData === "object" && responseData !== null
+            ? (responseData as { code?: unknown; detail?: unknown })
+            : undefined;
+        const hasBusinessCode =
+          typeof responseBody?.code === "string" &&
+          responseBody.code.length > 0;
 
-        // 401 分两类：
-        // - I18nError 业务 401（response.data.code 非空）：旧密码错、改密时用户被删等
-        //   → 不动 token，让具体调用方按业务文案展示。
-        // - 裸 HTTPException 401（response.data.code 为空）：JWT 过期 / 解码失败 / pwd_ver 不匹配
-        //   → 才视为「登录状态过期」，清理 token 并提示重新登录。
-        const hasCode = !!(
-          error?.response?.data as { code?: string } | undefined
-        )?.code;
-        if ($error.response?.status === 401 && getToken() && !hasCode) {
-          removeToken();
-          const userStore = useUserStoreHook();
-          userStore.SET_ACCESS_TOKEN("");
-          userStore.SET_USERNAME("");
-          message("登录状态已过期，请重新登录", {
+        const isExpiredSession = response?.status === 401 && !hasBusinessCode;
+        if (isExpiredSession) {
+          const token = getToken();
+
+          if (token) {
+            removeToken();
+            const userStore = useUserStoreHook();
+            userStore.SET_ACCESS_TOKEN("");
+            userStore.SET_USERNAME("");
+          }
+
+          message(i18n.global.t("msg.session_expired"), {
             type: "warning",
             grouping: true
           });
+        }
+
+        if (response?.status && !isExpiredSession) {
+          const errorMessage = extractDetailText(responseBody?.detail);
+          if (errorMessage) {
+            message(errorMessage, {
+              type: response.status === 401 ? "warning" : "error",
+              grouping: true
+            });
+          }
         }
 
         // 所有的响应异常 区分来源为取消请求/非取消请求
@@ -148,7 +166,9 @@ class PureHttp {
       PureHttp.axiosInstance
         .request<PureHttpResponse, unknown>(config)
         .then((response: PureHttpResponse) => {
-          resolve(response.data as T);
+          // PureHttp 的 response 拦截器已 return response.data，
+          // 这里拿到的就是后端 body，再 .data 会多拆一层导致 undefined。
+          resolve(response as T);
         })
         .catch(error => {
           reject(error);

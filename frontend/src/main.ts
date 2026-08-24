@@ -15,6 +15,8 @@ import "./style/index.scss";
 import "./style/tailwind.css";
 // 导入字体图标
 import "./assets/iconfont/iconfont.css";
+// ElMessage API 不会自动加载组件样式，需要手动引入
+import "element-plus/es/components/message/style/css";
 
 const app = createApp(App);
 app.use(i18n);

@@ -148,7 +148,9 @@ class PureHttp {
       PureHttp.axiosInstance
         .request<PureHttpResponse, unknown>(config)
         .then((response: PureHttpResponse) => {
-          resolve(response.data as T);
+          // PureHttp 的 response 拦截器已 return response.data，
+          // 这里拿到的就是后端 body，再 .data 会多拆一层导致 undefined。
+          resolve(response as T);
         })
         .catch(error => {
           reject(error);

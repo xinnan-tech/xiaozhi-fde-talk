@@ -139,7 +139,6 @@ type TranscriptEntry = {
   segId: string;
   startMs: number | null;
   role: string;
-  time: string;
   text: string;
   tone: "blue" | "green";
 };
@@ -445,19 +444,6 @@ const transcriptScrollRef = ref<{
   setScrollTop: (scrollTop: number) => void;
 } | null>(null);
 
-const formatTranscriptTime = (startMs: number | null = null) => {
-  if (startMs !== null && Number.isFinite(startMs) && startMs >= 0) {
-    const totalSeconds = Math.floor(startMs / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    return [hours, minutes, seconds]
-      .map(value => String(value).padStart(2, "0"))
-      .join(":");
-  }
-  return new Date().toLocaleTimeString(locale.value, { hour12: false });
-};
-
 const createTranscriptEntries = (transcript: unknown[]) => {
   return transcript
     .flatMap((item, index) => {
@@ -484,7 +470,6 @@ const createTranscriptEntries = (transcript: unknown[]) => {
               : `history-${index}`,
           startMs,
           role: speaker,
-          time: formatTranscriptTime(startMs),
           text,
           tone: "blue" as const
         }
@@ -511,7 +496,6 @@ const appendAsrMessage = (
       message.speaker === "unknown"
         ? t("interview.runtime.speaker", { number: 1 })
         : message.speaker,
-    time: formatTranscriptTime(message.start_ms),
     text: message.text,
     tone: "blue" as const
   };
@@ -1250,7 +1234,7 @@ onMounted(() => {
                 >
                   <div class="transcript-content">
                     <div class="transcript-meta">
-                      <time>{{ item.time }}</time>
+                      <span class="seg-id">{{ item.segId }}</span>
                     </div>
                     <p>{{ item.text }}</p>
                   </div>
@@ -2454,7 +2438,7 @@ onMounted(() => {
     margin-bottom: 8px;
   }
 
-  .transcript-meta time {
+  .transcript-meta .seg-id {
     font-size: 13px;
     font-weight: 600;
     color: #94a3b8;

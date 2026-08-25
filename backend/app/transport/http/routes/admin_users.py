@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -15,9 +15,9 @@ from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.core.password_policy import validate_password_strength
 from app.domain.auth import CurrentUser
-from app.persistence.db import SessionLocal, get_db
+from app.persistence.db import get_db
 from app.persistence.models import User
-from app.persistence.repositories.user import user_repo
+from app.persistence.repositories.user import _pwd_cache
 from app.transport.http.dependencies import require_admin
 from app.transport.http.schemas import AdminResetPasswordRequest, AdminUserInfo
 
@@ -52,19 +52,26 @@ async def reset_password(
     user_id: str,
     body: AdminResetPasswordRequest,
     _admin: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
     """重置用户密码。同步刷新 password_changed_at，旧 token 立即失效。
+
+    单 session 路径：复用请求级 get_db；之前嵌套开 SessionLocal 调
+    update_password_auto 会让外层 session 的隐式事务与内层 commit
+    在 SQLite 上时序不稳——CI 偶发旧 token pwd_ver 仍命中缓存里的旧值，
+    吊销检查放行 → 403 而非 401。
 
     不限制 admin 改其他 admin 的密码——admin 数量本来就少，最低门槛 1 个
     即可恢复（自助注册关时人工种子仍可用 service 层 register_user 走后续任务）。
     """
+    from app.core.security import hash_password_async
     validate_password_strength(body.new_password)
-    async with SessionLocal() as s:
-        row = await s.get(User, user_id)
-        if row is None:
-            raise I18nError(Keys.AUTH_USER_NOT_FOUND, http_status=404)
-        # 复用 update_password_auto：自带事务 + 写 password_changed_at + 失效缓存
-        ok = await user_repo.update_password_auto(row.username, body.new_password)
-    if not ok:
+    row = await db.get(User, user_id)
+    if row is None:
         raise I18nError(Keys.AUTH_USER_NOT_FOUND, http_status=404)
+    new_hash = await hash_password_async(body.new_password)
+    row.password_hash = new_hash
+    row.password_changed_at = datetime.now(timezone.utc)
+    await db.commit()
+    _pwd_cache.pop(user_id, None)
     return {"ok": True}

@@ -19,6 +19,19 @@
 **/*.pyc
 **/*.db
 **/*.sqlite3
+**/.venv
+**/venv/
+**/*.egg-info
+**/.coverage
+**/htmlcov
 docs
 *.md
 !README.md
+
+# backend 专属：原 backend/.dockerignore 的规则（Docker 只读根 .dockerignore，
+# 子目录 .dockerignore 不会被采用，所以必须合并到此处才真正生效）
+backend/tests/
+backend/models/
+backend/server.log
+backend/exports/
+backend/alembic/versions/.trash/

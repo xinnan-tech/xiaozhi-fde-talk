@@ -34,6 +34,10 @@ export default defineConfig({
         DB_URL: "sqlite+aiosqlite:///./tests/e2e/.e2e.db",
         HOST: "127.0.0.1",
         PORT: "8001",
+        // e2e 不连真 FunASR：adapters/asr/factory.py 的 _read_asr_config 会优先读
+        // ASR_TYPE 环境变量，funasr_mock 是离线 provider（pump_loop + asyncio），
+        // 见 backend/app/adapters/asr/funasr_mock.py。
+        ASR_TYPE: "funasr_mock",
       },
       stdout: "pipe",
       stderr: "pipe",

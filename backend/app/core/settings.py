@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     llm_model: str = "qwen-plus"
 
     # --- ASR（可插拔；adapters/asr/factory.py 按 asr_type 实例化）---
-    asr_type: Literal["funasr_server"] = "funasr_server"
+    asr_type: Literal["funasr_server", "funasr_mock"] = "funasr_server"
     asr_sample_rate: int = 16000
     # asr.ws_url 不再走 .env：运行时唯一来源是系统配置 store（admin 后台可改），
     # 由 adapters/asr/factory / funasr_server 直接读 DB，未配时首请求即抛

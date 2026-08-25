@@ -70,35 +70,6 @@ jobs:
       - name: Build frontend
         run: pnpm --dir frontend build
 
-      - name: Cache FunASR models
-        uses: actions/cache@v4
-        with:
-          path: backend/models/funasr-runtime-resources
-          # 镜像固定 funasr-runtime-sdk-online-cpu-0.1.12，run_server_2pass.sh
-          # 锁死模型 revision；docker-compose.yml 的 6 个 --*-dir 即模型清单，
-          # 变更即重生成 cache key。cache miss 走首次冷下载，下一步 timeout 兜底。
-          key: ${{ runner.os }}-funasr-${{ hashFiles('docker-compose.yml') }}
-          restore-keys: ${{ runner.os }}-funasr-
-
-      - name: Start FunASR
-        # cache miss 时冷启动：6 个模型 ~500MB-1GB，runner 带宽不稳时可达 10min+
-        timeout-minutes: 12
-        run: docker compose up -d funasr
-
-      - name: Wait for FunASR
-        run: |
-          for i in $(seq 1 100); do
-            if nc -z 127.0.0.1 10096 2>/dev/null; then
-              echo "FunASR ready"
-              exit 0
-            fi
-            echo "Waiting for FunASR... $i"
-            sleep 5
-          done
-          echo "FunASR not ready in 8min20s"
-          docker compose logs funasr
-          exit 1
-
       - name: Run e2e tests
         run: pnpm --dir frontend run test:e2e
         env:

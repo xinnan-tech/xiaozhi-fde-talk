@@ -1,12 +1,21 @@
 <script setup lang="ts">
+import { computed, onBeforeMount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import packageInfo from "../../../package.json";
+import { getBackendVersion } from "@/api/version";
 
 defineOptions({ name: "About" });
 
 const { t } = useI18n();
 const version = packageInfo.version;
+// 后端版本号：未拉到（请求中 / 失败 / 未登录）时为 null —— about 页降级为
+// 只显示前端版本，不向公网探测者暴露后端版本号。
+const backendVersion = ref<string | null>(null);
+// 仅当后端版本号拿到且与前端不同 → 显示两行；否则（一行 / 一致 / 仅前端）→ 单行
+const hasBothVersions = computed(
+  () => backendVersion.value !== null && backendVersion.value !== version,
+);
 const year = new Date().getFullYear();
 const productName = t("about.product_name");
 const productSummary = t("about.summary");
@@ -20,6 +29,15 @@ const maintainerIcon = useRenderIcon("tabler:user");
 const copyrightIcon = useRenderIcon("tabler:lock");
 const repoIcon = useRenderIcon("tabler:link");
 const docIcon = useRenderIcon("tabler:file-text");
+
+onBeforeMount(async () => {
+  try {
+    const res = await getBackendVersion();
+    backendVersion.value = res.version;
+  } catch {
+    // 401（未登录）/ 网络错：保持 null —— 模板降级为单行
+  }
+});
 </script>
 
 <template>
@@ -44,8 +62,18 @@ const docIcon = useRenderIcon("tabler:file-text");
           />
         </div>
         <div class="status-info">
-          <div class="status-title">{{ t("about.version") }}</div>
-          <div class="status-value">v{{ version }}</div>
+          <template v-if="hasBothVersions">
+            <div class="status-title">{{ t("about.version_frontend") }}</div>
+            <div class="status-value">v{{ version }}</div>
+            <div class="status-title status-title-secondary">
+              {{ t("about.version_backend") }}
+            </div>
+            <div class="status-value">v{{ backendVersion }}</div>
+          </template>
+          <template v-else>
+            <div class="status-title">{{ t("about.version") }}</div>
+            <div class="status-value">v{{ version }}</div>
+          </template>
         </div>
       </div>
 
@@ -228,6 +256,11 @@ const docIcon = useRenderIcon("tabler:file-text");
   .status-title {
     font-size: 13px;
     color: #666;
+  }
+
+  /* 两行布局下，第一行与值紧贴、第二行拉开间距，避免两段版本堆在一起 */
+  .status-title-secondary {
+    margin-top: 4px;
   }
 
   .status-value {

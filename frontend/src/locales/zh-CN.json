@@ -3,14 +3,11 @@
     "name": "简体中文",
     "code": "zh-CN"
   },
-
   "lang.zh_cn": "中文（简体）",
   "lang.zh_tw": "中文（繁體）",
   "lang.en_us": "English",
   "lang.vi_vn": "越南语",
-
   "msg.session_expired": "登录状态已过期，请重新登录",
-
   "menu.home": "访谈主页",
   "menu.system": "系统配置",
   "menu.users": "用户管理",
@@ -86,9 +83,7 @@
   "sidebar.assistant.feature_prompt": "开启即出提示",
   "sidebar.assistant.feature_report": "结束即得文档",
   "sidebar.assistant.create": "创建访谈",
-
   "doc.title": "访谈助手",
-
   "home.title": "访谈工作台",
   "home.subtitle": "会问一个问题，就是够专业",
   "home.search_placeholder": "搜索访谈...",
@@ -157,7 +152,6 @@
   "auth.change_password_failed": "修改失败，请稍后重试",
   "auth.change_password_old_wrong": "当前密码错误",
   "auth.change_password_mismatch": "两次输入的密码不一致",
-
   "users.list_title": "用户列表",
   "users.col_username": "用户名",
   "users.col_role": "角色",
@@ -183,7 +177,6 @@
   "users.dialog_subtitle": "正在为 {username} 重置登录密码",
   "users.new_password_placeholder": "至少 8 位，包含字母与数字",
   "users.confirm_password_placeholder": "再次输入新密码",
-
   "create.dialog.title": "创建新访谈",
   "create.dialog.basic_info": "基本信息",
   "create.dialog.interview_name": "访谈名称",
@@ -288,7 +281,6 @@
   "interview.runtime.kicked": "当前访谈已被其他连接接管",
   "interview.runtime.low_volume": "声音较小，请靠近麦克风",
   "interview.runtime.speaker": "说话人{number}",
-
   "report.default_title": "访谈报告",
   "report.tab.report": "访谈报告",
   "report.tab.transcript": "转录",
@@ -321,22 +313,18 @@
   "report.error_description": "请稍后重试",
   "report.reload": "重新加载",
   "report.ai": "AI",
-
   "top.username": "用户名",
   "top.password": "密码",
   "top.login": "登录",
   "top.logout": "退出",
-
   "nav.interviews": "🎙️ 访谈",
   "nav.config": "⚙️ 后端配置",
-
   "list.title": "访谈列表",
   "list.refresh": "刷新",
   "list.new": "＋ 新建访谈",
   "list.login_required": "请先登录。",
   "list.select_all": "全选",
   "list.delete_selected": "删除选中（{n}）",
-
   "create.title_new": "新建访谈",
   "create.title_edit": "编辑访谈",
   "create.back": "← 返回列表",
@@ -352,7 +340,6 @@
   "create.duration.45": "45 分钟",
   "create.duration.60": "1 小时",
   "create.duration.120": "2 小时",
-
   "detail.title": "访谈详情",
   "detail.start": "开始访谈",
   "detail.continue": "继续访谈",
@@ -370,7 +357,6 @@
   "detail.action.export_word": "导出 .docx",
   "detail.report_title": "报告",
   "detail.report_empty": "（访谈结束后点「查看报告」，LLM 照模板填，~10s）",
-
   "coach.filter.all": "全部",
   "coach.filter.done": "已问清",
   "coach.filter.new": "新冒出",
@@ -386,7 +372,6 @@
   "coach.label.none_in_filter": "（{label}暂无）",
   "coach.label.thinking": "辅导员正在思考之中…",
   "coach.label.corrected": "已纠正 {n} 处 ASR 错字",
-
   "config.title": "后端配置",
   "config.section.diag": "🔧 运行自检",
   "config.diag.help1": "点这里测试整套服务是否正常：ASR 连通 + 转写，LLM 连通 + 回复。",
@@ -404,26 +389,21 @@
   "config.save": "保存 {group}",
   "config.reload": "重载",
   "msg.no_fields": "（无字段）",
-
   "takeover.message": "该访谈已有另一个连接，是否接管？",
   "takeover.confirm": "接管连接",
   "takeover.cancel": "取消",
-
   "idle.message": "⏰ 访谈长时间无活动，{s} 秒后将自动挂起。",
   "idle.continue": "继续访谈",
   "idle.later": "稍后",
-
   "status.created": "待开始",
   "status.setting_up": "准备中",
   "status.in_progress": "进行中",
   "status.suspended": "已暂停",
   "status.extracting": "整理中",
   "status.ended": "已结束",
-
   "confirm.delete_one": "确认删除访谈「{name}」？",
   "confirm.delete_selected": "确认删除选中的 {n} 个访谈？",
   "confirm.forever": "此操作不可撤销。",
-
   "msg.login_required": "请先登录",
   "msg.loading": "加载中…",
   "msg.empty_list": "还没有访谈，点「新建访谈」开始。",
@@ -498,16 +478,13 @@
   "msg.asr_unavailable": "🎤 {msg}",
   "msg.ws_close_reason": "🔌 {reason}",
   "msg.saved_ok": "✅ 已保存，下一次请求生效",
-
   "name.untitled": "（未命名）",
-
   "ivmeta.created": "创建：",
   "ivmeta.started": "开始：",
   "ivmeta.ended": "结束：",
   "ivmeta.goal": "目标：",
   "ivmeta.edit": "编辑",
   "ivmeta.delete": "删除",
-
   "diag.label.asr": "ASR 语音识别",
   "diag.label.llm": "LLM 大语言模型",
   "diag.label.ok": "✅ 正常",
@@ -523,7 +500,6 @@
   "diag.detail.sample_real": "样本：真实音频",
   "diag.detail.sample_tone": "样本：合成 tone",
   "diag.latency": "{ms} ms",
-
   "about.title": "关于",
   "about.product_name": "小智方糖xiaozhi-fde-talk",
   "about.summary": "不只是录音转写，而是会\"听你聊、提示你问\"的 AI 访谈搭档",
@@ -534,5 +510,7 @@
   "about.rights": "版权所有",
   "about.repository": "代码仓库",
   "about.license_detail": "协议详情",
-  "about.license_full": "Apache License, Version 2.0, January 2004"
+  "about.license_full": "Apache License, Version 2.0, January 2004",
+  "about.version_frontend": "前端版本",
+  "about.version_backend": "后端版本"
 }

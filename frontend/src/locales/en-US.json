@@ -3,14 +3,11 @@
     "name": "English",
     "code": "en-US"
   },
-
   "lang.zh_cn": "中文（简体）",
   "lang.zh_tw": "中文（繁體）",
   "lang.en_us": "English",
   "lang.vi_vn": "Vietnamese",
-
   "msg.session_expired": "Your session has expired. Please sign in again.",
-
   "menu.home": "Interviews",
   "menu.system": "System config",
   "menu.users": "Users",
@@ -86,9 +83,7 @@
   "sidebar.assistant.feature_prompt": "Live prompts",
   "sidebar.assistant.feature_report": "Auto report",
   "sidebar.assistant.create": "Create",
-
   "doc.title": "Interview Assistant",
-
   "home.title": "Interview workspace",
   "home.subtitle": "Asking the right question is what makes you professional",
   "home.search_placeholder": "Search interviews...",
@@ -157,7 +152,6 @@
   "auth.change_password_failed": "Password change failed. Please try again later.",
   "auth.change_password_old_wrong": "Current password is incorrect",
   "auth.change_password_mismatch": "The two new passwords do not match",
-
   "users.list_title": "Users",
   "users.col_username": "Username",
   "users.col_role": "Role",
@@ -183,7 +177,6 @@
   "users.dialog_subtitle": "Reset password for {username}",
   "users.new_password_placeholder": "At least 8 characters, with letters and digits",
   "users.confirm_password_placeholder": "Re-enter the new password",
-
   "create.dialog.title": "Create new interview",
   "create.dialog.basic_info": "Basic information",
   "create.dialog.interview_name": "Interview name",
@@ -288,7 +281,6 @@
   "interview.runtime.kicked": "This interview was taken over by another connection",
   "interview.runtime.low_volume": "The volume is low. Move closer to the microphone.",
   "interview.runtime.speaker": "Speaker {number}",
-
   "report.default_title": "Interview report",
   "report.tab.report": "Interview report",
   "report.tab.transcript": "Transcript",
@@ -321,22 +313,18 @@
   "report.error_description": "Please try again later",
   "report.reload": "Reload",
   "report.ai": "AI",
-
   "top.username": "Username",
   "top.password": "Password",
   "top.login": "Sign in",
   "top.logout": "Sign out",
-
   "nav.interviews": "🎙️ Interviews",
   "nav.config": "⚙️ Backend config",
-
   "list.title": "Interviews",
   "list.refresh": "Refresh",
   "list.new": "＋ New interview",
   "list.login_required": "Please sign in first.",
   "list.select_all": "Select all",
   "list.delete_selected": "Delete selected ({n})",
-
   "create.title_new": "New interview",
   "create.title_edit": "Edit interview",
   "create.back": "← Back to list",
@@ -352,7 +340,6 @@
   "create.duration.45": "45 minutes",
   "create.duration.60": "1 hour",
   "create.duration.120": "2 hours",
-
   "detail.title": "Interview details",
   "detail.start": "Start interview",
   "detail.continue": "Resume interview",
@@ -370,7 +357,6 @@
   "detail.action.export_word": "Export .docx",
   "detail.report_title": "Report",
   "detail.report_empty": "(Click \"View report\" after the interview ends; the LLM fills the template in ~10s.)",
-
   "coach.filter.all": "All",
   "coach.filter.done": "Answered",
   "coach.filter.new": "Surfaced",
@@ -386,7 +372,6 @@
   "coach.label.none_in_filter": "(None in {label}.)",
   "coach.label.thinking": "Coach is thinking…",
   "coach.label.corrected": "Corrected {n} ASR typo(s)",
-
   "config.title": "Backend config",
   "config.section.diag": "🔧 Self-check",
   "config.diag.help1": "Run this to verify the whole pipeline: ASR connectivity + transcription, LLM connectivity + reply.",
@@ -404,26 +389,21 @@
   "config.save": "Save {group}",
   "config.reload": "Reload",
   "msg.no_fields": "(No fields.)",
-
   "takeover.message": "Another connection is already attached to this interview. Take over?",
   "takeover.confirm": "Take over",
   "takeover.cancel": "Cancel",
-
   "idle.message": "⏰ No activity for a while — auto-suspend in {s}s.",
   "idle.continue": "Resume",
   "idle.later": "Later",
-
   "status.created": "Created",
   "status.setting_up": "Setting up",
   "status.in_progress": "In progress",
   "status.suspended": "Suspended",
   "status.extracting": "Extracting",
   "status.ended": "Ended",
-
   "confirm.delete_one": "Delete interview \"{name}\"?",
   "confirm.delete_selected": "Delete {n} selected interviews?",
   "confirm.forever": "This cannot be undone.",
-
   "msg.login_required": "Please sign in first.",
   "msg.loading": "Loading…",
   "msg.empty_list": "No interviews yet. Click \"New interview\" to start.",
@@ -498,16 +478,13 @@
   "msg.asr_unavailable": "🎤 {msg}",
   "msg.ws_close_reason": "🔌 {reason}",
   "msg.saved_ok": "✅ Saved — takes effect on the next request",
-
   "name.untitled": "(Untitled)",
-
   "ivmeta.created": "Created: ",
   "ivmeta.started": "Started: ",
   "ivmeta.ended": "Ended: ",
   "ivmeta.goal": "Goal: ",
   "ivmeta.edit": "Edit",
   "ivmeta.delete": "Delete",
-
   "diag.label.asr": "ASR (speech recognition)",
   "diag.label.llm": "LLM (language model)",
   "diag.label.ok": "✅ OK",
@@ -523,7 +500,6 @@
   "diag.detail.sample_real": "Sample: real audio",
   "diag.detail.sample_tone": "Sample: synthetic tone",
   "diag.latency": "{ms} ms",
-
   "about.title": "About",
   "about.product_name": "xiaozhi-fde-talk",
   "about.summary": "Not just transcription — an AI interview partner that listens and prompts your next question.",
@@ -534,5 +510,7 @@
   "about.rights": "All Rights Reserved",
   "about.repository": "Repository",
   "about.license_detail": "License Details",
-  "about.license_full": "Apache License, Version 2.0, January 2004"
+  "about.license_full": "Apache License, Version 2.0, January 2004",
+  "about.version_frontend": "Frontend Version",
+  "about.version_backend": "Backend Version"
 }

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from datetime import timezone
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, Request
@@ -94,6 +95,10 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     pwd_changed_at = await user_repo.get_pwd_changed_at(user.user_id)
     # 历史用户 password_changed_at 可能为 None（迁移前回填的边缘场景）；
     # 退化到当前时间——保证 token 必然签出，pwd_ver 与 DB 始终能比对。
+    # naive datetime 统一当 UTC 解释，与 extract_auth 比对端对齐——
+    # 否则 CI UTC 下 pwd_ver 假阳性相等、改密后 token 漏吊销。
+    if pwd_changed_at and pwd_changed_at.tzinfo is None:
+        pwd_changed_at = pwd_changed_at.replace(tzinfo=timezone.utc)
     pwd_ver = int(pwd_changed_at.timestamp()) if pwd_changed_at else int(time.time())
     extra = {"username": user.username, "role": user.role}
     access_token = await create_access_token(
@@ -181,6 +186,10 @@ async def register(
     pwd_changed_at = await user_repo.get_pwd_changed_at(current.user_id)
     # 历史用户 password_changed_at 可能为 None；退化到当前时间——保证 token
     # 必然签出，pwd_ver 与 DB 始终能比对（login 路由同款）。
+    # naive datetime 统一当 UTC 解释，与 extract_auth 比对端对齐——
+    # 否则 CI UTC 下 pwd_ver 假阳性相等、改密后 token 漏吊销。
+    if pwd_changed_at and pwd_changed_at.tzinfo is None:
+        pwd_changed_at = pwd_changed_at.replace(tzinfo=timezone.utc)
     pwd_ver = int(pwd_changed_at.timestamp()) if pwd_changed_at else int(time.time())
     extra = {"username": current.username, "role": current.role}
     access_token = await create_access_token(
@@ -231,6 +240,9 @@ async def _decode_refresh_or_raise(token_str: str, db: AsyncSession) -> dict:
     pwd_changed_at = await user_repo.get_pwd_changed_at(user_id)
     if pwd_changed_at is None:
         raise I18nError(Keys.AUTH_REFRESH_REVOKED, http_status=401)
+    # naive datetime 统一当 UTC 解释——见 login/register 注释，CI UTC 下漏吊销
+    if pwd_changed_at.tzinfo is None:
+        pwd_changed_at = pwd_changed_at.replace(tzinfo=timezone.utc)
     if int(pwd_changed_at.timestamp()) != int(pwd_ver_claim):
         raise I18nError(Keys.AUTH_REFRESH_REVOKED, http_status=401)
     return payload

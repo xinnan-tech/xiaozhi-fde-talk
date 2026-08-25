@@ -123,6 +123,23 @@ export const extractInterviewFieldsApi = (data: ExtractInterviewRequest) => {
   );
 };
 
+export type OcrInterviewRequest = {
+  image_base64: string;
+};
+
+export type OcrInterviewResponse = {
+  text: string;
+};
+
+/** 拍照识别：后端视觉模型提取图片文字 */
+export const ocrInterviewImageApi = (data: OcrInterviewRequest) => {
+  return http.request<OcrInterviewResponse>(
+    "post",
+    baseUrlApi("/api/v1/interviews/ocr"),
+    { data }
+  );
+};
+
 /** 创建访谈 */
 export const saveInterviewApi = (data: CreateInterviewForm) => {
   return http.request<unknown>("post", baseUrlApi("/api/v1/interviews"), {

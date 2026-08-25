@@ -427,19 +427,20 @@ test.describe("场景 D-2: admin 改密 → bob 旧 token 调 /admin/users → 4
     const bobId = bobReg!.user.id
     const bobOldToken = bobReg!.access_token
 
-    // 3) 先用 bob 旧 token 调 /admin/users——应当 403（user 无权限）
-    // 注：bob 是 user role，/admin/users 要 admin，所以旧 token 实际是 403 而非 200
-    // 关键断言是改密后 token 被吊销——user_repo.update_password_auto 改 pwd_ver
-    // 让 token 中的 pwd_ver 与 DB 不匹配 → get_current_user 401
+    // 3) 先用 bob 旧 token 调 /api/v1/interviews——基线：200（user 角色能访问）
+    // 这步是后面 401 断言的前提：证明「同样的请求路径，改密前能通」，
+    // 才能让改密后的 401 真指向 pwd_ver 吊销，而不是其它鉴权失败。
     const beforeCtx = await playwrightRequest.newContext({ baseURL: E2E_API })
     const beforeStatus = await beforeCtx
-      .get("/api/v1/admin/users", {
+      .get("/api/v1/interviews", {
         headers: { Authorization: `Bearer ${bobOldToken}` },
       })
       .then(r => r.status())
     await beforeCtx.dispose()
-    // bob 是 user 角色——应当 403（不是 401）
-    expect(beforeStatus).toBe(403)
+    expect(
+      beforeStatus,
+      "bob 旧 token 改密前应能访问 /interviews（基线）"
+    ).toBe(200)
 
     // 4) admin 改 bob 密码
     const ok = await adminResetPassword(
@@ -449,10 +450,16 @@ test.describe("场景 D-2: admin 改密 → bob 旧 token 调 /admin/users → 4
     )
     expect(ok, "admin 改密失败").toBe(true)
 
-    // 5) bob 旧 token 再调 /admin/users → 应 401（pwd_ver mismatch）
+    // 5) bob 旧 token 再调 /api/v1/interviews → 应 401（pwd_ver mismatch）。
+    //
+    // 探针不能用 /admin/users：bob 是 user 角色，那条路径的鉴权是
+    // get_current_user（吊销）+ require_admin（403）两层叠加，user 角色
+    // 不管 token 死活都先被 403 挡掉，永远见不到吊销分支的 401。
+    // /api/v1/interviews 只走 get_current_user：改密前 200，改密后 401
+    // → 才是 pwd_ver 吊销的真实信号。
     const afterCtx = await playwrightRequest.newContext({ baseURL: E2E_API })
     const afterStatus = await afterCtx
-      .get("/api/v1/admin/users", {
+      .get("/api/v1/interviews", {
         headers: { Authorization: `Bearer ${bobOldToken}` },
       })
       .then(r => r.status())

@@ -427,19 +427,20 @@ test.describe("场景 D-2: admin 改密 → bob 旧 token 调 /admin/users → 4
     const bobId = bobReg!.user.id
     const bobOldToken = bobReg!.access_token
 
-    // 3) 先用 bob 旧 token 调 /admin/users——应当 403（user 无权限）
-    // 注：bob 是 user role，/admin/users 要 admin，所以旧 token 实际是 403 而非 200
-    // 关键断言是改密后 token 被吊销——user_repo.update_password_auto 改 pwd_ver
-    // 让 token 中的 pwd_ver 与 DB 不匹配 → get_current_user 401
+    // 3) 先用 bob 旧 token 调 /api/v1/interviews——基线：200（user 角色能访问）
+    // 这步是后面 401 断言的前提：证明「同样的请求路径，改密前能通」，
+    // 才能让改密后的 401 真指向 pwd_ver 吊销，而不是其它鉴权失败。
     const beforeCtx = await playwrightRequest.newContext({ baseURL: E2E_API })
     const beforeStatus = await beforeCtx
-      .get("/api/v1/admin/users", {
+      .get("/api/v1/interviews", {
         headers: { Authorization: `Bearer ${bobOldToken}` },
       })
       .then(r => r.status())
     await beforeCtx.dispose()
-    // bob 是 user 角色——应当 403（不是 401）
-    expect(beforeStatus).toBe(403)
+    expect(
+      beforeStatus,
+      "bob 旧 token 改密前应能访问 /interviews（基线）"
+    ).toBe(200)
 
     // 4) admin 改 bob 密码
     const ok = await adminResetPassword(
@@ -449,10 +450,16 @@ test.describe("场景 D-2: admin 改密 → bob 旧 token 调 /admin/users → 4
     )
     expect(ok, "admin 改密失败").toBe(true)
 
-    // 5) bob 旧 token 再调 /admin/users → 应 401（pwd_ver mismatch）
+    // 5) bob 旧 token 再调 /api/v1/interviews → 应 401（pwd_ver mismatch）。
+    //
+    // 探针不能用 /admin/users：bob 是 user 角色，那条路径的鉴权是
+    // get_current_user（吊销）+ require_admin（403）两层叠加，user 角色
+    // 不管 token 死活都先被 403 挡掉，永远见不到吊销分支的 401。
+    // /api/v1/interviews 只走 get_current_user：改密前 200，改密后 401
+    // → 才是 pwd_ver 吊销的真实信号。
     const afterCtx = await playwrightRequest.newContext({ baseURL: E2E_API })
     const afterStatus = await afterCtx
-      .get("/api/v1/admin/users", {
+      .get("/api/v1/interviews", {
         headers: { Authorization: `Bearer ${bobOldToken}` },
       })
       .then(r => r.status())
@@ -505,5 +512,111 @@ test.describe("场景 E: registration-status 500 → 去注册按钮禁用", () 
     // 之前版本曾尝试 el-tooltip 包 disabled 表达，但与设计意图冲突，回退到直接隐藏。
     const goRegister = dialog.locator("text=去注册")
     await expect(goRegister).toHaveCount(0, { timeout: 5_000 })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// 场景 F：首用户注册后 admin 菜单不闪现（App.vue watch 跟着 role 重拉注册状态）
+// ─────────────────────────────────────────────────────────────────────
+
+test.describe("场景 F: 首用户注册 → admin 菜单不闪现", () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test("mock 零用户 staleness → 注册后 + 刷新后均不出现 admin/users 菜单", async ({
+    page,
+    context,
+  }) => {
+    await context.clearCookies()
+
+    // 模拟「零用户时 registration-status 强制返 true / 有用户后按 cfg false」——
+    // 这就是用户报 bug 的根因：App.vue onMounted 拿到的 true 是缓存的 stale 值，
+    // 注册瞬间角色从空跳成 admin，旧缓存让 admin 菜单闪现。
+    let registered = false
+    let registrationStatusCalls = 0
+    await page.route("**/api/v1/auth/registration-status", route => {
+      registrationStatusCalls++
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          allow_registration: !registered,
+        }),
+      })
+    })
+
+    // 模拟注册响应：让 alice 成为 admin（首用户默认）
+    await page.route("**/api/v1/auth/register", route => {
+      registered = true
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          access_token: "mock-admin-token",
+          refresh_token: "",
+          token_type: "bearer",
+          user: {
+            id: "mock-admin-id",
+            username: "alice_first",
+            role: "admin",
+          },
+        }),
+      })
+    })
+
+    await page.goto("/")
+    await page.evaluate(() => {
+      localStorage.clear()
+      sessionStorage.clear()
+    })
+
+    // 点 avatar → dialog
+    await page.locator(".user-avatar").click()
+    const dialog = page.locator(".login-dialog")
+    await dialog.waitFor({ state: "visible", timeout: 15_000 })
+    // 等 LoginDialog watch 触发 registration-status（mock 2nd call 应返 true）
+    await page.waitForTimeout(500)
+
+    // 切到注册模式
+    const goRegister = dialog.locator("a.el-link").filter({
+      hasText: /Sign up|去注册|去註冊|Đăng ký/i,
+    })
+    await expect(goRegister).toBeVisible({ timeout: 5_000 })
+    await goRegister.click()
+
+    // 填表 + 提交
+    await dialog.locator(".login-input").nth(0).locator("input").fill("alice_first")
+    await dialog.locator(".login-input").nth(1).locator("input").fill("Strong1!pwd")
+    await dialog.locator(".login-input").nth(2).locator("input").fill("Strong1!pwd")
+    await dialog.locator(".login-btn").click()
+    await dialog.waitFor({ state: "hidden", timeout: 15_000 })
+
+    // 注册成功后 Element Plus toast「注册成功」
+    await expect(page.locator(".el-message--success")).toContainText(
+      /注册成功|register.*success|success/i,
+      { timeout: 5_000 }
+    )
+
+    // 关键断言：admin 角色拿到后菜单不出现。这是 bug 的核心断言：fix 之前
+    // 会闪现，fix 之后立刻消失。watch 会重拉 registration-status，mock 在注册
+    // 后切到返 false，缓存对齐后 filter 把 admin 菜单过滤掉。
+    await page.waitForTimeout(500)
+    const adminMenuLink = page.locator(".sidebar-menu a, .el-menu a, nav a").filter({
+      hasText: /^Users$|^用户管理$|^用戶管理$/i,
+    })
+    await expect(adminMenuLink).toHaveCount(0, { timeout: 5_000 })
+
+    // 刷新后仍不出现（确保 onMounted 的初始 fetch 也对齐 cfg false）
+    await page.reload()
+    await page.waitForTimeout(500)
+    const adminMenuLinkAfterReload = page.locator(
+      ".sidebar-menu a, .el-menu a, nav a"
+    ).filter({
+      hasText: /^Users$|^用户管理$|^用戶管理$/i,
+    })
+    await expect(adminMenuLinkAfterReload).toHaveCount(0, { timeout: 5_000 })
+
+    // 探针：注册后 registration-status 应被多调用一次（watch 重拉）。这是对 fix
+    // 的直接验证——没修之前只有 onMounted + dialog open 共 2 次。
+    expect(registrationStatusCalls).toBeGreaterThanOrEqual(3)
   })
 })

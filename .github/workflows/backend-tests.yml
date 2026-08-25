@@ -5,7 +5,7 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,6 +17,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          pip install pytest==8.3.4 pytest-asyncio==0.24.0
+          pip install pytest==8.3.4 pytest-asyncio==0.24.0 pytest-timeout==2.4.0
       - name: Run unit tests
-        run: cd backend && python -m pytest tests/unit -q --tb=short
+        # -v 暴露挂死时的当前测试名；--timeout=60 给真挂死的单条测试一个退出窗口，
+        # 否则 CI 走完 20 分钟 cap 也只能看到 buffer flush 出来的一行。
+        run: cd backend && python -m pytest tests/unit -v --tb=short --timeout=60

@@ -6,6 +6,7 @@ Auth 边界：extract_auth 协议无关鉴权，WS 等非 HTTP 协议复用。
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timezone
 from typing import Literal, Optional, Protocol
 
 from app.core.exceptions import AuthError
@@ -40,6 +41,12 @@ async def extract_auth(raw_token: Optional[str]) -> CurrentUser:
     pwd_changed_at = await user_repo.get_pwd_changed_at(user_id)
     if pwd_changed_at is None:
         raise AuthError("user not found")
+    # SQLite + SQLAlchemy ORM 往返丢 tz：写入是 aware UTC，存为 naive 字符串，
+    # 读出来 tzinfo=None。统一当 UTC 解释，避免不同系统时区下 pwd_ver 计算漂移
+    # 导致「改密后 token 应被吊销却放行」(CI UTC 下) 或「未改密却误吊销」
+    # (mac 等本地非 UTC 系统)。
+    if pwd_changed_at.tzinfo is None:
+        pwd_changed_at = pwd_changed_at.replace(tzinfo=timezone.utc)
     if int(pwd_changed_at.timestamp()) != int(pwd_ver_claim):
         raise AuthError("token revoked (pwd_ver mismatch)")
     return CurrentUser(

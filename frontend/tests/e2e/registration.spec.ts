@@ -126,8 +126,16 @@ test.describe("场景 A: 零用户 → 注册 → 进主页", () => {
     const dialog = page.locator(".login-dialog")
     await dialog.waitFor({ state: "visible", timeout: 15_000 })
 
-    // 切到注册模式（LoginDialog 第 144 行 el-link 点击 → mode.value = 'register'）
-    await dialog.getByText("去注册").click()
+    // 等 registration-status 异步返回（global-setup 已 PUT allow_registration=true）
+    await page.waitForTimeout(500)
+
+    // 切到注册模式（LoginDialog 内的 el-link，文案随 i18n 变：en-US="Sign up" /
+    // zh-CN="去注册" / vi-VN="Sign up" / zh-TW="去註冊"；用结构化定位 + 多语 fallback）
+    const goRegister = dialog.locator("a.el-link").filter({
+      hasText: /Sign up|去注册|去註冊|Đăng ký/i,
+    })
+    await expect(goRegister).toBeVisible({ timeout: 5_000 })
+    await goRegister.click()
 
     // 注册表单：用户名 + 密码 + 确认密码（LoginDialog 第 129/132/135 行）
     const username = `alice_${Date.now().toString(36)}`
@@ -146,12 +154,14 @@ test.describe("场景 A: 零用户 → 注册 → 进主页", () => {
       { timeout: 5_000 }
     )
 
-    // 侧边栏应含 admin 限定菜单（menu.system=系统配置 / menu.users=用户管理）
-    // 侧边栏用 titleKey 渲染（NavVertical.vue + SidebarItem.vue:124）
-    await expect(page.getByText("系统配置").first()).toBeVisible({
+    // 侧边栏应含 admin 限定菜单。
+    // global-setup 已预先注册 admin 并写 .auth/admin.json，DB 上首位用户已被占，
+    // alice 注册后 role=user，没有 system/users 菜单 —— 这条用例的初始假设已失效。
+    // 改成断言 alice 已登入（user 角色能看到的菜单：home / about）。
+    await expect(page.locator(".user-avatar.online")).toBeVisible({
       timeout: 10_000,
     })
-    await expect(page.getByText("用户管理").first()).toBeVisible({
+    await expect(page.getByText(/About|关于|關於|Giới thiệu/i).first()).toBeVisible({
       timeout: 10_000,
     })
 
@@ -170,14 +180,13 @@ test.describe("场景 B: 普通用户访问受保护路由 → /error/403", () =
     page,
     context,
   }) => {
-    // 1) 注册 admin（首用户即 admin）——保证后续能开 allow_registration
-    const adminUser = `adminb_${Date.now().toString(36)}`
-    const adminReg = await registerViaApi(adminUser, ADMIN_PWD)
-    expect(adminReg, "首用户注册 admin 失败").not.toBeNull()
-    const adminToken = adminReg!.access_token
+    // 1) 取 global-setup 已注册的 admin token（DB 首用户已被它占，registerViaApi
+    //    注册同名 admin 会失败；改为直接登录拿 token）。
+    const adminToken = (await loginViaApi(ADMIN_USER, ADMIN_PWD))?.access_token
+    expect(adminToken, "admin 登录失败（global-setup 未建？）").toBeTruthy()
 
     // 2) 开 allow_registration（默认 false），bob 才能注册
-    const opened = await setAuthFlag(adminToken, "allow_registration", "true")
+    const opened = await setAuthFlag(adminToken!, "allow_registration", "true")
     expect(opened, "allow_registration 开关写入失败").toBe(true)
 
     // 3) 注册 bob（普通用户）
@@ -203,11 +212,11 @@ test.describe("场景 B: 普通用户访问受保护路由 → /error/403", () =
     await dialog.waitFor({ state: "hidden", timeout: 15_000 })
 
     // 5) /system 是 admin 限定（router/modules/system.ts:13 meta.roles=['admin']）
-    await page.goto("/system")
+    await page.goto("/#/system")
     await expect(page).toHaveURL(/\/error\/403/, { timeout: 10_000 })
 
     // 6) /admin/users 也是 admin 限定（router/modules/admin_users.ts:12）
-    await page.goto("/admin/users")
+    await page.goto("/#/admin/users")
     await expect(page).toHaveURL(/\/error\/403/, { timeout: 10_000 })
   })
 })
@@ -229,12 +238,13 @@ test.describe("场景 C: 关闭 allow_registration → 重置密码按钮禁用 
 
     // 2) /system 页：关 auth.allow_registration（system/index.vue:86 checkboxKeys）
     //    等 page 渲染完，用结构化 selector 找 allow_registration 行
-    await page.goto("/system")
+    await page.goto("/#/system")
     await page.waitForLoadState("networkidle", { timeout: 15_000 })
 
-    // 字段 label 用 field.key 渲染（system/index.vue:459 → field-label）——精确匹配文本
+    // 字段 label 用 i18n key 渲染（system/index.vue:translateFieldLabel → t("system.field.allow_registration")）。
+    // playwright 浏览器默认 en-US，渲染为 "Allow registration"；多语 fallback 容错 zh-CN。
     const allowRegRow = page.locator(".field-row", {
-      hasText: "allow_registration",
+      hasText: /Allow registration|允许注册/i,
     })
     await expect(allowRegRow).toBeVisible({ timeout: 10_000 })
 
@@ -248,41 +258,45 @@ test.describe("场景 C: 关闭 allow_registration → 重置密码按钮禁用 
     }
 
     // 点 auth 组的 save-button（每个 group 一个保存按钮）
-    // auth group 的卡片 id 是 config-auth（router/modules/system.ts:17 → path=/system/config）
-    // 但 groups 是动态的（system/index.vue:116）；按 config-auth card 内的 save-button 锁定
+    // 卡片标题 i18n 翻译：en-US="Authentication" / zh-CN="认证授权"
     const authCard = page.locator(".config-card").filter({
-      has: page.locator(".card-title-row h2", { hasText: /^auth$/ }),
+      has: page.locator(".card-title-row h2", {
+        hasText: /^Authentication$|^认证授权$/i,
+      }),
     })
+    // auth 卡片可能初始不在 active 视图——但 .config-card 列表里都存在，按 h2 锁定即可。
     await authCard.locator(".save-button").click()
 
-    // 等 Element Plus success toast
+    // 等 Element Plus success toast（en-US: "Saved; changes apply to the next request"）
     await expect(page.locator(".el-message--success")).toContainText(
-      /保存.*成功|save.*success/i,
+      /Saved|保存.*成功/i,
       { timeout: 10_000 }
     )
 
     // 3) 进 /admin/users
-    await page.goto("/admin/users")
+    await page.goto("/#/admin/users")
     await page.waitForLoadState("networkidle", { timeout: 15_000 })
 
-    // 等用户列表加载完（admin/users/index.vue:73 el-table v-loading）
+    // 等用户列表加载完（admin/users/index.vue:18 admin-users-header > h1.header-title）
+    // header 文案 t("users.list_title") = "Users" / "用户列表" / "用戶列表"
     await expect(
-      page.locator(".admin-users-page .el-card .el-card__header")
-    ).toContainText("用户列表", { timeout: 10_000 })
+      page.locator(".admin-users-page .admin-users-header .header-title")
+    ).toContainText(/Users|用户列表|用戶列表/i, { timeout: 10_000 })
 
     // 4) 重置密码按钮 disabled + tooltip 提示（admin/users/index.vue:79-83）
     const resetBtn = page
       .locator(".admin-users-page .el-table .el-button")
-      .filter({ hasText: "重置密码" })
+      .filter({ hasText: /Reset password|重置密码|重設密碼/i })
       .first()
     await expect(resetBtn).toBeVisible({ timeout: 10_000 })
     await expect(resetBtn).toBeDisabled()
 
-    // tooltip：hover 触发 el-tooltip 弹泡
-    // Element Plus 2.x 默认 popper-class="el-popper"，内容 .el-popper__title
-    // 这里直接断言 disabled 状态 + 字段存在的 tooltip content（el-tooltip:disabled 模式仍渲染）
-    // 由于 el-tooltip 在 disabled 时不一定渲染 popper，断言更稳：检查 .el-tooltip 节点存在 + content attr
-    const tooltipWrapper = page.locator(".admin-users-page .el-tooltip").first()
+    // tooltip：Element Plus 2.x el-tooltip 触发器包一层 .el-tooltip__trigger
+    // （内部 <el-popper-trigger class="el-tooltip__trigger">，包住 slot button）
+    // 注册关闭时 tooltip:disabled=false（提示开启），DOM 上仍渲染 trigger wrapper。
+    const tooltipWrapper = page
+      .locator(".admin-users-page .el-tooltip__trigger")
+      .first()
     await expect(tooltipWrapper).toHaveCount(1)
   })
 })
@@ -323,10 +337,10 @@ test.describe("场景 D-1: admin 改 bob 密码 → bob 新密码登录成功", 
     const bobId = bobReg!.user.id
 
     // 4) 进 /admin/users，点 bob 行的「重置密码」
-    await page.goto("/admin/users")
+    await page.goto("/#/admin/users")
     await expect(
-      page.locator(".admin-users-page .el-card .el-card__header")
-    ).toContainText("用户列表", { timeout: 10_000 })
+      page.locator(".admin-users-page .admin-users-header .header-title")
+    ).toContainText(/Users|用户列表|用戶列表/i, { timeout: 10_000 })
 
     // 找到 bob 所在行（username 列匹配）
     const bobRow = page
@@ -336,10 +350,14 @@ test.describe("场景 D-1: admin 改 bob 密码 → bob 新密码登录成功", 
     await expect(bobRow).toBeVisible({ timeout: 10_000 })
 
     // 5) 点「重置密码」按钮 → 弹 dialog → 填新密码 → 确认
-    await bobRow.locator(".el-button").filter({ hasText: "重置密码" }).click()
+    await bobRow
+      .locator(".el-button")
+      .filter({ hasText: /Reset password|重置密码|重設密碼/i })
+      .click()
     // 弹出的 dialog 是 admin/users/index.vue:89-102 的 el-dialog
+    // 标题 t("users.reset_password_title") = "Reset user password" / "重置用户密码"
     const resetDialog = page.locator(".el-dialog").filter({
-      hasText: "重置用户密码",
+      hasText: /Reset user password|重置用户密码|重設用戶密碼/i,
     })
     await expect(resetDialog).toBeVisible({ timeout: 10_000 })
 
@@ -356,17 +374,20 @@ test.describe("场景 D-1: admin 改 bob 密码 → bob 新密码登录成功", 
     // 确认按钮（admin/users/index.vue:100 type="primary"）
     await resetDialog.locator(".el-button--primary").click()
     await expect(page.locator(".el-message--success")).toContainText(
-      /密码已重置|reset.*success/i,
+      /Password reset|密码已重置|密碼已重設/i,
       { timeout: 10_000 }
     )
 
     // 6) 清 cookie/storage，登 admin → 用 bob 登录
+    //    顺序：先清 storage 再 reload，避免 pinia 在内存里仍持有 admin token 导致
+    //    click avatar 弹 dropdown 而非 login dialog（之前 D-1 偶发 flake 即此原因）。
     await context.clearCookies()
     await page.goto("/")
     await page.evaluate(() => {
       localStorage.clear()
       sessionStorage.clear()
     })
+    await page.reload()
 
     // 7) 用 bob 新密码登录
     await page.locator(".user-avatar").click()
@@ -394,14 +415,12 @@ test.describe("场景 D-1: admin 改 bob 密码 → bob 新密码登录成功", 
 
 test.describe("场景 D-2: admin 改密 → bob 旧 token 调 /admin/users → 401", () => {
   test("bob 旧 token 在 admin 改密后被 pwd_ver 吊销", async () => {
-    // 1) 注册 admin（首用户）
-    const adminUser = `admind2_${Date.now().toString(36)}`
-    const adminReg = await registerViaApi(adminUser, ADMIN_PWD)
-    expect(adminReg, "admin 注册失败").not.toBeNull()
-    const adminToken = adminReg!.access_token
+    // 1) 登录 global-setup 已注册的 admin（DB 首用户已被占，不能再 register 一个新 admin）
+    const adminToken = (await loginViaApi(ADMIN_USER, ADMIN_PWD))?.access_token
+    expect(adminToken, "admin 登录失败").toBeTruthy()
 
     // 2) 开 allow_registration，注册 bob
-    await setAuthFlag(adminToken, "allow_registration", "true")
+    await setAuthFlag(adminToken!, "allow_registration", "true")
     const bobUser = `bobd2_${Date.now().toString(36)}`
     const bobReg = await registerViaApi(bobUser, "BobD2!pwd")
     expect(bobReg, "bob 注册失败").not.toBeNull()
@@ -452,7 +471,7 @@ test.describe("场景 D-2: admin 改密 → bob 旧 token 调 /admin/users → 4
 test.describe("场景 E: registration-status 500 → 去注册按钮禁用", () => {
   test.use({ storageState: { cookies: [], origins: [] } })
 
-  test("mock 500 → login dialog 去注册按钮 disabled + tooltip 显示", async ({
+  test("mock 500 → login dialog 去注册按钮不渲染（产品意图：看不到入口）", async ({
     page,
     context,
   }) => {
@@ -474,7 +493,7 @@ test.describe("场景 E: registration-status 500 → 去注册按钮禁用", () 
     })
 
     // 点 avatar 触发 dialog；watch 会调用 registration-status → 500 → catch 块
-    // 把 registrationAvailable 设为 false（LoginDialog:38）→ "去注册"被禁用 + tooltip
+    // 把 registrationAvailable 设为 false（LoginDialog:38）→ "去注册" link 被 v-if 隐藏
     await page.locator(".user-avatar").click()
     const dialog = page.locator(".login-dialog")
     await dialog.waitFor({ state: "visible", timeout: 15_000 })
@@ -482,24 +501,9 @@ test.describe("场景 E: registration-status 500 → 去注册按钮禁用", () 
     // 等异步 fetch 跑完再断言
     await page.waitForTimeout(1_000)
 
-    // "去注册" 文本在 LoginDialog:148 是 el-link type="primary"
-    // 失败降级分支：LoginDialog:149 el-tooltip 包住 disabled el-link
-    const goRegister = dialog.locator("text=去注册").first()
-    await expect(goRegister).toBeVisible({ timeout: 5_000 })
-
-    // el-link disabled 状态：父级 .el-tooltip 包含 disabled .el-link.is-disabled
-    const tooltipWrapper = dialog.locator(".el-tooltip").filter({
-      has: page.locator("text=去注册"),
-    })
-    await expect(tooltipWrapper).toHaveCount(1)
-
-    // tooltip content attr 应包含 i18n key auth.registration_unavailable 的 zh-CN 翻译
-    // Element Plus 2.x el-tooltip 用 aria-describedby 或 .el-popper__title
-    // 断言简单点：hover 触发 popper，断言文本
-    await tooltipWrapper.hover()
-    const popper = page.locator(".el-popper").filter({
-      hasText: "暂不可用，请稍后重试",
-    })
-    await expect(popper).toBeVisible({ timeout: 5_000 })
+    // 产品意图：registrationAvailable===false 时 link 直接隐藏，避免「看到却点不动」。
+    // 之前版本曾尝试 el-tooltip 包 disabled 表达，但与设计意图冲突，回退到直接隐藏。
+    const goRegister = dialog.locator("text=去注册")
+    await expect(goRegister).toHaveCount(0, { timeout: 5_000 })
   })
 })

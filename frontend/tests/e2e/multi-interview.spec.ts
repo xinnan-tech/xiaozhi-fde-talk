@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test"
 import { loginAsAdmin } from "./fixtures/admin"
+import { fillCreateInterviewForm } from "./fixtures/create-interview"
 
 // 连续创建 2 个不同标题的访谈 → home 列表都显示 → 点各自进对应详情
 test("创建 2 个访谈、home 列表都显示、点击各自进对应详情", async ({ page }) => {
@@ -11,7 +12,6 @@ test("创建 2 个访谈、home 列表都显示、点击各自进对应详情", 
     .getByRole("button", { name: /新建访谈|New interview/i })
     .first()
   const dialog = page.locator(".create-interview-dialog")
-  const titleField = page.getByLabel(/访谈名称|interview.*name/i).first()
   const submitBtn = page
     .getByRole("button", { name: /创建访谈|create.*interview/i })
     .last()
@@ -20,7 +20,7 @@ test("创建 2 个访谈、home 列表都显示、点击各自进对应详情", 
   await createBtn.click()
   await dialog.waitFor({ state: "visible", timeout: 10_000 })
   const title1 = `e2e-multi-a-${Date.now()}`
-  await titleField.fill(title1)
+  await fillCreateInterviewForm(page, title1)
   await submitBtn.click()
   await expect(dialog).not.toBeVisible({ timeout: 10_000 })
 
@@ -28,7 +28,7 @@ test("创建 2 个访谈、home 列表都显示、点击各自进对应详情", 
   await createBtn.click()
   await dialog.waitFor({ state: "visible", timeout: 10_000 })
   const title2 = `e2e-multi-b-${Date.now()}`
-  await titleField.fill(title2)
+  await fillCreateInterviewForm(page, title2)
   await submitBtn.click()
   await expect(dialog).not.toBeVisible({ timeout: 10_000 })
 

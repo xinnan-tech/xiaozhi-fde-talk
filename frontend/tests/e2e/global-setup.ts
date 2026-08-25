@@ -9,16 +9,36 @@ export default async function globalSetup(config: FullConfig) {
   // 不再走旧版 bootstrap 的 seed admin：d0084ff / 6c926b9 已删 seed + 简化 bootstrap，
   // 但 global-setup 没同步——这里补回。注册失败（如用户已存在）吞掉，让后续 UI 登录失败再报。
   const apiCtx = await playwrightRequest.newContext({ baseURL: E2E_API })
+  let adminToken: string | undefined
   try {
-    await apiCtx.post("/api/v1/auth/register", {
+    const regResp = await apiCtx.post("/api/v1/auth/register", {
       data: {
         username: ADMIN_USER,
         password: ADMIN_PWD,
         confirm_password: ADMIN_PWD,
       },
     })
+    if (regResp.status() === 200) {
+      const regData = (await regResp.json()) as { access_token?: string }
+      adminToken = regData.access_token
+    }
   } finally {
     await apiCtx.dispose()
+  }
+
+  // 首用户已注册后，config_store 默认 auth.allow_registration="false"。
+  // registration 场景 A（zero-user 注册）/ 场景 D-1/D-2（注册 bob）依赖该开关为 true；
+  // 场景 C 显式 PUT 关掉，不依赖初值，但初值 false 也无害。全局打开让后续 spec 顺序无关。
+  if (adminToken) {
+    const flagCtx = await playwrightRequest.newContext({ baseURL: E2E_API })
+    try {
+      await flagCtx.put("/api/v1/admin/config/auth", {
+        headers: { Authorization: `Bearer ${adminToken}` },
+        data: { allow_registration: "true" },
+      })
+    } finally {
+      await flagCtx.dispose()
+    }
   }
 
   const baseURL = config.projects[0].use.baseURL as string

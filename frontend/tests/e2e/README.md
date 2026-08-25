@@ -14,9 +14,9 @@
 - 后端 web server：playwright.config.ts 自动拉起（8001 端口）；
   如端口被占先杀掉。
 - FunASR @ `localhost:10096`（`docker compose up funasr`）
-- 默认 admin 账号：`admin` / `longenough1234`
-  （与 `backend/tests/conftest.py::_TEST_ADMIN_PASSWORD` 兜底一致）
-- **CI 必须注入** `E2E_ADMIN_USER` / `E2E_ADMIN_PASSWORD`，避免仓库硬编码密钥泄漏
+- 默认 admin 账号：`admin` / `AdminTest123!@#`
+  （与 `backend/tests/conftest.py::_TEST_ADMIN_PASSWORD` 兜底一致；密码 ≥ 3 类字符，过 `password_policy` 强度校验）
+- **CI 推荐注入** `E2E_ADMIN_USER` / `E2E_ADMIN_PASSWORD` 走不同测试密钥，不注入时 fallback 也满足强度要求
 
 ## Conda / Python 路径不对
 

@@ -7,13 +7,6 @@ on:
       - "backend/**"
       - ".github/workflows/frontend-e2e.yml"
       - "docker-compose.yml"
-  push:
-    branches: [main]
-    paths:
-      - "frontend/**"
-      - "backend/**"
-      - ".github/workflows/frontend-e2e.yml"
-      - "docker-compose.yml"
 
 jobs:
   e2e:

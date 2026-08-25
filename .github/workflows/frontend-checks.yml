@@ -2,9 +2,6 @@ name: frontend-checks
 on:
   pull_request:
     paths: ["frontend/**", ".github/workflows/frontend-checks.yml"]
-  push:
-    branches: [main]
-    paths: ["frontend/**", ".github/workflows/frontend-checks.yml"]
 jobs:
   typecheck:
     runs-on: ubuntu-latest

@@ -2,9 +2,6 @@ name: backend-tests
 on:
   pull_request:
     paths: ["backend/**", ".github/workflows/backend-tests.yml"]
-  push:
-    branches: [main]
-    paths: ["backend/**", ".github/workflows/backend-tests.yml"]
 jobs:
   pytest:
     runs-on: ubuntu-latest

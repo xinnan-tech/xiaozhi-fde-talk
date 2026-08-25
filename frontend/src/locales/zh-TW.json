@@ -544,5 +544,7 @@
   "about.rights": "版權所有",
   "about.repository": "程式碼倉庫",
   "about.license_detail": "協議詳情",
-  "about.license_full": "Apache License, Version 2.0, January 2004"
+  "about.license_full": "Apache License, Version 2.0, January 2004",
+  "about.version_frontend": "前端版本",
+  "about.version_backend": "後端版本"
 }

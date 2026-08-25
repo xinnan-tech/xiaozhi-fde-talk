@@ -544,5 +544,7 @@
   "about.rights": "Đã đăng ký bản quyền",
   "about.repository": "Kho mã nguồn",
   "about.license_detail": "Chi tiết giấy phép",
-  "about.license_full": "Apache License, Version 2.0, January 2004"
+  "about.license_full": "Apache License, Version 2.0, January 2004",
+  "about.version_frontend": "Phiên bản frontend",
+  "about.version_backend": "Phiên bản backend"
 }

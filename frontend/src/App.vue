@@ -76,11 +76,17 @@ onMounted(() => {
 
 // 用户角色变化（登录 / 登出 / 注册）→ 重新过滤菜单。
 // 监听 role 而非整个 userStore：role 之外字段（username / avatar）变化不需要重算。
+//
+// 注册场景同时重拉 registration-status：零用户时后端强制返 true 撑开注册入口，
+// 首个用户注册后切到 cfg 真值（默认 false）。仅按 role 触发 filter 会让 admin
+// 菜单闪现一次再被刷新校正。setRegistrationAllowed 早出兜底 role 维度过滤。
 watch(
   () => userRole?.value,
   newRole => {
     if (newRole === undefined) return;
-    permissionStore.applyMenuFilter();
+    void fetchRegistrationStatus().finally(() => {
+      permissionStore.applyMenuFilter();
+    });
   }
 );
 

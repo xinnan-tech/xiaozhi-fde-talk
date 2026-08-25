@@ -507,3 +507,109 @@ test.describe("场景 E: registration-status 500 → 去注册按钮禁用", () 
     await expect(goRegister).toHaveCount(0, { timeout: 5_000 })
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────
+// 场景 F：首用户注册后 admin 菜单不闪现（App.vue watch 跟着 role 重拉注册状态）
+// ─────────────────────────────────────────────────────────────────────
+
+test.describe("场景 F: 首用户注册 → admin 菜单不闪现", () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test("mock 零用户 staleness → 注册后 + 刷新后均不出现 admin/users 菜单", async ({
+    page,
+    context,
+  }) => {
+    await context.clearCookies()
+
+    // 模拟「零用户时 registration-status 强制返 true / 有用户后按 cfg false」——
+    // 这就是用户报 bug 的根因：App.vue onMounted 拿到的 true 是缓存的 stale 值，
+    // 注册瞬间角色从空跳成 admin，旧缓存让 admin 菜单闪现。
+    let registered = false
+    let registrationStatusCalls = 0
+    await page.route("**/api/v1/auth/registration-status", route => {
+      registrationStatusCalls++
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          allow_registration: !registered,
+        }),
+      })
+    })
+
+    // 模拟注册响应：让 alice 成为 admin（首用户默认）
+    await page.route("**/api/v1/auth/register", route => {
+      registered = true
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          access_token: "mock-admin-token",
+          refresh_token: "",
+          token_type: "bearer",
+          user: {
+            id: "mock-admin-id",
+            username: "alice_first",
+            role: "admin",
+          },
+        }),
+      })
+    })
+
+    await page.goto("/")
+    await page.evaluate(() => {
+      localStorage.clear()
+      sessionStorage.clear()
+    })
+
+    // 点 avatar → dialog
+    await page.locator(".user-avatar").click()
+    const dialog = page.locator(".login-dialog")
+    await dialog.waitFor({ state: "visible", timeout: 15_000 })
+    // 等 LoginDialog watch 触发 registration-status（mock 2nd call 应返 true）
+    await page.waitForTimeout(500)
+
+    // 切到注册模式
+    const goRegister = dialog.locator("a.el-link").filter({
+      hasText: /Sign up|去注册|去註冊|Đăng ký/i,
+    })
+    await expect(goRegister).toBeVisible({ timeout: 5_000 })
+    await goRegister.click()
+
+    // 填表 + 提交
+    await dialog.locator(".login-input").nth(0).locator("input").fill("alice_first")
+    await dialog.locator(".login-input").nth(1).locator("input").fill("Strong1!pwd")
+    await dialog.locator(".login-input").nth(2).locator("input").fill("Strong1!pwd")
+    await dialog.locator(".login-btn").click()
+    await dialog.waitFor({ state: "hidden", timeout: 15_000 })
+
+    // 注册成功后 Element Plus toast「注册成功」
+    await expect(page.locator(".el-message--success")).toContainText(
+      /注册成功|register.*success|success/i,
+      { timeout: 5_000 }
+    )
+
+    // 关键断言：admin 角色拿到后菜单不出现。这是 bug 的核心断言：fix 之前
+    // 会闪现，fix 之后立刻消失。watch 会重拉 registration-status，mock 在注册
+    // 后切到返 false，缓存对齐后 filter 把 admin 菜单过滤掉。
+    await page.waitForTimeout(500)
+    const adminMenuLink = page.locator(".sidebar-menu a, .el-menu a, nav a").filter({
+      hasText: /^Users$|^用户管理$|^用戶管理$/i,
+    })
+    await expect(adminMenuLink).toHaveCount(0, { timeout: 5_000 })
+
+    // 刷新后仍不出现（确保 onMounted 的初始 fetch 也对齐 cfg false）
+    await page.reload()
+    await page.waitForTimeout(500)
+    const adminMenuLinkAfterReload = page.locator(
+      ".sidebar-menu a, .el-menu a, nav a"
+    ).filter({
+      hasText: /^Users$|^用户管理$|^用戶管理$/i,
+    })
+    await expect(adminMenuLinkAfterReload).toHaveCount(0, { timeout: 5_000 })
+
+    // 探针：注册后 registration-status 应被多调用一次（watch 重拉）。这是对 fix
+    // 的直接验证——没修之前只有 onMounted + dialog open 共 2 次。
+    expect(registrationStatusCalls).toBeGreaterThanOrEqual(3)
+  })
+})

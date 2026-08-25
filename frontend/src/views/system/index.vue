@@ -2,7 +2,7 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { extractBackendError } from "@/utils/error";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage } from "element-plus";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { usePermissionStoreHook } from "@/store/modules/permission";
@@ -26,13 +26,16 @@ defineOptions({
 
 /** 页面编辑器使用的配置项值 */
 type ConfigValue = string | boolean;
+type AsrTypeOption = { value: string; label: string };
 type ConfigField = {
   /** 配置项key */
   key: string;
   /** 配置项label */
   label: string;
   /** 配置项类型 */
-  type?: "text" | "password" | "checkbox";
+  type?: "text" | "password" | "checkbox" | "select";
+  /** select 类型的选项列表 */
+  options?: AsrTypeOption[];
 };
 type ConfigGroup = {
   /** 配置分组key */
@@ -101,9 +104,22 @@ const selfCheckRunning = ref(false);
 const selfCheckTarget = ref<CheckTarget>("all");
 const selfCheckResults = reactive<SelfCheckResult[]>([]);
 /** 敏感密码字段 */
-const sensitiveKeys = ["api_key"];
+const sensitiveKeys = ["api_key", "access_token"];
 /** 复选框字段 */
-const checkboxKeys = ["ws_verify_ssl", "allow_registration"];
+const checkboxKeys = [
+  "ws_verify_ssl",
+  "allow_registration",
+  "enable_multilingual"
+];
+/** ASR 类型选项（运行时从嵌套结构填充） */
+const asrTypeOptions = ref<AsrTypeOption[]>([]);
+/** ASR type → 该类型拥有的字段 key 集合（运行时填充） */
+const asrTypeFieldKeys = reactive<Record<string, string[]>>({});
+/** 当前 ASR 类型的可见字段 key 集合 */
+const visibleAsrFieldKeys = computed(() => {
+  const type = config.asr?.type as string;
+  return asrTypeFieldKeys[type] ?? [];
+});
 
 /** 是否已登录 */
 const isLoggedIn = computed(() => Boolean(userStore.accessToken));
@@ -121,6 +137,35 @@ const toEditorValue = (key: string, value: SystemConfigValue): ConfigValue => {
   return value == null ? "" : String(value);
 };
 
+/** 读取配置字段值（ASR 走嵌套路径） */
+const getFieldValue = (
+  groupKey: string,
+  fieldKey: string
+): ConfigValue | undefined => {
+  if (groupKey === "asr") {
+    const type = config.asr?.type as string;
+    return config.asr?.[type]?.[fieldKey];
+  }
+  return config[groupKey]?.[fieldKey];
+};
+
+/** 写入配置字段值（ASR 走嵌套路径） */
+const setFieldValue = (
+  groupKey: string,
+  fieldKey: string,
+  value: ConfigValue
+) => {
+  if (groupKey === "asr") {
+    const type = config.asr?.type as string;
+    if (type && config.asr?.[type]) {
+      (config.asr[type] as unknown as Record<string, ConfigValue>)[fieldKey] =
+        value;
+    }
+  } else {
+    config[groupKey][fieldKey] = value;
+  }
+};
+
 /** 获取配置分组图标 */
 const getGroupIcon = (key: string) =>
   icons[key as keyof typeof icons] ?? useRenderIcon("tabler:settings");
@@ -134,25 +179,104 @@ const buildConfigGroups = (data: SystemConfig) => {
   );
 
   configGroups.value = groups.map(([groupKey, section]) => {
-    /** 配置分组字段 */
-    const fields = Object.entries(section).map(([fieldKey, value]) => ({
-      key: fieldKey,
-      label: translateFieldLabel(fieldKey),
-      type: checkboxKeys.includes(fieldKey)
-        ? ("checkbox" as const)
-        : sensitiveKeys.includes(fieldKey)
-          ? ("password" as const)
-          : typeof value === "boolean"
-            ? ("checkbox" as const)
-            : ("text" as const)
-    }));
+    let fields: ConfigField[];
 
-    loadedConfig[groupKey] = Object.fromEntries(
-      Object.entries(section).map(([fieldKey, value]) => [
-        fieldKey,
-        toEditorValue(fieldKey, value)
-      ])
-    );
+    if (groupKey === "asr") {
+      // ASR: type 字段 + 遍历所有嵌套类型的所有 key
+      const sectionRec = section as Record<string, unknown>;
+      const typeValue = (sectionRec["type"] as string) || "funasr_server";
+      // 驱动：ASR 类型选项 + 每个类型的字段映射（供切换时过滤用）
+      const detectedTypes = Object.keys(sectionRec).filter(
+        k => k !== "type" && typeof sectionRec[k] === "object"
+      );
+      asrTypeOptions.value = detectedTypes.map(k => ({
+        value: k,
+        label: k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())
+      }));
+      // 先清空再填充
+      Object.keys(asrTypeFieldKeys).forEach(k => delete asrTypeFieldKeys[k]);
+      detectedTypes.forEach(typeKey => {
+        const nested = sectionRec[typeKey] as Record<string, SystemConfigValue>;
+        asrTypeFieldKeys[typeKey] = Object.keys(nested);
+      });
+
+      fields = [
+        {
+          key: "type",
+          label: translateFieldLabel("type"),
+          type: "select" as const,
+          options: asrTypeOptions.value
+        }
+      ];
+
+      // 遍历所有嵌套类型，收集字段（去重，type 选项已覆盖的跳过）
+      const seenKeys = new Set<string>();
+      for (const typeKey of Object.keys(sectionRec)) {
+        if (typeKey === "type" || typeof sectionRec[typeKey] !== "object")
+          continue;
+        const nested = sectionRec[typeKey] as Record<string, SystemConfigValue>;
+        for (const [fieldKey] of Object.entries(nested)) {
+          if (seenKeys.has(fieldKey)) continue;
+          seenKeys.add(fieldKey);
+          const isCheckbox = checkboxKeys.includes(fieldKey);
+          const isPassword = sensitiveKeys.includes(fieldKey);
+          fields.push({
+            key: fieldKey,
+            label: translateFieldLabel(fieldKey),
+            type: isCheckbox
+              ? ("checkbox" as const)
+              : isPassword
+                ? ("password" as const)
+                : ("text" as const)
+          });
+        }
+      }
+
+      // loadedConfig 保持嵌套结构：{ type, funasr_server: {...}, doubao_stream: {...} }
+      loadedConfig[groupKey] = { type: typeValue } as Record<
+        string,
+        ConfigValue
+      >;
+      for (const [k, v] of Object.entries(sectionRec)) {
+        if (k === "type") {
+          loadedConfig[groupKey]["type"] = toEditorValue(
+            "type",
+            v as SystemConfigValue
+          );
+        } else if (typeof v === "object" && v !== null) {
+          // 每个 ASR 类型保持嵌套
+          (
+            loadedConfig[groupKey] as unknown as Record<
+              string,
+              Record<string, ConfigValue>
+            >
+          )[k] = Object.fromEntries(
+            Object.entries(v as Record<string, SystemConfigValue>).map(
+              ([subK, subV]) => [subK, toEditorValue(subK, subV)]
+            )
+          );
+        }
+      }
+    } else {
+      fields = Object.entries(section).map(([fieldKey, value]) => ({
+        key: fieldKey,
+        label: translateFieldLabel(fieldKey),
+        type: checkboxKeys.includes(fieldKey)
+          ? ("checkbox" as const)
+          : sensitiveKeys.includes(fieldKey)
+            ? ("password" as const)
+            : typeof value === "boolean"
+              ? ("checkbox" as const)
+              : ("text" as const)
+      }));
+
+      loadedConfig[groupKey] = Object.fromEntries(
+        Object.entries(section).map(([fieldKey, value]) => [
+          fieldKey,
+          toEditorValue(fieldKey, value)
+        ])
+      );
+    }
 
     return {
       key: groupKey,
@@ -227,17 +351,34 @@ const saveConfig = async (group: ConfigGroup) => {
     return;
   }
 
-  const singleConfig = { ...config[group.key] };
-  /** 转换 boolean 类型为字符串 */
-  for (let key in singleConfig) {
-    if (typeof singleConfig[key] === "boolean") {
-      singleConfig[key] = singleConfig[key].toString();
+  let payload: Record<string, unknown>;
+
+  if (group.key === "asr") {
+    // ASR: 嵌套结构 { type, funasr_server: {...}, doubao_stream: {...} }
+    payload = { type: config.asr?.type };
+    const fieldKeys = asrTypeFieldKeys ?? {};
+    for (const typeKey of Object.keys(fieldKeys)) {
+      const fields: Record<string, unknown> = {};
+      for (const fieldKey of fieldKeys[typeKey] ?? []) {
+        let val = config.asr?.[typeKey]?.[fieldKey];
+        if (typeof val === "boolean") val = val.toString();
+        fields[fieldKey] = val;
+      }
+      payload[typeKey] = fields;
+    }
+  } else {
+    // 其他分组：扁平 { key: value }
+    payload = { ...config[group.key] };
+    for (const key in payload) {
+      if (typeof payload[key] === "boolean") {
+        payload[key] = (payload[key] as boolean).toString();
+      }
     }
   }
 
   const res = await systemConfigSaveApi<Record<string, ConfigValue>>(
     group.key,
-    singleConfig
+    payload as Record<string, ConfigValue>
   );
   if (res.ok) {
     ElMessage.success(t("system.save_success"));
@@ -495,29 +636,57 @@ watch(locale, () => {
               <h2>{{ group.title }}</h2>
             </div>
             <div class="field-list">
-              <label
-                v-for="field in group.fields"
-                :key="field.key"
-                class="field-row"
-              >
-                <span class="field-label">{{ field.label }}</span>
-                <el-input
-                  v-if="field.type !== 'checkbox'"
-                  v-model="config[group.key][field.key] as string"
-                  :type="field.type ?? 'text'"
-                  class="field-input"
-                  :aria-label="field.label"
-                  :placeholder="
-                    sensitiveKeys.includes(field.key) ? '************' : ''
+              <template v-for="field in group.fields" :key="field.key">
+                <label
+                  v-if="
+                    group.key !== 'asr' ||
+                    field.key === 'type' ||
+                    visibleAsrFieldKeys.includes(field.key)
                   "
-                />
-                <el-checkbox
-                  v-else
-                  v-model="config[group.key][field.key]"
-                  class="field-checkbox"
-                  :aria-label="field.label"
-                />
-              </label>
+                  class="field-row"
+                >
+                  <span class="field-label">{{ field.label }}</span>
+                  <!-- ASR type: radio button group -->
+                  <template v-if="field.type === 'select'">
+                    <div class="asr-type-radios">
+                      <el-radio-group
+                        v-model="config[group.key][field.key] as string"
+                        size="small"
+                      >
+                        <el-radio-button
+                          v-for="opt in field.options"
+                          :key="opt.value"
+                          :value="opt.value"
+                        >
+                          {{ opt.label }}
+                        </el-radio-button>
+                      </el-radio-group>
+                    </div>
+                  </template>
+                  <el-input
+                    v-else-if="field.type !== 'checkbox'"
+                    :model-value="getFieldValue(group.key, field.key) as string"
+                    :type="field.type ?? 'text'"
+                    class="field-input"
+                    :aria-label="field.label"
+                    :placeholder="
+                      sensitiveKeys.includes(field.key) ? '************' : ''
+                    "
+                    @update:model-value="
+                      setFieldValue(group.key, field.key, $event as ConfigValue)
+                    "
+                  />
+                  <el-checkbox
+                    v-else
+                    :model-value="getFieldValue(group.key, field.key)"
+                    class="field-checkbox"
+                    :aria-label="field.label"
+                    @update:model-value="
+                      setFieldValue(group.key, field.key, $event as ConfigValue)
+                    "
+                  />
+                </label>
+              </template>
             </div>
             <div class="card-actions">
               <el-button class="reset-button" @click="resetConfig(group.key)">
@@ -1148,6 +1317,23 @@ watch(locale, () => {
 
       :deep(.el-checkbox__label) {
         display: none;
+      }
+    }
+
+    &-radios {
+      display: flex;
+      align-items: center;
+
+      :deep(.el-radio-group) {
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      :deep(.el-radio-button__inner) {
+        height: 26px;
+        padding: 0 10px;
+        font-size: 12px;
+        border-radius: 6px;
       }
     }
   }

@@ -20,13 +20,58 @@ router = APIRouter(prefix="/admin/config", tags=["admin"])
 
 _GROUPS = ("llm", "asr", "ocr", "coach", "auth", "session")
 
+# ASR 类型 → 子 key 前缀（存储层）
+_ASR_TYPE_PREFIXES = ("funasr_server", "doubao_stream")
+
+
+def _flatten_asr(raw: dict[str, Any]) -> dict[str, Any]:
+    """把存储层的扁平 {asr.type, asr.funasr_server.*, asr.doubao_stream.*} 转为嵌套结构。
+
+    前端期望：
+    {
+      type: "funasr_server",
+      funasr_server: { language, sample_rate, ws_url, ... },
+      doubao_stream: { language, sample_rate, appid, ... }
+    }
+    """
+    result: dict[str, Any] = {"type": raw.get("type", "funasr_server")}
+    for prefix in _ASR_TYPE_PREFIXES:
+        prefix_key = f"{prefix}."
+        ns_keys = {k: v for k, v in raw.items() if k.startswith(prefix_key)}
+        if ns_keys:
+            result[prefix] = {k[len(prefix_key):]: v for k, v in ns_keys.items()}
+    return result
+
+
+def _expand_asr(body: dict[str, Any]) -> dict[str, str]:
+    """把前端传来的嵌套 ASR body 展开为存储层的扁平 full-key dict。
+
+    前端发送：
+    { type: "doubao_stream", doubao_stream: { language, sample_rate, ... } }
+    →
+    存储：{ "asr.type": "doubao_stream", "asr.doubao_stream.language": "zh-CN", ... }
+    """
+    current_type = body.get("type", "funasr_server")
+    full_items: dict[str, str] = {"asr.type": current_type}
+    for prefix in _ASR_TYPE_PREFIXES:
+        if prefix in body and isinstance(body[prefix], dict):
+            for k, v in body[prefix].items():
+                if v is None:
+                    continue
+                full_items[f"asr.{prefix}.{k}"] = str(v)
+    return full_items
+
 
 @router.get("")
 async def get_all_config(
     _admin: CurrentUser = Depends(require_admin),
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, Any]:
     store = get_config_store()
-    return {g: await store.get_group(g) for g in _GROUPS}
+    result: dict[str, Any] = {}
+    for g in _GROUPS:
+        raw = await store.get_group(g)
+        result[g] = _flatten_asr(raw) if g == "asr" else raw
+    return result
 
 
 @router.get("/{group}")
@@ -38,7 +83,8 @@ async def get_group_config(
         raise I18nError(
             Keys.HTTP_ADMIN_CONFIG_GROUP_NOT_FOUND, http_status=404, group=group,
         )
-    return await get_config_store().get_group(group)
+    raw = await get_config_store().get_group(group)
+    return _flatten_asr(raw) if group == "asr" else raw
 
 
 @router.put("/{group}")
@@ -52,13 +98,26 @@ async def put_group_config(
             Keys.HTTP_ADMIN_CONFIG_GROUP_NOT_FOUND, http_status=404, group=group,
         )
 
-    allowed_keys = {k.split(".", 1)[1] for k in ALL_B_KEYS if k.startswith(group + ".")}
-    unknown = set(body.keys()) - allowed_keys
-    if unknown:
-        raise I18nError(
-            Keys.HTTP_ADMIN_CONFIG_UNKNOWN_KEYS, http_status=422,
-            unknown=sorted(unknown), allowed=sorted(allowed_keys),
-        )
+    # ASR 使用嵌套 body，其他分组使用扁平 body
+    if group == "asr":
+        full_items = _expand_asr(body)
+        # 校验：只接受已知的 namespaced key
+        allowed_full = {k for k in ALL_B_KEYS if k.startswith("asr.")}
+        unknown = {k for k in full_items if k not in allowed_full}
+        if unknown:
+            raise I18nError(
+                Keys.HTTP_ADMIN_CONFIG_UNKNOWN_KEYS, http_status=422,
+                unknown=sorted(unknown), allowed=sorted(allowed_full),
+            )
+    else:
+        allowed_keys = {k.split(".", 1)[1] for k in ALL_B_KEYS if k.startswith(group + ".")}
+        unknown = set(body.keys()) - allowed_keys
+        if unknown:
+            raise I18nError(
+                Keys.HTTP_ADMIN_CONFIG_UNKNOWN_KEYS, http_status=422,
+                unknown=sorted(unknown), allowed=sorted(allowed_keys),
+            )
+        full_items = {f"{group}.{k}": ("" if v is None else str(v)) for k, v in body.items()}
 
     # stub LLM 仅供 e2e/单测使用：prod 模式下任何 admin PUT llm.type=stub
     # 都会被静默接受并立即生效，结果是真实路径返回假数据且零日志。生产模式
@@ -70,15 +129,12 @@ async def put_group_config(
                 Keys.HTTP_ADMIN_STUB_LLM_FORBIDDEN, http_status=403,
             )
 
-    # 转换为 full key；None 当成空串（敏感字段空串会被 set_many 跳过）
-    full_items = {f"{group}.{k}": ("" if v is None else str(v)) for k, v in body.items()}
     try:
         await get_config_store().set_many(full_items)
     except ValueError as e:
-        # 未知 key / 数值 key 的坏值（如 jwt_expire_minutes="abc"）在落库前拒绝
         raise I18nError(
             Keys.CONFIG_INVALID_ENUM_VALUE, http_status=422,
-            field=group, value=str(e), allowed=sorted(allowed_keys),
+            field=group, value=str(e),
         ) from e
 
     return {"ok": True, "group": group}

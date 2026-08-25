@@ -19,6 +19,7 @@ from app.services.reports.generator import _transcript_signature
 class _FakeState:
     transcript: list[TranscriptSegment] = field(default_factory=list)
     session: MagicMock = field(default_factory=lambda: MagicMock(template_id="pm-research"))
+    items: list = field(default_factory=list)  # _build_user reads state.items
 
 
 @dataclass

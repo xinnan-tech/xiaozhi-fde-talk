@@ -26,6 +26,7 @@ def _seg(seg_id: str, text: str) -> TranscriptSegment:
 class _FakeState:
     transcript: list[TranscriptSegment] = field(default_factory=list)
     session: MagicMock = field(default_factory=lambda: MagicMock(template_id="pm-research"))
+    items: list = field(default_factory=list)  # _build_user reads state.items
 
 
 @dataclass

@@ -9,6 +9,7 @@ import json
 from typing import AsyncIterator
 
 from sqlalchemy import event
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.settings import get_settings
@@ -37,16 +38,20 @@ def _enable_sqlite_foreign_keys(engine) -> None:
 
 def _build_engine():
     settings = get_settings()
-    engine = create_async_engine(
-        settings.db_url,
-        echo=settings.db_echo,
-        future=True,
-        json_serializer=_dumps,
-        pool_size=10,
-        max_overflow=20,
-        pool_recycle=1800,
-        pool_pre_ping=True,
-    )
+    engine_kwargs = {
+        "echo": settings.db_echo,
+        "future": True,
+        "json_serializer": _dumps,
+    }
+    if make_url(settings.db_url).get_backend_name() != "sqlite":
+        engine_kwargs.update(
+            pool_size=10,
+            max_overflow=20,
+            pool_recycle=1800,
+            pool_pre_ping=True,
+        )
+
+    engine = create_async_engine(settings.db_url, **engine_kwargs)
     _enable_sqlite_foreign_keys(engine)
     return engine
 

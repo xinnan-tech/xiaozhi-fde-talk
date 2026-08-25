@@ -3,7 +3,7 @@ export default {
   name: "AdminUsers",
   component: () => import("@/views/admin/users/index.vue"),
   meta: {
-    icon: "tabler:users",
+    icon: "mdi:account-group",
     title: "用户管理",
     titleKey: "menu.users",
     rank: 3,

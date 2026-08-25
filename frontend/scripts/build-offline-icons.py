@@ -40,6 +40,7 @@ NEEDED = {
     "ep": ["download", "delete", "refresh", "circle-check-filled", "close", "loading"],
     "jam": ["activity"],
     "ri": ["information-line"],
+    "mdi": ["account-group"],
 }
 
 

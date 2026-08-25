@@ -33,6 +33,16 @@ async def test_diagnose_asr_short_circuits_on_missing_ws_url():
 
 
 @pytest.mark.asyncio
+async def test_diagnose_asr_doubao_short_circuits_on_missing_credentials():
+    """豆包流式无 ws_url 字段，靠 appid + access_token 判定；缺其一即 config_missing。"""
+    with patch.object(diagnostics, "get_config_store") as gcs:
+        store = {"asr.type": "doubao_stream", "asr.doubao_stream.appid": "", "asr.doubao_stream.access_token": "tok"}
+        gcs.return_value.get_sync = lambda key, default=None: store.get(key, default)
+        res = await diagnostics.diagnose_asr()
+    assert res["code"] == "config_missing"
+
+
+@pytest.mark.asyncio
 async def test_diagnose_asr_parses_sample_rate_as_int():
     """sample_rate 是字符串 "16000" → 必须被解析为 int 16000（不能是 coroutine）。
 

@@ -1,4 +1,4 @@
-"""数据库初始化 + 僵尸会话清扫 + 演示账号种入。"""
+"""数据库初始化 + 僵尸会话清扫。"""
 from __future__ import annotations
 
 import logging
@@ -62,7 +62,7 @@ async def _ensure_columns(conn: AsyncConnection) -> None:
 
 
 async def init_db() -> None:
-    """建表 + 缺列自愈 + 窄清老种子 admin。lifespan 启动时调一次。
+    """建表 + 缺列自愈。lifespan 启动时调一次。
 
     dev/test（默认）：Base.metadata.create_all + 缺列自愈（本地快速启动）
     prod：强制 APP_DB_USE_ALEMBIC=1，走 alembic upgrade head——保留迁移历史，
@@ -85,20 +85,6 @@ async def init_db() -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             await _ensure_columns(conn)
-    await _drop_seed_admin()
-
-
-async def _drop_seed_admin() -> None:
-    """dev 自愈：清掉老种子 admin 账户（窄 WHERE），幂等。
-
-    dev 模式不跑 alembic，此处镜像生产迁移的窄清理，避免旧种子 admin 残留
-    导致 registration-status 返回 allow_registration=false、首用户注册路径卡住。
-    """
-    async with SessionLocal() as session:
-        await session.execute(
-            text("DELETE FROM users WHERE username = 'admin' AND role = 'admin'")
-        )
-        await session.commit()
 
 
 async def sweep_stale_sessions() -> int:

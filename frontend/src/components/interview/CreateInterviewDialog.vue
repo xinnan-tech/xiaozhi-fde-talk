@@ -1,18 +1,34 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch, markRaw } from "vue";
+import {
+  computed,
+  nextTick,
+  reactive,
+  ref,
+  watch,
+  watchEffect,
+  markRaw
+} from "vue";
+import dayjs from "dayjs";
+import customParseFormat from "dayjs/plugin/customParseFormat";
 import type { FormInstance, FormRules } from "element-plus/es/components/form";
 import { useI18n } from "vue-i18n";
 import { message } from "@/utils/message";
 import { extractBackendError } from "@/utils/error";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
+import { AVMedia } from "vue-audio-visual";
+import { useAsrRecorder } from "@/composables/useAsrRecorder";
+import { useCameraCapture } from "@/composables/useCameraCapture";
 import {
   extractInterviewFieldsApi,
   getInterviewsTemplatesApi,
   getInterviewTemplateDetailApi,
+  ocrInterviewImageApi,
   type CreateInterviewForm,
   type TemplateBaseField,
   type TemplateItem
 } from "@/api/interview";
+
+dayjs.extend(customParseFormat);
 
 defineOptions({
   name: "CreateInterviewDialog"
@@ -38,12 +54,17 @@ const clipboardIcon = markRaw(useRenderIcon("tabler:clipboard-text"));
 
 const formRef = ref<FormInstance>();
 const selectedInputMethod = ref("");
+const activePanel = ref<"" | "clipboard" | "voice" | "camera">("");
 const goalError = ref("");
 const interviewTemplates = ref<TemplateItem[]>([]);
 const interviewTemplatesLoading = ref(false);
 const templateFields = ref<TemplateBaseField[]>([]);
 const templateFieldsTemplateId = ref("");
+const clipboardText = ref("");
 const clipboardExtracting = ref(false);
+const voiceExtracting = ref(false);
+const cameraRecognizing = ref(false);
+const cameraVideoRef = ref<HTMLVideoElement>();
 const createDefaultForm = (): CreateInterviewForm => ({
   base_info: {
     title: "欣南科技公司售前业务洽谈助手",
@@ -57,8 +78,26 @@ const createDefaultForm = (): CreateInterviewForm => ({
   template_id: ""
 });
 const form = reactive<CreateInterviewForm>(createDefaultForm());
-const clipboardInputVisible = ref(false);
-const clipboardText = ref("");
+
+// 语音转写录音：/ws/v1/asr 专用 WS + 麦克风（区别于访谈会话 WS）
+const {
+  mediaStream: asrMediaStream,
+  state: asrState,
+  transcript: asrTranscript,
+  elapsedSeconds: asrElapsedSeconds,
+  stopReason: asrStopReason,
+  everRecorded: asrEverRecorded,
+  start: startAsrRecording,
+  stop: stopAsrRecording
+} = useAsrRecorder();
+
+// 拍照名片 OCR：取流 + 截帧，预览 <video> 挂在面板模板里
+const {
+  stream: cameraStream,
+  open: openCamera,
+  close: closeCamera,
+  snap: snapCamera
+} = useCameraCapture();
 
 const rules = computed<FormRules>(() => ({
   "base_info.title": [
@@ -154,21 +193,55 @@ const durationOptions = computed(() => [
 ]);
 
 const resetForm = async () => {
+  // 兜底释放录音/摄像头（正常路径由 destroy-on-close 卸载时清理）
+  if (asrState.value !== "idle") void stopAsrRecording();
+  closeCamera();
   formRef.value?.resetFields();
   Object.assign(form, createDefaultForm());
   form.template_id = interviewTemplates.value[0]?.id ?? "";
   selectedInputMethod.value = "";
-  clipboardInputVisible.value = false;
+  activePanel.value = "";
   clipboardText.value = "";
   clipboardExtracting.value = false;
+  voiceExtracting.value = false;
+  cameraRecognizing.value = false;
   goalError.value = "";
   await nextTick();
   formRef.value?.clearValidate();
 };
 
-const selectInputMethod = (methodKey: string) => {
+const closeActivePanel = () => {
+  selectedInputMethod.value = "";
+  activePanel.value = "";
+  closeCamera();
+};
+
+const selectInputMethod = async (methodKey: string) => {
+  // 录音进行中不允许切换入口，先停止识别
+  if (asrState.value !== "idle") return;
+  if (
+    methodKey !== "voice" &&
+    methodKey !== "camera" &&
+    methodKey !== "clipboard"
+  ) {
+    return;
+  }
   selectedInputMethod.value = methodKey;
-  clipboardInputVisible.value = methodKey === "clipboard";
+  activePanel.value = methodKey;
+
+  if (methodKey === "voice") {
+    const started = await startAsrRecording();
+    if (!started) {
+      message(t("create.dialog.voice_failed"), { type: "error" });
+      closeActivePanel();
+    }
+  } else if (methodKey === "camera") {
+    const opened = await openCamera();
+    if (!opened) {
+      message(t("create.dialog.camera_unavailable"), { type: "error" });
+      closeActivePanel();
+    }
+  }
 };
 
 const loadTemplateFields = async (templateId: string) => {
@@ -194,11 +267,102 @@ const normalizeExtractedValue = (key: string, value: string) => {
     }, durationOptions.value[0]?.value ?? "");
   }
 
-  if (key === "start_time" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
-    return value.replace("T", " ") + ":00";
+  if (key === "start_time") {
+    const parsed = dayjs(value, "YYYY-MM-DDTHH:mm", true);
+    if (parsed.isValid()) {
+      return parsed.format("YYYY-MM-DD HH:mm:ss");
+    }
   }
 
   return value;
+};
+
+/** 公共提取流程：与文本来源无关（粘贴/录音转写/拍照 OCR 共用），返回成功回填的字段数。 */
+const runExtractAndFill = async (transcript: string) => {
+  // 模板详情提供字段名称和字段类型
+  const fields = await loadTemplateFields(form.template_id);
+  const fieldLabels: Record<string, string> = {};
+  const fieldTypes: Record<string, string> = {};
+  const fieldKeys = fields.map(field => {
+    fieldLabels[field.key] = field.label || field.key;
+    fieldTypes[field.key] = field.type || "text";
+    return field.key;
+  });
+
+  // 访谈名称和目标不属于模板基础字段
+  fieldKeys.push("title", "goal");
+  fieldLabels.title = t("create.dialog.interview_name");
+  fieldLabels.goal = t("create.dialog.goal");
+
+  // 已填写的值会作为上下文传给后端
+  const currentValues: Record<string, string> = {};
+  const baseInfo = form.base_info as Record<string, string>;
+  for (const key of fieldKeys) {
+    const value =
+      key === "title"
+        ? form.base_info.title
+        : key === "goal"
+          ? form.goal
+          : baseInfo[key];
+    if (value) currentValues[key] = String(value);
+  }
+
+  // 后端根据文本和字段定义返回提取结果
+  const response = await extractInterviewFieldsApi({
+    transcript,
+    template_id: form.template_id,
+    fields: fieldKeys,
+    field_labels: fieldLabels,
+    field_types: fieldTypes,
+    current_values: currentValues
+  });
+
+  // 将提取结果写回表单控件；值与当前一致的回显不计入 filled，filled表示更新字段数
+  let filled = 0;
+  for (const [key, rawValue] of Object.entries(response.values ?? {})) {
+    if (!rawValue) continue;
+    const value = normalizeExtractedValue(key, String(rawValue));
+    if (!value) continue;
+    if (key !== "title" && key !== "goal" && !(key in form.base_info)) {
+      continue;
+    }
+
+    const previous =
+      key === "title"
+        ? form.base_info.title
+        : key === "goal"
+          ? form.goal
+          : baseInfo[key];
+    if (previous === value) continue;
+
+    if (key === "title") {
+      form.base_info.title = value;
+    } else if (key === "goal") {
+      form.goal = value;
+      goalError.value = "";
+    } else {
+      baseInfo[key] = value;
+    }
+    filled += 1;
+  }
+
+  message(
+    filled > 0
+      ? t("create.dialog.clipboard_success", { count: filled })
+      : t("create.dialog.clipboard_no_fields"),
+    { type: filled > 0 ? "success" : "warning" }
+  );
+  if (filled > 0) {
+    formRef.value?.clearValidate([
+      "base_info.title",
+      "base_info.project",
+      "base_info.interviewee",
+      "base_info.start_time",
+      "base_info.duration",
+      "goal"
+    ]);
+  }
+  return filled;
 };
 
 const extractClipboardText = async () => {
@@ -211,83 +375,9 @@ const extractClipboardText = async () => {
 
   clipboardExtracting.value = true;
   try {
-    // 模板详情提供字段名称和字段类型
-    const fields = await loadTemplateFields(form.template_id);
-    const fieldLabels: Record<string, string> = {};
-    const fieldTypes: Record<string, string> = {};
-    const fieldKeys = fields.map(field => {
-      fieldLabels[field.key] = field.label || field.key;
-      fieldTypes[field.key] = field.type || "text";
-      return field.key;
-    });
-
-    // 访谈名称和目标不属于模板基础字段
-    fieldKeys.push("title", "goal");
-    fieldLabels.title = t("create.dialog.interview_name");
-    fieldLabels.goal = t("create.dialog.goal");
-
-    // 已填写的值会作为上下文传给后端
-    const currentValues: Record<string, string> = {};
-    const baseInfo = form.base_info as Record<string, string>;
-    for (const key of fieldKeys) {
-      const value =
-        key === "title"
-          ? form.base_info.title
-          : key === "goal"
-            ? form.goal
-            : baseInfo[key];
-      if (value) currentValues[key] = String(value);
-    }
-
-    // 后端根据文本和字段定义返回提取结果
-    const response = await extractInterviewFieldsApi({
-      transcript,
-      template_id: form.template_id,
-      fields: fieldKeys,
-      field_labels: fieldLabels,
-      field_types: fieldTypes,
-      current_values: currentValues
-    });
-
-    // 将提取结果写回表单控件
-    let filled = 0;
-    for (const [key, rawValue] of Object.entries(response.values ?? {})) {
-      if (!rawValue) continue;
-      const value = normalizeExtractedValue(key, String(rawValue));
-      if (!value) continue;
-
-      if (key === "title") {
-        form.base_info.title = value;
-      } else if (key === "goal") {
-        form.goal = value;
-        goalError.value = "";
-      } else if (key in form.base_info) {
-        baseInfo[key] = value;
-      } else {
-        continue;
-      }
-      filled += 1;
-    }
-
-    message(
-      filled > 0
-        ? t("create.dialog.clipboard_success", { count: filled })
-        : t("create.dialog.clipboard_no_fields"),
-      { type: filled > 0 ? "success" : "warning" }
-    );
-    if (filled > 0) {
-      formRef.value?.clearValidate([
-        "base_info.title",
-        "base_info.project",
-        "base_info.interviewee",
-        "base_info.start_time",
-        "base_info.duration",
-        "goal"
-      ]);
-    }
+    await runExtractAndFill(transcript);
     clipboardText.value = "";
-    clipboardInputVisible.value = false;
-    selectedInputMethod.value = "";
+    closeActivePanel();
   } catch (error) {
     message(extractBackendError(error, t("create.dialog.clipboard_failed")), {
       type: "error"
@@ -297,10 +387,108 @@ const extractClipboardText = async () => {
   }
 };
 
-const backFromClipboardInput = () => {
-  clipboardInputVisible.value = false;
-  selectedInputMethod.value = "";
+const voiceBusy = computed(
+  () => asrState.value !== "idle" || voiceExtracting.value
+);
+
+const voiceElapsedLabel = computed(() => {
+  const minutes = String(Math.floor(asrElapsedSeconds.value / 60)).padStart(
+    2,
+    "0"
+  );
+  const seconds = String(asrElapsedSeconds.value % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+});
+
+// 转写区占位文案跟随真实状态：停止/提取阶段不再误显「录音中」
+const voicePlaceholder = computed(() =>
+  asrState.value === "recording"
+    ? t("create.dialog.voice_recording")
+    : t("create.dialog.voice_stopping")
+);
+
+/** 停止录音并提取：手动点停止与服务端自动停止（60s 上限）共用。 */
+const extractVoiceTranscript = async () => {
+  if (voiceExtracting.value) return;
+  voiceExtracting.value = true;
+  try {
+    const transcript = (await stopAsrRecording()).trim();
+    if (!transcript) {
+      // 服务端断开（ASR 服务不可用）与真没说话，给出不同的提示
+      if (asrStopReason.value === "server") {
+        message(t("create.dialog.voice_service_unavailable"), {
+          type: "error"
+        });
+      } else {
+        message(t("create.dialog.voice_empty"), { type: "warning" });
+      }
+      // 空结果没有内容可留在面板，退回入口列表，避免卡在「录音中」假状态
+      closeActivePanel();
+      return;
+    }
+    await runExtractAndFill(transcript);
+    closeActivePanel();
+  } catch (error) {
+    message(extractBackendError(error, t("create.dialog.voice_failed")), {
+      type: "error"
+    });
+    // 提取失败同样退回入口列表，面板不留不可操作的僵尸态
+    closeActivePanel();
+  } finally {
+    voiceExtracting.value = false;
+  }
 };
+
+const recognizePhoto = async () => {
+  const video = cameraVideoRef.value;
+  if (!video || cameraRecognizing.value) return;
+
+  cameraRecognizing.value = true;
+  try {
+    const imageBase64 = await snapCamera(video);
+    const response = await ocrInterviewImageApi({
+      image_base64: imageBase64
+    });
+    const text = (response.text ?? "").trim();
+    if (!text) {
+      message(t("create.dialog.ocr_empty"), { type: "warning" });
+      return;
+    }
+    await runExtractAndFill(text);
+    closeActivePanel();
+  } catch (error) {
+    message(extractBackendError(error, t("create.dialog.ocr_failed")), {
+      type: "error"
+    });
+  } finally {
+    cameraRecognizing.value = false;
+  }
+};
+
+// 服务端触发停止（60s 上限/连接断开）时，与手动停止走同一提取流程；
+// everRecorded=false 说明 start() 未成功过（如启动即断开），按启动失败处理不提取
+watch(asrState, (next, previous) => {
+  if (previous !== "stopping" || next !== "idle") return;
+  if (voiceExtracting.value || !asrEverRecorded.value) return;
+  void extractVoiceTranscript();
+});
+
+// 摄像头流挂到预览 <video>（面板渲染与取流完成先后不定，post flush 兜底）
+watchEffect(
+  () => {
+    const video = cameraVideoRef.value;
+    const stream = cameraStream.value;
+    if (!video) return;
+    const next = stream ?? null;
+    if (video.srcObject !== next) {
+      video.srcObject = next;
+    }
+    if (stream) {
+      void video.play().catch(() => undefined);
+    }
+  },
+  { flush: "post" }
+);
 
 const loadInterviewTemplates = async () => {
   interviewTemplatesLoading.value = true;
@@ -318,37 +506,17 @@ const loadInterviewTemplates = async () => {
   }
 };
 
-const formatDateTime = (date: Date) => {
-  const pad = (value: number) => String(value).padStart(2, "0");
-
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-    date.getDate()
-  )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
-    date.getSeconds()
-  )}`;
-};
-
 const calculateEndTime = () => {
-  const match = form.base_info.start_time.match(
-    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/
+  const startTime = dayjs(
+    form.base_info.start_time,
+    ["YYYY-MM-DD HH:mm:ss", "YYYY-MM-DDTHH:mm:ss"],
+    true
   );
-  if (!match) return "";
+  if (!startTime.isValid()) return "";
 
-  const [, year, month, day, hours, minutes, seconds] = match;
-  const startTime = new Date(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hours),
-    Number(minutes),
-    Number(seconds)
-  );
-  if (Number.isNaN(startTime.getTime())) return "";
-
-  startTime.setMinutes(
-    startTime.getMinutes() + Number(form.base_info.duration)
-  );
-  return formatDateTime(startTime);
+  return startTime
+    .add(Number(form.base_info.duration), "minute")
+    .format("YYYY-MM-DD HH:mm:ss");
 };
 
 const handleClose = () => {
@@ -531,8 +699,12 @@ watch(
           <h3>{{ $t("create.dialog.quick_input") }}</h3>
         </div>
         <div class="quick-input-stage">
-          <Transition name="clipboard-panel" mode="out-in">
-            <div v-if="clipboardInputVisible" class="clipboard-input-panel">
+          <Transition name="quick-input-panel" mode="out-in">
+            <div
+              v-if="activePanel === 'clipboard'"
+              key="clipboard"
+              class="clipboard-input-panel"
+            >
               <el-input
                 v-model="clipboardText"
                 type="textarea"
@@ -540,7 +712,7 @@ watch(
                 :disabled="clipboardExtracting"
                 :placeholder="$t('create.dialog.clipboard_placeholder')"
               />
-              <div class="clipboard-actions">
+              <div class="panel-actions">
                 <el-button
                   type="primary"
                   :loading="clipboardExtracting"
@@ -552,14 +724,79 @@ watch(
                 <el-button
                   plain
                   :disabled="clipboardExtracting"
-                  @click="backFromClipboardInput"
+                  @click="closeActivePanel"
                 >
                   {{ $t("create.dialog.back") }}
                 </el-button>
               </div>
             </div>
 
-            <div v-else class="input-method-list">
+            <div
+              v-else-if="activePanel === 'voice'"
+              key="voice"
+              class="voice-input-panel"
+            >
+              <div class="voice-body">
+                <div class="voice-transcript">
+                  {{ asrTranscript || voicePlaceholder }}
+                </div>
+                <div class="voice-meta">
+                  <AVMedia
+                    v-if="asrState === 'recording' && asrMediaStream"
+                    :media="asrMediaStream"
+                    class="voice-voiceprint"
+                    type="frequ"
+                    frequ-direction="mo"
+                    :canv-width="72"
+                    :canv-height="16"
+                    :frequ-lnum="24"
+                    :line-width="1"
+                    frequ-line-cap
+                    line-color="#409eff"
+                  />
+                  <span class="voice-duration">{{ voiceElapsedLabel }}</span>
+                </div>
+              </div>
+              <div class="panel-actions">
+                <el-button
+                  type="primary"
+                  :loading="voiceExtracting"
+                  :disabled="asrState === 'idle' && !voiceExtracting"
+                  @click="extractVoiceTranscript"
+                >
+                  {{ $t("create.dialog.voice_stop") }}
+                </el-button>
+              </div>
+            </div>
+
+            <div
+              v-else-if="activePanel === 'camera'"
+              key="camera"
+              class="camera-input-panel"
+            >
+              <div class="camera-preview">
+                <video ref="cameraVideoRef" autoplay playsinline muted />
+              </div>
+              <div class="panel-actions">
+                <el-button
+                  type="primary"
+                  :loading="cameraRecognizing"
+                  :disabled="cameraRecognizing"
+                  @click="recognizePhoto"
+                >
+                  {{ $t("create.dialog.camera_snap") }}
+                </el-button>
+                <el-button
+                  plain
+                  :disabled="cameraRecognizing"
+                  @click="closeActivePanel"
+                >
+                  {{ $t("create.dialog.back") }}
+                </el-button>
+              </div>
+            </div>
+
+            <div v-else key="methods" class="input-method-list">
               <button
                 v-for="method in inputMethods"
                 :key="method.key"
@@ -810,46 +1047,61 @@ watch(
       position: relative;
       display: block;
       width: 100%;
-      height: 112px;
+      min-height: 112px;
     }
 
-    .clipboard-panel-enter-active,
-    .clipboard-panel-leave-active {
+    // out-in 切换：离场元素脱离文档流，进场面板撑起实际高度
+    .quick-input-panel-leave-active {
       position: absolute;
-      inset: 0;
+      top: 0;
+      left: 0;
       width: 100%;
       transition:
         transform 0.28s ease,
         opacity 0.28s ease;
     }
 
-    .clipboard-panel-enter-from.clipboard-input-panel {
+    .quick-input-panel-enter-active {
+      transition:
+        transform 0.28s ease,
+        opacity 0.28s ease;
+    }
+
+    .quick-input-panel-enter-from.clipboard-input-panel,
+    .quick-input-panel-enter-from.voice-input-panel,
+    .quick-input-panel-enter-from.camera-input-panel,
+    .quick-input-panel-leave-to.clipboard-input-panel,
+    .quick-input-panel-leave-to.voice-input-panel,
+    .quick-input-panel-leave-to.camera-input-panel {
       opacity: 0;
       transform: translateX(100%);
     }
 
-    .clipboard-panel-enter-from.input-method-list {
+    .quick-input-panel-enter-from.input-method-list,
+    .quick-input-panel-leave-to.input-method-list {
       opacity: 0;
       transform: translateX(-100%);
     }
 
-    .clipboard-panel-leave-to.clipboard-input-panel {
-      opacity: 0;
-      transform: translateX(100%);
-    }
-
-    .clipboard-panel-leave-to.input-method-list {
-      opacity: 0;
-      transform: translateX(-100%);
-    }
-
-    .clipboard-input-panel {
+    .clipboard-input-panel,
+    .voice-input-panel,
+    .camera-input-panel {
       display: flex;
       gap: 10px;
       align-items: stretch;
       width: 100%;
-      height: 100%;
+    }
 
+    .clipboard-input-panel,
+    .voice-input-panel {
+      height: 112px;
+    }
+
+    .camera-input-panel {
+      height: 216px;
+    }
+
+    .clipboard-input-panel {
       .el-textarea {
         flex: 1;
         min-width: 0;
@@ -859,26 +1111,80 @@ watch(
         height: 100%;
         resize: none;
       }
+    }
 
-      .clipboard-actions {
-        display: flex;
-        flex: 0 0 90px;
-        flex-direction: column;
-        gap: 8px;
-        justify-content: center;
+    .voice-body {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+    }
 
-        .el-button {
-          width: 100%;
-          height: 32px;
-          margin: 0;
-          border-radius: 8px;
-        }
+    .voice-transcript {
+      flex: 1;
+      padding: 8px 10px;
+      overflow-y: auto;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #343a40;
+      background: #f7f8fa;
+      border-radius: 8px;
+    }
+
+    .voice-meta {
+      display: flex;
+      flex-shrink: 0;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+      min-height: 16px;
+    }
+
+    .voice-voiceprint {
+      canvas {
+        display: block;
+      }
+    }
+
+    .voice-duration {
+      font-size: 12px;
+      color: #a0a6ae;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .camera-preview {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      background: #000;
+      border-radius: 8px;
+
+      video {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+    }
+
+    .panel-actions {
+      display: flex;
+      flex: 0 0 90px;
+      flex-direction: column;
+      gap: 8px;
+      justify-content: center;
+
+      .el-button {
+        width: 100%;
+        height: 32px;
+        margin: 0;
+        border-radius: 8px;
       }
     }
 
     .input-method-list {
-      position: absolute;
-      inset: 0;
+      position: relative;
       width: 100%;
       display: grid;
       grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
@@ -1090,19 +1396,26 @@ watch(
       }
 
       .input-method-list {
-        height: 172px;
+        min-height: 172px;
         grid-template-columns: 1fr;
         grid-template-rows: none;
       }
 
       .quick-input-stage {
-        height: 172px;
+        min-height: 172px;
       }
 
-      .clipboard-input-panel {
-        .clipboard-actions {
-          flex-basis: 88px;
-        }
+      .clipboard-input-panel,
+      .voice-input-panel {
+        height: 132px;
+      }
+
+      .camera-input-panel {
+        height: 260px;
+      }
+
+      .panel-actions {
+        flex-basis: 88px;
       }
 
       .input-method:first-child {

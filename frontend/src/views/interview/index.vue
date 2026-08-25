@@ -1138,9 +1138,11 @@ onMounted(() => {
                     <User class="session-meta-icon" />
                     <span>{{ $t("interview.meta.interviewee") }}</span>
                   </span>
-                  <strong>{{
-                    interviewDetail?.base_info?.interviewee || "--"
-                  }}</strong>
+                  <strong
+                    :title="interviewDetail?.base_info?.interviewee || '--'"
+                  >
+                    {{ interviewDetail?.base_info?.interviewee || "--" }}
+                  </strong>
                 </div>
               </div>
               <div
@@ -1161,7 +1163,9 @@ onMounted(() => {
                     <Aim class="session-meta-icon" />
                     <span>{{ $t("interview.meta.goal") }}</span>
                   </span>
-                  <strong>{{ interviewDetail?.goal || "--" }}</strong>
+                  <strong :title="interviewDetail?.goal">{{
+                    interviewDetail?.goal || "--"
+                  }}</strong>
                 </div>
               </div>
             </div>
@@ -1894,7 +1898,11 @@ onMounted(() => {
     border-right: 0;
   }
 
-  .session-meta-interviewee,
+  .session-meta-interviewee {
+    flex: 0 1 7em;
+    max-width: 7em;
+  }
+
   .session-meta-time {
     flex: 0 0 auto;
   }
@@ -1913,6 +1921,7 @@ onMounted(() => {
   .session-meta-copy {
     display: grid;
     gap: 6px;
+    width: 100%;
     min-width: 0;
     align-content: start;
   }
@@ -1941,6 +1950,16 @@ onMounted(() => {
     display: -webkit-box;
     overflow: hidden;
     white-space: normal;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+  }
+
+  .session-meta-interviewee .session-meta-copy strong {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: anywhere;
     -webkit-box-orient: vertical;
     line-clamp: 2;
     -webkit-line-clamp: 2;

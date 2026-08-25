@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test"
 import { loginAsAdmin } from "./fixtures/admin"
+import { fillCreateInterviewForm } from "./fixtures/create-interview"
 
 test("recording flow: create → navigate → start → recording status → stop", async ({
   page,
@@ -16,11 +17,8 @@ test("recording flow: create → navigate → start → recording status → sto
   const dialog = page.locator(".create-interview-dialog")
   await dialog.waitFor({ state: "visible", timeout: 10_000 })
 
-  const titleField = page.getByLabel(/访谈名称|interview.*name/i).first()
-  await titleField.waitFor({ state: "visible", timeout: 10_000 })
-
   const uniqueTitle = `e2e-rec-${Date.now()}`
-  await titleField.fill(uniqueTitle)
+  await fillCreateInterviewForm(page, uniqueTitle)
 
   // submit（footer 按钮文案「创建访谈」/「Create interview」）
   await page

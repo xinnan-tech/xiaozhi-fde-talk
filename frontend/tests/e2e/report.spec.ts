@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test"
 import { loginAsAdmin } from "./fixtures/admin"
+import { fillCreateInterviewForm } from "./fixtures/create-interview"
 
 test.describe("report page accessibility", () => {
   test("ending an interview redirects to /home (not /report/:id)", async ({
@@ -16,10 +17,8 @@ test.describe("report page accessibility", () => {
     const dialog = page.locator(".create-interview-dialog")
     await dialog.waitFor({ state: "visible", timeout: 10_000 })
 
-    const titleField = page.getByLabel(/访谈名称|interview.*name/i).first()
-    await titleField.waitFor({ state: "visible", timeout: 10_000 })
     const uniqueTitle = `e2e-report-${Date.now()}`
-    await titleField.fill(uniqueTitle)
+    await fillCreateInterviewForm(page, uniqueTitle)
 
     await page
       .getByRole("button", { name: /创建访谈|create.*interview/i })

@@ -1,53 +1,36 @@
-"""_drop_seed_admin：dev 自愈窄清理老种子 admin 账户。
-
-回归需求：旧 bootstrap 会灌入 username='admin' role='admin' 的演示账号；
-自助注册体系不再允许这个残留，否则 registration-status 会卡死 / 首用户走不通。
-"""
+"""数据库初始化不应删除真实管理员账户。"""
 from __future__ import annotations
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.persistence.bootstrap import _drop_seed_admin
-from app.persistence.db import SessionLocal
-from app.persistence.models import User
-
-
-@pytest.fixture
-async def _clean_users():
-    """清掉 admin/alice 用户，避免上一个测试的状态泄漏。"""
-    async with SessionLocal() as s:
-        from sqlalchemy import text
-        await s.execute(text("DELETE FROM users WHERE username IN ('admin', 'alice')"))
-        await s.commit()
-    yield
-    async with SessionLocal() as s:
-        from sqlalchemy import text
-        await s.execute(text("DELETE FROM users WHERE username IN ('admin', 'alice')"))
-        await s.commit()
+from app.persistence import bootstrap
+from app.persistence.models import Base, User
 
 
 @pytest.mark.asyncio
-async def test_drop_seed_admin_removes_only_admin_user(_clean_users):
-    # seed：1 个 admin + 1 个普通用户
-    async with SessionLocal() as s:
-        s.add_all([
-            User(id="u1", username="admin", password_hash="x", role="admin"),
-            User(id="u2", username="alice", password_hash="x", role="user"),
-        ])
-        await s.commit()
+async def test_init_db_preserves_registered_admin(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_local = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(bootstrap, "engine", engine)
+    monkeypatch.setattr(bootstrap, "SessionLocal", session_local)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("APP_DB_USE_ALEMBIC", raising=False)
 
-    await _drop_seed_admin()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_local() as session:
+            session.add(User(id="u1", username="admin", password_hash="x", role="admin"))
+            await session.commit()
 
-    async with SessionLocal() as s:
-        rows = (await s.execute(select(User))).scalars().all()
-        usernames = {r.username for r in rows}
-        # 只清 admin，alice 留着；其它残留用户（其它测试留下的）不动
-        assert "admin" not in usernames
-        assert "alice" in usernames
+        await bootstrap.init_db()
 
-
-@pytest.mark.asyncio
-async def test_drop_seed_admin_is_idempotent(_clean_users):
-    await _drop_seed_admin()  # 第二次调用不报错
-    await _drop_seed_admin()
+        async with session_local() as session:
+            user = (await session.execute(
+                select(User).where(User.username == "admin")
+            )).scalar_one()
+            assert user.role == "admin"
+    finally:
+        await engine.dispose()

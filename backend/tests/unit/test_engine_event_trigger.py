@@ -12,9 +12,17 @@ from app.services.coaching.engine import CoachingEngine
 
 def _engine(make_state, **overrides):
     e = CoachingEngine(make_state(), lambda m: None)
+    # 标记首评已生成 → first_compute 不再后台补跑 first_generate，本测试只关心
+    # 防抖/段数阈值/限频这些事件触发路径，first_generate 单独有其它测试覆盖。
+    e.state.session.first_batch_generated = True
     e._llm = AsyncMock()
-    e._llm.chat_json = AsyncMock(return_value={"items": []})
+    # engine 走 chat_text(..., json_mode=True)，再由 _extract_json_dict 从 raw text
+    # 抽 {...} 块解析（替代旧的 chat_json 返回 dict 直传）。
+    # 中文项让 pivot 看到 CJK 脚本 → 不触发 fallback 重试，测试只关心事件触发计数。
+    e._llm.chat_text = AsyncMock(return_value='{"items": [{"text": "测试项"}]}')
     e._get_llm = lambda: e._llm
+    # 单测不应真落库（test-session-1 行可能 stale；schema 演进后会因 NOT NULL 撞墙）。
+    e._persist = AsyncMock()
     e._pause_s = overrides.get("pause_s", 0.02)
     e._max_pending_segments = overrides.get("max_pending", 8)
     e._min_interval_s = overrides.get("min_interval", 0.0)
@@ -35,7 +43,7 @@ async def test_pause_debounce_fires_recompute(make_state):
     _add_seg(e.state)
     e.on_utterance()
     await asyncio.sleep(0.1)  # 防抖 0.02s 到期 + LLM mock 立即返回
-    assert e._llm.chat_json.await_count >= 1
+    assert e._llm.chat_text.await_count >= 1
     await e._drain_bg()
 
 
@@ -48,9 +56,9 @@ async def test_debounce_rearmed_by_new_utterance(make_state):
     await asyncio.sleep(0.05)
     e.on_utterance()  # 重臂：从现在起再等 0.1s
     await asyncio.sleep(0.06)
-    assert e._llm.chat_json.await_count == 0  # 未到期
+    assert e._llm.chat_text.await_count == 0  # 未到期
     await asyncio.sleep(0.1)
-    assert e._llm.chat_json.await_count == 1
+    assert e._llm.chat_text.await_count == 1
     await e._drain_bg()
 
 
@@ -61,7 +69,7 @@ async def test_no_fire_when_window_empty(make_state):
     await e.first_compute()
     e._arm(e._pause_s, "测试")
     await asyncio.sleep(0.1)
-    assert e._llm.chat_json.await_count == 0
+    assert e._llm.chat_text.await_count == 0
 
 
 async def test_segment_threshold_fires_without_pause(make_state):
@@ -72,7 +80,7 @@ async def test_segment_threshold_fires_without_pause(make_state):
     for _ in range(3):
         e.on_utterance()
     await asyncio.sleep(0.1)
-    assert e._llm.chat_json.await_count == 1
+    assert e._llm.chat_text.await_count == 1
     await e._drain_bg()
 
 
@@ -85,9 +93,9 @@ async def test_min_interval_defers_but_not_drops(make_state):
     _add_seg(e.state)
     e.on_utterance()
     await asyncio.sleep(0.05)
-    assert e._llm.chat_json.await_count == 0   # 被限频推迟
+    assert e._llm.chat_text.await_count == 0   # 被限频推迟
     await asyncio.sleep(0.2)
-    assert e._llm.chat_json.await_count == 1   # 满间隔后照常触发
+    assert e._llm.chat_text.await_count == 1   # 满间隔后照常触发
     await e._drain_bg()
 
 
@@ -96,13 +104,14 @@ async def test_no_second_call_while_in_progress(make_state):
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def hang(*a):
+    async def hang(*a, **kw):  # engine 调 chat_text(s, u, json_mode=True)，**kw 兼容
         started.set()
         await release.wait()
-        return {"items": []}
+        # 中文项让 pivot 看到 CJK 脚本 → 不触发 fallback 重试，await_count 保持 1
+        return '{"items": [{"text": "测试项"}]}'
 
     e = _engine(make_state, pause_s=0.01)
-    e._llm.chat_json = AsyncMock(side_effect=hang)
+    e._llm.chat_text = AsyncMock(side_effect=hang)
     await e.first_compute()
     _add_seg(e.state)
     e.on_utterance()
@@ -110,11 +119,11 @@ async def test_no_second_call_while_in_progress(make_state):
     _add_seg(e.state, 2)      # 在途期间又来新段
     e.on_utterance()
     await asyncio.sleep(0.05)
-    assert e._llm.chat_json.await_count == 1  # 无第二个并发调用
+    assert e._llm.chat_text.await_count == 1  # 无第二个并发调用
     release.set()
     await asyncio.sleep(0.05)
     # 失败/续算路径：hang 正常返回 → 游标推进 → 不再有第二次
-    assert e._llm.chat_json.await_count == 1
+    assert e._llm.chat_text.await_count == 1
     await e._drain_bg()
 
 
@@ -125,7 +134,7 @@ async def test_listen_pause_blocks_fire(make_state):
     e.on_utterance()
     e.on_listen_pause()
     await asyncio.sleep(0.1)
-    assert e._llm.chat_json.await_count == 0
+    assert e._llm.chat_text.await_count == 0
     assert e._sched_task is None or e._sched_task.done()
 
 
@@ -150,8 +159,9 @@ async def test_failure_resends_old_items_then_retries(make_state):
 
     e = CoachingEngine(make_state(), send)
     e._llm = AsyncMock()
-    e._llm.chat_json = AsyncMock(side_effect=[LLMError("boom"), {"items": []}])
+    e._llm.chat_text = AsyncMock(side_effect=[LLMError("boom"), '{"items": [{"text": "测试项"}]}'])  # 中文防 pivot 重试
     e._get_llm = lambda: e._llm
+    e._persist = AsyncMock()  # 同上，避免落库
     e._pause_s = 0.01
     e._min_interval_s = 0.1
     await e.first_compute()
@@ -160,11 +170,11 @@ async def test_failure_resends_old_items_then_retries(make_state):
     e.on_utterance()
     await asyncio.sleep(0.05)
     finals = [m for m in sent if m["type"] == "coaching.update" and m["phase"] == "final"]
-    assert e._llm.chat_json.await_count == 1          # 第一次调用失败
+    assert e._llm.chat_text.await_count == 1          # 第一次调用失败
     assert len(finals) == 2                           # 首算 + 失败后的旧清单重推
     assert finals[1]["items"] == old_items            # 失败 → 推回上一份清单
     await asyncio.sleep(0.2)
-    assert e._llm.chat_json.await_count == 2          # 续算成功，恰好两次
+    assert e._llm.chat_text.await_count == 2          # 续算成功，恰好两次
     assert e._transcript_len_at_last == len(e.state.transcript)  # 游标推进 → 无第三次
     await e._drain_bg()
 
@@ -176,7 +186,7 @@ async def test_on_listen_stopped_empty_window_no_call(make_state):
     await e.first_compute()
     e.on_listen_stopped()
     await asyncio.sleep(0.05)
-    assert e._llm.chat_json.await_count == 0
+    assert e._llm.chat_text.await_count == 0
 
 
 async def test_on_listen_stopped_skips_while_in_progress(make_state):
@@ -187,5 +197,5 @@ async def test_on_listen_stopped_skips_while_in_progress(make_state):
     e._in_progress = True
     e.on_listen_stopped()
     await asyncio.sleep(0.05)
-    assert e._llm.chat_json.await_count == 0
+    assert e._llm.chat_text.await_count == 0
     e._in_progress = False

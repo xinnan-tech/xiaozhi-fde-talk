@@ -1,4 +1,9 @@
-"""ENUM_KEYS 校验 + 新默认值。"""
+"""ENUM_KEYS 校验 + 新默认值。
+
+ASR 语种按 provider 分键（豆包流式 ea5dbd3 引入）——asr.funasr_server.language
+是 FunASR 短码三选（zh/yue/en），asr.doubao_stream.language 是豆包 locale 长码。
+共享聚合键「asr.language」没有意义：两个 provider 语种列表互不兼容。
+"""
 import pytest
 
 from app.core.config_store import DEFAULTS, ENUM_KEYS, validate_value
@@ -9,11 +14,23 @@ from app.core.i18n.messages import Keys
 
 def test_enum_keys_exact_set():
     """ENUM_KEYS 必须是这组 key；新增枚举（如未来 ocr.model）必须同步更新本断言。"""
-    assert set(ENUM_KEYS.keys()) == {"asr.language", "llm.output_language", "ocr.type"}
+    assert set(ENUM_KEYS.keys()) == {
+        "asr.funasr_server.language",
+        "asr.doubao_stream.language",
+        "llm.output_language",
+        "ocr.type",
+    }
 
 
 def test_enum_keys_values_are_correct_sets():
-    assert ENUM_KEYS["asr.language"] == {"zh", "yue", "en"}
+    assert ENUM_KEYS["asr.funasr_server.language"] == {"zh", "yue", "en"}
+    # 豆包完整 locale 列表（含 yue-CN 粤语）；新增条目同步在 doubao_stream 适配器。
+    assert ENUM_KEYS["asr.doubao_stream.language"] == {
+        "zh-CN", "en-US", "ja-JP", "id-ID", "es-MX", "pt-BR", "de-DE",
+        "fr-FR", "ko-KR", "fil-PH", "ms-MY", "th-TH", "ar-SA", "it-IT",
+        "bn-BD", "el-GR", "nl-NL", "ru-RU", "tr-TR", "vi-VN", "pl-PL",
+        "ro-RO", "ne-NP", "uk-UA", "yue-CN",
+    }
     # llm.output_language 从 derived_output_language_enum() 派生（10 条头部语种）——
     # 加语种只改 _LANG_META 一处，断言改成"完全等于派生值"以防漂移。
     assert ENUM_KEYS["llm.output_language"] == derived_output_language_enum()
@@ -21,23 +38,23 @@ def test_enum_keys_values_are_correct_sets():
     assert ENUM_KEYS["ocr.type"] == {"openai", "baidu"}
 
 
-def test_validate_value_accepts_asr_zh():
-    validate_value("asr.language", "zh")  # 不抛
+def test_validate_value_accepts_funasr_zh():
+    validate_value("asr.funasr_server.language", "zh")  # 不抛
 
 
-def test_validate_value_accepts_asr_yue():
-    validate_value("asr.language", "yue")  # 不抛
+def test_validate_value_accepts_funasr_yue():
+    validate_value("asr.funasr_server.language", "yue")  # 不抛
 
 
-def test_validate_value_accepts_asr_en():
-    validate_value("asr.language", "en")  # 不抛
+def test_validate_value_accepts_funasr_en():
+    validate_value("asr.funasr_server.language", "en")  # 不抛
 
 
-def test_validate_value_rejects_asr_fr():
+def test_validate_value_rejects_funasr_fr():
     with pytest.raises(I18nError) as ei:
-        validate_value("asr.language", "fr")
+        validate_value("asr.funasr_server.language", "fr")
     assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
-    assert ei.value.params["field"] == "asr.language"
+    assert ei.value.params["field"] == "asr.funasr_server.language"
     assert ei.value.params["value"] == "fr"
     assert ei.value.http_status == 400
 
@@ -65,16 +82,17 @@ def test_validate_value_rejects_llm_zh_bare():
 
 
 def test_validate_value_keys_independent():
-    """asr.language 非法不应该影响 llm.output_language，反之亦然。"""
+    """asr.* 非法不应该影响 llm.output_language，反之亦然。"""
     with pytest.raises(I18nError) as ei:
-        validate_value("asr.language", "fr")
+        validate_value("asr.funasr_server.language", "fr")
     assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
     # 反向不抛
     validate_value("llm.output_language", "zh_cn")
 
 
 def test_defaults_include_language_keys():
-    assert DEFAULTS["asr.language"] == "zh"
+    assert DEFAULTS["asr.funasr_server.language"] == "zh"
+    assert DEFAULTS["asr.doubao_stream.language"] == "zh-CN"
     assert DEFAULTS["llm.output_language"] == "zh_cn"
 
 

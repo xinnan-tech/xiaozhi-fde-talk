@@ -40,12 +40,9 @@ async def test_prod_env_runs_alembic(monkeypatch):
         r.stderr = ""
         return r
 
-    # 阻断副作用：Base.metadata.create_all + 自愈 + 清种子 admin。
+    # 阻断副作用：Base.metadata.create_all + 自愈。
     # engine.begin 是属性不能直接 setattr，patch 调用的源头（Base.metadata.create_all）。
     create_all_calls: list[object] = []
-
-    async def fake_drop_admin():
-        called["drop_admin"] = True
 
     from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -68,7 +65,6 @@ async def test_prod_env_runs_alembic(monkeypatch):
 
     monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr(AsyncEngine, "begin", fake_begin)
-    monkeypatch.setattr("app.persistence.bootstrap._drop_seed_admin", fake_drop_admin)
 
     from app.persistence.bootstrap import init_db
     await init_db()
@@ -76,7 +72,6 @@ async def test_prod_env_runs_alembic(monkeypatch):
     assert called["cmd"] == ["alembic", "upgrade", "head"], \
         f"prod 模式必须走 alembic，实际跑了 {called['cmd']}"
     assert create_all_calls == [], "prod 不应走 create_all"
-    assert called.get("drop_admin") is True
 
 
 @pytest.mark.asyncio
@@ -113,12 +108,8 @@ async def test_prod_env_overrides_disable_alembic(monkeypatch):
     def fake_begin(self):
         return _FakeCtx()
 
-    async def fake_drop_admin():
-        called["drop_admin"] = True
-
     monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setattr(AsyncEngine, "begin", fake_begin)
-    monkeypatch.setattr("app.persistence.bootstrap._drop_seed_admin", fake_drop_admin)
 
     from app.persistence.bootstrap import init_db
     await init_db()
@@ -167,7 +158,6 @@ async def test_dev_env_skips_alembic(monkeypatch):
         return None
 
     monkeypatch.setattr("app.persistence.bootstrap._ensure_columns", _noop_async)
-    monkeypatch.setattr("app.persistence.bootstrap._drop_seed_admin", _noop_async)
 
     from app.persistence.bootstrap import init_db
     await init_db()
@@ -189,7 +179,6 @@ async def test_prod_alembic_failure_raises(monkeypatch):
         return r
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    monkeypatch.setattr("app.persistence.bootstrap._drop_seed_admin", lambda: None)
 
     from app.persistence.bootstrap import init_db
     with pytest.raises(RuntimeError) as ei:

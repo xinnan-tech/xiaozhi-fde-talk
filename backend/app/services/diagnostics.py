@@ -378,6 +378,10 @@ async def diagnose_asr(timeout_s: float = 10.0) -> dict[str, Any]:
     """根据 asr.type 连对应 ASR → 送测试音频 → 等到 final 或超时 → 返回是否成功 + 转写文本。"""
     cfg = get_config_store()
     asr_type = cfg.get_sync("asr.type") or "funasr_server"
+    ws_url = cfg.get_sync(f"asr.{asr_type}.ws_url") or ""
+    # 缺 ws_url → 直接返 config_missing；不等 provider 启动失败再走 _extract_asr_error。
+    if not ws_url:
+        return _result("config_missing", key=Keys.DIAG_ASR_NOT_CONFIGURED)
     sample_rate = int(cfg.get_sync(f"asr.{asr_type}.sample_rate") or "16000")
 
     wav_bytes = await asyncio.to_thread(_build_test_audio, sample_rate)

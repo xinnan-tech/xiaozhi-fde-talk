@@ -349,22 +349,51 @@ def _build_test_audio(sample_rate: int) -> bytes | None:
     return _pcm_to_wav_bytes(raw_pcm + silence, sample_rate)
 
 
+def _extract_pcm_from_wav(wav_bytes: bytes) -> bytes:
+    """从 WAV 字节流中提取原始 PCM（16-bit mono）。"""
+    try:
+        import wave
+        with wave.open(io.BytesIO(wav_bytes), "rb") as w:
+            nch = w.getnchannels()
+            sw = w.getsampwidth()
+            nframes = w.getnframes()
+            raw = w.readframes(nframes)
+        if sw != 2:
+            return b""
+        if nch > 1:
+            samples = struct.unpack(f"<{nframes * nch}h", raw)
+            mono = bytearray()
+            for i in range(nframes):
+                s = sum(samples[i * nch + c] for c in range(nch)) // nch
+                mono.extend(struct.pack("<h", s))
+            return bytes(mono)
+        return raw
+    except Exception:  # noqa: BLE001
+        return b""
+
+
 # ---------- ASR 自检 ----------
 
 async def diagnose_asr(timeout_s: float = 10.0) -> dict[str, Any]:
-    """连 FunASR → 送测试音频 → 等到 final 或超时 → 返回是否成功 + 转写文本。"""
+    """根据 asr.type 连对应 ASR → 送测试音频 → 等到 final 或超时 → 返回是否成功 + 转写文本。"""
     cfg = get_config_store()
-    ws_url = cfg.get_sync("asr.ws_url") or ""
-    sample_rate = int(cfg.get_sync("asr.sample_rate") or "16000")
-    if not ws_url:
-        return _result("config_missing", key=Keys.DIAG_ASR_NOT_CONFIGURED)
+    asr_type = cfg.get_sync("asr.type") or "funasr_server"
+    sample_rate = int(cfg.get_sync(f"asr.{asr_type}.sample_rate") or "16000")
 
     wav_bytes = await asyncio.to_thread(_build_test_audio, sample_rate)
-    used_real = wav_bytes is not None and _REAL_SAMPLE.exists()
+    used_real = _REAL_SAMPLE.exists()
 
-    provider = FunASRServerProvider()
-    provider._ws_url = ws_url
-    provider._sample_rate = sample_rate
+    # WAV → 原始 PCM（供 doubao_stream 的 feed_stream 使用）
+    raw_pcm = await asyncio.to_thread(_extract_pcm_from_wav, wav_bytes)
+
+    # 根据 asr.type 创建对应 provider
+    if asr_type == "doubao_stream":
+        from app.adapters.asr.doubao_stream import DoubaoStreamProvider
+        provider: Any = DoubaoStreamProvider()
+    else:
+        provider = FunASRServerProvider()
+        provider._ws_url = cfg.get_sync(f"asr.funasr_server.ws_url") or ""
+        provider._sample_rate = sample_rate
 
     utterances: list[str] = []
     final_event = asyncio.Event()
@@ -382,10 +411,15 @@ async def diagnose_asr(timeout_s: float = 10.0) -> dict[str, Any]:
         return _extract_asr_error(e) | {"latency_ms": int((time.monotonic() - t0) * 1000)}
 
     try:
-        # wav-mode：把整段 wav 一次性发给 FunASR（与正式访谈客户端用法一致：完整 opus/webm 帧）
-        await provider._ws.send(wav_bytes)
-        # 触发离线句尾（is_speaking=false 让 FunASR 跑 2pass 离线纠错）
-        await provider._ws.send('{"is_speaking": false}'.encode("utf-8"))
+        if asr_type == "doubao_stream":
+            # 豆包流式：通过 feed_stream 发送原始 PCM
+            await provider.feed_stream(raw_pcm)
+            await provider.stop_stream()
+        else:
+            # FunASR：直接发 WAV 字节（wav-mode）
+            await provider._ws.send(wav_bytes)
+            await provider._ws.send('{"is_speaking": false}'.encode("utf-8"))
+
         try:
             await asyncio.wait_for(final_event.wait(), timeout=timeout_s - (time.monotonic() - t0))
         except asyncio.TimeoutError:

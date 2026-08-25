@@ -71,7 +71,7 @@ def _build_ssl_context(ws_url: str) -> ssl.SSLContext:
     """
     ctx = ssl.create_default_context()
     # 用户显式关闭 SSL 验证
-    if get_config_store().get_sync("asr.ws_verify_ssl") == "false":
+    if get_config_store().get_sync("asr.funasr_server.ws_verify_ssl") == "false":
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
     elif _is_local(ws_url):
@@ -113,9 +113,10 @@ class FunASRServerProvider(ASRProvider):
         store = get_config_store()
         # 不再 or 兜底 localhost：DB 显式为空时 start_stream 抛 ASRProviderError，
         # prod 没配 ASR 第一次请求就报错（fail-fast），不再静默连 localhost 失败。
-        self._ws_url = store.get_sync("asr.ws_url") or ""
-        self._sample_rate = int(store.get_sync("asr.sample_rate") or 16000)
-        self._funasr_language: str = _to_funasr_language(store.get_sync("asr.language"))
+        P = "asr.funasr_server."
+        self._ws_url = store.get_sync(f"{P}ws_url") or ""
+        self._sample_rate = int(store.get_sync(f"{P}sample_rate") or 16000)
+        self._funasr_language: str = _to_funasr_language(store.get_sync(f"{P}language"))
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         # 连接已不可用（recv_loop 结束）。只立标志不清 self._ws：句柄必须保留
         # 到 close() 真正关闭底层 TCP——先单独跑过 stop_stream 的调用方

@@ -23,10 +23,19 @@ from app.persistence.models import SystemConfig
 
 logger = logging.getLogger(__name__)
 
-# B 类 19 个 key 的合法清单（前后端共用）
+# B 类 key 的合法清单（前后端共用）
+# ASR 字段按 type 隔离存储：asr.funasr_server.* / asr.doubao_stream.*
 ALL_B_KEYS: list[str] = [
     "llm.type", "llm.base_url", "llm.api_key", "llm.model", "llm.output_language",
-    "asr.type", "asr.language", "asr.sample_rate", "asr.ws_url", "asr.ws_verify_ssl",
+    "asr.type",
+    # FunASR Server
+    "asr.funasr_server.language", "asr.funasr_server.sample_rate",
+    "asr.funasr_server.ws_url", "asr.funasr_server.ws_verify_ssl",
+    # Doubao Stream
+    "asr.doubao_stream.language", "asr.doubao_stream.sample_rate",
+    "asr.doubao_stream.appid", "asr.doubao_stream.access_token",
+    "asr.doubao_stream.resource_id", "asr.doubao_stream.enable_multilingual",
+    # Coach
     "coach.pause_s", "coach.max_pending_segments", "coach.min_interval_s", "coach.llm_timeout_s",
     "auth.jwt_expire_minutes", "auth.allow_registration", "auth.refresh_token_expire_days",
     "session.grace_period_s",
@@ -43,13 +52,15 @@ SENSITIVE_KEYS: frozenset[str] = frozenset({
     "llm.api_key",
     "ocr.api_key",
     "ocr.secret_key",
+    "asr.doubao_stream.access_token",
     "system.jwt_secret",
 })
 
 # 数值 key 的类型表：写入前校验。坏值若落库，要到运行路径（登录的
 # int(jwt_expire_minutes)、断连的 float(grace_period_s)）才抛 500，全站遭殃。
 NUMERIC_KEYS: dict[str, type] = {
-    "asr.sample_rate": int,
+    "asr.funasr_server.sample_rate": int,
+    "asr.doubao_stream.sample_rate": int,
     "coach.max_pending_segments": int,
     "auth.jwt_expire_minutes": int,
     "auth.refresh_token_expire_days": int,
@@ -72,7 +83,14 @@ from app.core.i18n.lang_meta import derived_output_language_enum
 ENUM_KEYS: dict[str, set[str]] = {
     # FunASR 实际支持 {zh, en, ja, ko, yue, auto}，但我们只把常用的 3 个
     # 暴露给管理员——粤语场景明确支持（用户需求），ja/ko 当前无需求。
-    "asr.language": {"zh", "yue", "en"},
+    "asr.funasr_server.language": {"zh", "yue", "en"},
+    # Doubao 语种：完整 locale 列表
+    "asr.doubao_stream.language": {
+        "zh-CN", "en-US", "ja-JP", "id-ID", "es-MX", "pt-BR", "de-DE",
+        "fr-FR", "ko-KR", "fil-PH", "ms-MY", "th-TH", "ar-SA", "it-IT",
+        "bn-BD", "el-GR", "nl-NL", "ru-RU", "tr-TR", "vi-VN", "pl-PL",
+        "ro-RO", "ne-NP", "uk-UA", "yue-CN",
+    },
     # LLM 输出语种：跟 ASR 是独立维度（详见 plan Task 2.5 注释）。
     "llm.output_language": derived_output_language_enum(),
     # OCR 模型类型：openai 兼容（qwen-vl、gpt-4o）或百度
@@ -84,6 +102,7 @@ ENUM_KEYS: dict[str, set[str]] = {
 # 注册开关注定踩坑。
 BOOL_KEYS: frozenset[str] = frozenset({
     "auth.allow_registration",
+    "asr.doubao_stream.enable_multilingual",
 })
 
 
@@ -137,10 +156,18 @@ DEFAULTS: dict[str, str] = {
     "llm.model": "qwen-plus",
     "llm.output_language": "zh_cn",
     "asr.type": "funasr_server",
-    "asr.language": "zh",
-    "asr.sample_rate": "16000",
-    "asr.ws_url": "wss://localhost:10096",
-    "asr.ws_verify_ssl": "false",
+    # FunASR Server
+    "asr.funasr_server.language": "zh",
+    "asr.funasr_server.sample_rate": "16000",
+    "asr.funasr_server.ws_url": "wss://localhost:10096",
+    "asr.funasr_server.ws_verify_ssl": "false",
+    # Doubao Stream
+    "asr.doubao_stream.language": "zh-CN",
+    "asr.doubao_stream.sample_rate": "16000",
+    "asr.doubao_stream.appid": "",
+    "asr.doubao_stream.access_token": "",
+    "asr.doubao_stream.resource_id": "volc.bigasr.sauc.duration",
+    "asr.doubao_stream.enable_multilingual": "false",
     "coach.pause_s": "5.0",
     "coach.max_pending_segments": "8",
     "coach.min_interval_s": "10.0",

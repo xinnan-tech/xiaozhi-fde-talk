@@ -15,6 +15,7 @@ from app.core.config_store import DEFAULTS, get_config_store
 _REGISTRY = {
     "funasr_server": ("app.adapters.asr.funasr_server", "FunASRServerProvider"),
     "funasr_mock": ("app.adapters.asr.funasr_mock", "FunASRMockProvider"),
+    "doubao_stream": ("app.adapters.asr.doubao_stream", "DoubaoStreamProvider"),
 }
 
 _provider: Optional[ASRProvider] = None

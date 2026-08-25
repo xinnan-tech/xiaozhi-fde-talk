@@ -79,8 +79,7 @@ const activeTab = computed(() => tabOptions.value[tabValue.value].key);
 
 const transcriptList = computed(() => {
   return [...(interviewDetail.value?.transcript ?? [])].reverse().map(item => ({
-    ...item,
-    time: formatTranscriptTime(item.start_ms)
+    ...item
   }));
 });
 
@@ -369,7 +368,7 @@ onMounted(async () => {
               >
                 <div class="transcript-content">
                   <div class="transcript-meta">
-                    <time>{{ item.time }}</time>
+                    <span class="seg-id">{{ item.seg_id }}</span>
                   </div>
                   <p>{{ item.text }}</p>
                 </div>
@@ -845,7 +844,7 @@ onMounted(async () => {
     margin-bottom: 8px;
   }
 
-  .transcript-meta time {
+  .transcript-meta .seg-id {
     font-size: 13px;
     font-weight: 600;
     color: #94a3b8;

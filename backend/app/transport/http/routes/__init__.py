@@ -11,6 +11,7 @@ from app.transport.http.routes.interviews import router as interviews_router
 from app.transport.http.routes.reports import router as reports_router
 from app.transport.http.routes.skills import router as skills_router
 from app.transport.http.routes.templates import router as templates_router
+from app.transport.http.routes.version import router as version_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
@@ -21,5 +22,6 @@ router.include_router(skills_router)
 router.include_router(admin_config_router)
 router.include_router(admin_users_router)
 router.include_router(diagnostics_router)
+router.include_router(version_router)
 
 __all__ = ["router"]

@@ -1,7 +1,26 @@
-import { chromium, type FullConfig } from "@playwright/test"
+import { chromium, request as playwrightRequest, type FullConfig } from "@playwright/test"
 import { ADMIN_USER, ADMIN_PWD } from "./fixtures/auth"
 
+// 与 playwright.config.ts webServer[0].port=8001 对齐：frontend vite preview 把 /api 反代到 8001
+const E2E_API = "http://127.0.0.1:8001"
+
 export default async function globalSetup(config: FullConfig) {
+  // 先在 fresh DB 上注册首用户（按 auth/register 契约：count==0 → role=admin）。
+  // 不再走旧版 bootstrap 的 seed admin：d0084ff / 6c926b9 已删 seed + 简化 bootstrap，
+  // 但 global-setup 没同步——这里补回。注册失败（如用户已存在）吞掉，让后续 UI 登录失败再报。
+  const apiCtx = await playwrightRequest.newContext({ baseURL: E2E_API })
+  try {
+    await apiCtx.post("/api/v1/auth/register", {
+      data: {
+        username: ADMIN_USER,
+        password: ADMIN_PWD,
+        confirm_password: ADMIN_PWD,
+      },
+    })
+  } finally {
+    await apiCtx.dispose()
+  }
+
   const baseURL = config.projects[0].use.baseURL as string
   const browser = await chromium.launch()
   const context = await browser.newContext()

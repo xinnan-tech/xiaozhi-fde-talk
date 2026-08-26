@@ -307,6 +307,7 @@
   "interview.runtime.suspend_dialog.message": "系統偵測到長時間沒有聲音，已暫停本次訪談。點擊「繼續」可立即恢復麥克風與連線，或先處理其他事情稍後再繼續。",
   "interview.runtime.suspend_dialog.confirm": "繼續",
   "interview.runtime.suspend_dialog.cancel": "暫不",
+  "interview.runtime.suspend_dialog.ended_while_waiting": "工作階段已結束，無法繼續",
   "interview.runtime.speaker": "說話人 {number}",
 
   "report.default_title": "訪談報告",

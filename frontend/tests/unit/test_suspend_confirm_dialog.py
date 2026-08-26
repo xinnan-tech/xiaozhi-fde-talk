@@ -63,6 +63,27 @@ def test_handle_session_suspended_calls_start_on_confirm():
     )
 
 
+def test_handle_session_suspended_rechecks_ended_after_confirm():
+    """弹框期间后端推了 session.ended 时，用户点继续必须有可见反馈。
+
+    await ElMessageBox.confirm 期间 WS 仍可推 ended；用户点「继续」后
+    若直接进 handleStartInterview，入口守卫会静默 return，用户毫无
+    反馈。要在调 start 前再查一次，命中即 toast 告知。"""
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleSessionSuspended = async () => {")
+    # confirm await 与 handleStartInterview 之间的 ended 守卫
+    confirm_idx = body.index("await ElMessageBox.confirm(")
+    start_idx = body.index("await handleStartInterview()")
+    between = body[confirm_idx:start_idx]
+    assert 'status === "ended"' in between, (
+        "弹框 await 之后、调 handleStartInterview 之前必须再查 status === "
+        "'ended'，否则 ended 状态会被入口守卫静默吞掉"
+    )
+    assert "ElMessage" in between, (
+        "ended 命中必须给一条 ElMessage 提示，否则用户不知道为何没继续"
+    )
+
+
 def test_handle_session_suspended_uses_reentrancy_guard():
     """重复触发不能堆栈多个弹框；用 finally 重置 flag。"""
     script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
@@ -114,6 +135,7 @@ def test_suspend_dialog_i18n_keys_in_all_locales():
         "interview.runtime.suspend_dialog.message",
         "interview.runtime.suspend_dialog.confirm",
         "interview.runtime.suspend_dialog.cancel",
+        "interview.runtime.suspend_dialog.ended_while_waiting",
     )
     for path in locales:
         keys = set(json.loads(path.read_text(encoding="utf-8")).keys())

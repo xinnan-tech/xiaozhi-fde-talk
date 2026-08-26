@@ -300,6 +300,7 @@
   "interview.runtime.suspend_dialog.message": "No audio was detected for a while, so this interview has been paused. Click Continue to restart the microphone and reconnect now, or handle something else first and resume later.",
   "interview.runtime.suspend_dialog.confirm": "Continue",
   "interview.runtime.suspend_dialog.cancel": "Not now",
+  "interview.runtime.suspend_dialog.ended_while_waiting": "This session has ended and cannot be resumed.",
   "interview.runtime.speaker": "Speaker {number}",
   "report.default_title": "Interview report",
   "report.tab.report": "Interview report",

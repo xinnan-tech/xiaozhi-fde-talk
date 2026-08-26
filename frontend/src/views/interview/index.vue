@@ -642,6 +642,13 @@ const handleSessionSuspended = async () => {
         type: "warning"
       }
     );
+    // 弹框等待期间后端可能再推 session.ended：用户点「继续」之前再查一次，
+    // 命中即 toast 告知「会话已结束」，避免 handleStartInterview 入口守卫
+    // 静默吞掉、用户毫无反馈。
+    if (interviewDetail.value?.status === "ended") {
+      ElMessage.warning(t("interview.runtime.suspend_dialog.ended_while_waiting"));
+      return;
+    }
     await handleStartInterview();
   } catch {
     // 用户选择暂不继续：维持 suspended，控制按钮下次再点。

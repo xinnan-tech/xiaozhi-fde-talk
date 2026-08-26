@@ -307,6 +307,7 @@
   "interview.runtime.suspend_dialog.message": "Hệ thống không phát hiện âm thanh trong một khoảng thời gian nên đã tạm dừng phỏng vấn. Nhấp Tiếp tục để khởi động lại micro và kết nối ngay, hoặc xử lý việc khác trước rồi quay lại sau.",
   "interview.runtime.suspend_dialog.confirm": "Tiếp tục",
   "interview.runtime.suspend_dialog.cancel": "Để sau",
+  "interview.runtime.suspend_dialog.ended_while_waiting": "Phiên đã kết thúc, không thể tiếp tục.",
   "interview.runtime.speaker": "Người nói {number}",
 
   "report.default_title": "Báo cáo phỏng vấn",

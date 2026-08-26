@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -25,7 +25,12 @@ router = APIRouter(prefix="/admin/users", tags=["admin"])
 
 
 def _iso(dt: datetime | None) -> str | None:
-    return dt.isoformat() if dt else None
+    if dt is None:
+        return None
+    # 确保转成 UTC 再序列化，保证前端 new Date() 能正确识别为 UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 @router.get("", response_model=list[AdminUserInfo])

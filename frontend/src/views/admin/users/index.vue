@@ -2,7 +2,6 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { message } from "@/utils/message";
-import { extractBackendError } from "@/utils/error";
 import {
   listUsersApi,
   resetPasswordApi,
@@ -101,11 +100,13 @@ async function submitReset() {
     message(t("users.reset_password_success"), { type: "success" });
     resetDialogVisible.value = false;
   } catch (e: unknown) {
-    // 后端 I18nError 已返回精确文案（用户不存在 / 新密码不合规等），
-    // 交给 helper 解析；取不到再走 i18n 兜底。
-    message(extractBackendError(e, t("users.reset_password_failed")), {
-      type: "error"
-    });
+    // 后端 4xx/5xx 错误已由 http 响应拦截器统一 toast（带 grouping 去重），
+    // 这里再 message() 会形成两条 toast（issue #62 反馈）。
+    // 仅当网络错误（无 response）时给兜底——拦截器只处理有 response 的情况。
+    const hasResponse = (e as { response?: unknown })?.response !== undefined;
+    if (!hasResponse) {
+      message(t("users.reset_password_failed"), { type: "error" });
+    }
   } finally {
     resetting.value = false;
   }

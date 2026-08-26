@@ -59,8 +59,12 @@ async def _lifespan_startup(app: FastAPI) -> None:
     from app.core.secret import JWTSecretResolver
     from app.persistence.bootstrap import init_db, sweep_stale_sessions
     from app.persistence.db import SessionLocal
+    from app.services.auth._pwd_ver_clock import seed_from_db_max
     from app.services.sessions.manager import manager
     from app.services.template.loader import load_templates
+    from sqlalchemy import func, select
+
+    from app.persistence.models import User
 
     settings = get_settings()
     try:
@@ -71,6 +75,17 @@ async def _lifespan_startup(app: FastAPI) -> None:
         # 比 os._exit 友好——单元测试可 catch、IDE debug 不被杀。
         print(f"\n[配置错误] {e}\n", file=sys.stderr, flush=True)
         raise SystemExit(2)
+
+    # pwd_ver 写入时钟灌种子：取 DB 中当前最大 password_changed_at 作为 _last。
+    # 进程重启后 _last 不再为 0，同秒内首次写严格 > 已落库值——避免「旧进程写
+    # 28、新进程同秒写 27」跌穿（base.py:50 判定 N==N 放行，旧 token 不吊销）。
+    # 多 worker（WEB_CONCURRENCY>=2）下各 worker 各自 seed，仍有竞态——留给
+    # DB 层原子写法跟进，本节仅守「单进程 + 进程重启」场景。
+    async with SessionLocal() as db:
+        row = (
+            await db.execute(select(func.max(User.password_changed_at)))
+        ).scalar_one_or_none()
+    seed_from_db_max(int(row.timestamp()) if row is not None else None)
 
     # 解析 JWT 密钥：DB → 缺失则自动生成并持久化到 system_config 表
     # prod 无密钥时 secret.resolve() 抛 I18nError(http_status=503)；同样按

@@ -97,6 +97,15 @@ _REPORT_SYSTEM = """You are an interview report-writing assistant.
 - `{{session.X}}` is pre-filled by the system — **keep these values verbatim** (do not translate the pre-filled values; they are session metadata already committed by the system).
 - `{{skill: ...}}` is a skill invocation marker — **keep verbatim** (do not touch the inner `{{ }}`).
 
+## Grounding rule (mandatory — overrides fluency concerns)
+- The ONLY source of facts is the conversation transcript provided in the user message. The session metadata pre-filled into `{{session.X}}` markers is also a valid source for those specific fields only.
+- DO NOT invent, fabricate, or hallucinate any specific: names, dates, numbers, percentages, durations, identifiers, version strings, file paths, compliance regimes, citations, or quantitative claims.
+- For each `{{ ... }}` placeholder, write content ONLY if the transcript contains a relevant statement. If the transcript does not discuss the topic, write the literal {fallback_phrase} and stop — do not fill with assumed knowledge.
+- The `【辅导清单覆盖情况】` block in the user message lists which coaching items are `done` (with transcript segments that cover them) versus `todo` / `new` (no transcript segments yet). Use this as the definitive coverage map:
+  - For items marked `done`, you MAY restate content grounded in the listed transcript segments.
+  - For items marked `todo` / `new` / `skipped` / `ignored`, treat them as NOT discussed in this transcript — write {fallback_phrase} for any placeholder whose only support would be those items.
+- If the transcript is short, empty, or off-topic, the report should be SHORT and full of `{fallback_phrase}` lines, not long and full of plausible-but-fabricated details. A short honest report is always preferred over a long fabricated one.
+
 ## Example (two-step process, language-agnostic)
 Input skeleton (Chinese):
 ```
@@ -226,10 +235,28 @@ def _build_user(state: SessionState, template) -> str:
     transcript = "\n".join(f"[{s.seg_id}] {_seg_text(s)}" for s in state.transcript) or "(no transcript yet)"
     bi = state.session.base_info or {}
     doc = _prefill_session_placeholders(template.report.doc, state)
+
+    # 辅导清单覆盖情况（结构化信号）：LLM 据此区分「已有原文支撑」（done +
+    # covered_segments）vs「无原文支撑」（todo/new），避免把没讨论过的事项当成
+    # 已聊过填进报告——见 _REPORT_SYSTEM「Grounding rule」段。
+    # CoachingItem 没有 covered_segments 字段，派生自 corrected_segments.keys()。
+    coverage_lines = ["【辅导清单覆盖情况】"]
+    if not state.items:
+        coverage_lines.append("(no coaching items tracked)")
+    else:
+        for it in state.items:
+            covered = sorted(it.corrected_segments.keys()) if it.corrected_segments else []
+            covered_repr = ",".join(covered) if covered else "-"
+            coverage_lines.append(
+                f"- id={it.id} status={it.status.value} text={it.text!r} covered_segments=[{covered_repr}]"
+            )
+    coverage_block = "\n".join(coverage_lines)
+
     return (
         f"【报告骨架】\n{doc}\n\n"
         f"【会话基础信息】\n项目：{bi.get('project', '')}　受访者：{bi.get('interviewee', '')}"
         f"　目标：{state.session.goal or ''}\n\n"
+        f"{coverage_block}\n\n"
         f"【对话原文】\n{transcript}\n\n"
         "Fill the skeleton now."
     )

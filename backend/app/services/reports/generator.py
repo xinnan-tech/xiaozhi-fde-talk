@@ -103,7 +103,7 @@ _REPORT_SYSTEM = """You are an interview report-writing assistant.
 - For each `{{ ... }}` placeholder, write content ONLY if the transcript contains a relevant statement. If the transcript does not discuss the topic, write the literal {fallback_phrase} and stop — do not fill with assumed knowledge.
 - The `【辅导清单覆盖情况】` block in the user message lists which coaching items are `done` (with transcript segments that cover them) versus `todo` / `new` (no transcript segments yet). Use this as the definitive coverage map:
   - For items marked `done`, you MAY restate content grounded in the listed transcript segments.
-  - For items marked `todo` / `new`, treat them as NOT discussed in this transcript — write {fallback_phrase} for any placeholder whose only support would be those items.
+  - For items marked `todo` / `new` / `skipped` / `ignored`, treat them as NOT discussed in this transcript — write {fallback_phrase} for any placeholder whose only support would be those items.
 - If the transcript is short, empty, or off-topic, the report should be SHORT and full of `{fallback_phrase}` lines, not long and full of plausible-but-fabricated details. A short honest report is always preferred over a long fabricated one.
 
 ## Example (two-step process, language-agnostic)

@@ -38,14 +38,30 @@ def test_system_has_grounding_rule():
 
 
 def test_system_enumerates_forbidden_specifics():
-    """base 必须点名禁止的具体信息类别——只有「禁止编造」太抽象，LLM 还是会编。"""
+    """base 必须点名禁止的具体信息类别——只有「禁止编造」太抽象，LLM 还是会编。
+
+    经验：name/number/date 三件套太低——LLM 会改去编 percentages / file path /
+    duration / version string。规则须覆盖至少 4 类才算到位。
+    """
     body = generator._REPORT_SYSTEM.lower()
-    # 至少出现以下三类（任一缺都意味着规则不到位，LLM 仍会编其它类型）
-    forbidden_kinds = ["name", "number", "date"]
+    forbidden_kinds = ["name", "number", "date", "percentage", "duration", "file path"]
     present = [k for k in forbidden_kinds if k in body]
-    assert len(present) >= 2, (
-        f"base 未点名至少两类禁止编造的具体信息（names/numbers/dates/percentages/durations/...），"
+    assert len(present) >= 4, (
+        f"base 未点名至少 4 类禁止编造的具体信息（实测：3 类 LLM 仍编 percentages），"
         f"实际出现 {present}：{body[:400]!r}"
+    )
+
+
+def test_system_treats_skipped_ignored_as_uncovered():
+    """Grounding rule 必须把 skipped / ignored 当作未覆盖——否则 LLM 看到这两态会猜。
+
+    实测看 qwen-plus 不严格区分 status 五态，但加这条 sentinel 防止后续模型/规则
+    漂移时让 skipped 项"有 seg 可引"造成幻觉回归。
+    """
+    body = generator._REPORT_SYSTEM.lower()
+    # grounding rule 段必须同时点 skipped 和 ignored
+    assert "skipped" in body and "ignored" in body, (
+        f"base 未点名 skipped/ignored 也按未覆盖处理——LLM 可能误读这两态：{body[:600]!r}"
     )
 
 

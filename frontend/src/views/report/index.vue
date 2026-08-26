@@ -4,7 +4,6 @@ import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import MarkdownIt from "markdown-it";
 import ReSegmented from "@/components/ReSegmented";
-import { extractBackendError } from "@/utils/error";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import {
@@ -200,12 +199,13 @@ const handleExportReport = async (
     link.click();
     URL.revokeObjectURL(url);
   } catch (e: unknown) {
-    ElMessage.error(
-      extractBackendError(
-        e,
+    // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+    const hasResponse = (e as { response?: unknown })?.response !== undefined;
+    if (!hasResponse) {
+      ElMessage.error(
         t("report.export_failed", { extension: extension.toUpperCase() })
-      )
-    );
+      );
+    }
   }
 };
 
@@ -231,7 +231,11 @@ const handleDeleteInterview = async () => {
     await router.push("/home");
   } catch (error) {
     if (error !== "cancel" && error !== "close") {
-      ElMessage.error(extractBackendError(error, t("report.delete_failed")));
+      // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+      const hasResponse = (error as { response?: unknown })?.response !== undefined;
+      if (!hasResponse) {
+        ElMessage.error(t("report.delete_failed"));
+      }
     }
   }
 };

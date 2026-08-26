@@ -99,6 +99,29 @@ async def test_min_interval_defers_but_not_drops(make_state):
     await e._drain_bg()
 
 
+async def test_pivot_retry_does_not_duplicate_coaching_update(make_state):
+    """pivot 兜底（LLM 输出英文 → 重试 en）→ coaching.update 仍只发一次 final，不重复推中间结果。
+
+    中文 mock 让 pivot 不重试，遮掉了「重试是否引入重复推」这条路径。本用例故意返英文 mock，
+    强制走 pivot 重试分支，断言 final 阶段的 coaching.update 只发一次（旧版本未做去重会发2次）。
+    """
+    e = _engine(make_state, pause_s=0.01)
+    # 英文 mock → LATIN → pivot 触发 with_lang_fallback 重试一次（系统会自动 fallback 到 en）
+    e._llm.chat_text = AsyncMock(return_value='{"items": [{"text": "english item"}]}')
+    sent: list[dict] = []
+    e._ws_send = sent.append
+    await e.first_compute()
+    _add_seg(e.state)
+    e.on_utterance()
+    await asyncio.sleep(0.1)
+    finals = [m for m in sent if m["type"] == "coaching.update" and m["phase"] == "final"]
+    # first_compute 的 final + 重算后的 final = 2 次；中间 recomputing 不算
+    assert len(finals) == 2
+    # 重算后的 final 用的是新 version（>1），证明重试没被错杀
+    assert finals[1]["version"] > finals[0]["version"]
+    await e._drain_bg()
+
+
 async def test_no_second_call_while_in_progress(make_state):
     """LLM 在途时触发到达 → 不并发第二个调用；完成后窗口增长则续算。"""
     started = asyncio.Event()

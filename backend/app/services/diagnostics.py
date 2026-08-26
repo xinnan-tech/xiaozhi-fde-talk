@@ -380,11 +380,12 @@ async def diagnose_asr(timeout_s: float = 10.0) -> dict[str, Any]:
     asr_type = cfg.get_sync("asr.type") or "funasr_server"
     # 缺关键配置 → 直接返 config_missing；不等 provider 启动失败再走 _extract_asr_error。
     # 字段按 type 分：funasr_server 要 ws_url，豆包要 appid + access_token。
+    # 未知 type（funasr_mock 等不需要 ws_url 的 provider）直接放过，让下方 provider 自检。
     if asr_type == "doubao_stream":
         if not (cfg.get_sync("asr.doubao_stream.appid")
                 and cfg.get_sync("asr.doubao_stream.access_token")):
             return _result("config_missing", key=Keys.DIAG_ASR_NOT_CONFIGURED)
-    else:
+    elif asr_type == "funasr_server":
         if not cfg.get_sync("asr.funasr_server.ws_url"):
             return _result("config_missing", key=Keys.DIAG_ASR_NOT_CONFIGURED)
     sample_rate = int(cfg.get_sync(f"asr.{asr_type}.sample_rate") or "16000")

@@ -483,6 +483,23 @@ const scrollTranscriptToTop = async () => {
   transcriptScrollRef.value?.setScrollTop(0);
 };
 
+// 接管后获取最新访谈转录
+const refreshInterviewTranscript = async () => {
+  const sessionId = getInterviewSessionId();
+  if (!sessionId) return;
+
+  try {
+    const detail = await getInterviewDetailApi(sessionId);
+    if (route.params.id !== sessionId) return;
+
+    interviewDetail.value = detail;
+    transcriptEntries.value = createTranscriptEntries(detail.transcript);
+    void scrollTranscriptToTop();
+  } catch (error) {
+    console.warn("[InterviewPage] 接管后刷新访谈详情失败", error);
+  }
+};
+
 const appendAsrMessage = (
   message: Extract<InterviewServerMessage, { type: "asr" }>
 ) => {
@@ -631,6 +648,9 @@ const websocket = useWebSocket({
     void openMicrophone().then(started => {
       if (started) shouldResumeMicrophone.value = false;
     });
+  },
+  onTakeoverCompleted: () => {
+    void refreshInterviewTranscript();
   },
   onDisconnected: event => {
     console.warn("[InterviewPage] WebSocket 已断开", event.code, event.reason);

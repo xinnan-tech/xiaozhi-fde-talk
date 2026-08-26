@@ -84,6 +84,7 @@ export interface useWebSocketOptions {
   onConnected?: (
     message: Extract<InterviewServerMessage, { type: "hello" }>
   ) => void;
+  onTakeoverCompleted?: () => void;
   onDisconnected?: (event: CloseEvent) => void;
   onError?: (message: InterviewErrorMessage) => void;
 }
@@ -197,12 +198,14 @@ export function useWebSocket(options: useWebSocketOptions) {
       options.onMessage?.(message);
 
       if (message.type === "hello") {
+        const takeoverCompleted = isPendingTakeover.value;
         // 接管复用现有 WebSocket，不会再次触发底层 onConnected；
         // hello 是接管完成的握手确认，必须同步退出 pending 状态。
         isPendingTakeover.value = false;
         isHandshakeComplete.value = true;
         sequence.value = message.resume_from_seq || 0;
         options.onConnected?.(message);
+        if (takeoverCompleted) options.onTakeoverCompleted?.();
       } else if (message.type === "connection.conflict") {
         isPendingTakeover.value = true;
       } else if (message.type === "connection.kicked") {

@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 INTERVIEW_VUE = ROOT / "src" / "views" / "interview" / "index.vue"
+WEBSOCKET_TS = ROOT / "src" / "composables" / "useWebSocket.ts"
 
 
 def _script_block(text: str) -> str:
@@ -118,3 +119,55 @@ def test_suspend_dialog_i18n_keys_in_all_locales():
         keys = set(json.loads(path.read_text(encoding="utf-8")).keys())
         missing = [k for k in needed if k not in keys]
         assert not missing, f"{path.name} 缺 {missing}"
+
+
+def test_use_web_socket_exports_allow_reconnect():
+    """useWebSocket 必须导出 allowReconnect 复位函数。
+
+    session.suspended 路径把 isReconnectAllowed 置 false 后，必须有外部
+    接口把它置 true，否则暂停弹框选「继续」时 openWebSocket 没法重连。
+    """
+    text = WEBSOCKET_TS.read_text(encoding="utf-8")
+    assert "const allowReconnect = () =>" in text, (
+        "useWebSocket 必须定义 allowReconnect 复位函数"
+    )
+    assert "isReconnectAllowed.value = true" in text, (
+        "allowReconnect 必须把 isReconnectAllowed 置 true 才能再次 autoReconnect"
+    )
+    # 必须出现在 return 对象里
+    assert "allowReconnect," in text, (
+        "allowReconnect 必须从 useWebSocket 返回给 view 使用"
+    )
+
+
+def test_handle_start_interview_resets_reconnect_before_open():
+    """handleStartInterview 必须在 openWebSocket 前调 allowReconnect。
+
+    suspended 路径把可重连标志置 false 后直接 open，autoReconnect 立即
+    拒绝 → 用户体验「继续」后连接仍卡死。把复位提到 open 之前，确保即使
+    上一次断开发生在弹框期间，重连链也能重新被允许。"""
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleStartInterview = async () => {")
+    allow_idx = body.index("allowReconnect()")
+    open_idx = body.index("openWebSocket()")
+    assert allow_idx < open_idx, (
+        "allowReconnect() 必须在 openWebSocket() 之前，否则重连锁仍关闭"
+    )
+
+
+def test_handle_start_interview_guards_against_ended_status():
+    """handleStartInterview 入口必须拦下 status === 'ended' 的情况。
+
+    session.ended 与 session.suspended 共用同一分支，弹框等待期间后端
+    可能再推 ended；若用户仍点「继续」则会把 ended 改回 in_progress，
+    状态机被异步路径撕坏。要在入口用 handleControlButtonClick 同样的
+    白名单守住。"""
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleStartInterview = async () => {")
+    # 入口第一个判断就是 ended 守卫
+    assert 'status === "ended"' in body[:body.index("isInterviewStarted")], (
+        "status === 'ended' 守卫必须在 isInterviewStarted 检查之前"
+    )
+    assert "return;" in body[:body.index("isInterviewStarted")], (
+        "ended 状态命中后必须 return，否则继续往下跑改 status"
+    )

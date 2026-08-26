@@ -335,6 +335,9 @@ const startInterviewTimer = (reset = true) => {
 };
 
 const handleStartInterview = async () => {
+  // 会话已结束时不可重启：等待确认期间后端可能再推 session.ended，
+  // 此处若不拦就把 ended 改回 in_progress，状态机被弹框异步路径撕坏。
+  if (interviewDetail.value?.status === "ended") return;
   if (isInterviewStarted.value) return;
   isInterviewStarted.value = true;
   const wasSuspended = interviewDetail.value?.status === "suspended";
@@ -355,6 +358,8 @@ const handleStartInterview = async () => {
     interviewDetail.value.status = "in_progress";
   }
 
+  // 暂停后 WS 层 isReconnectAllowed=false，需手动复位才能再次重连。
+  allowReconnect();
   openWebSocket();
 
   // WebSocket 已经连接时直接开始监听；尚未连接时由 onConnected 处理。
@@ -733,7 +738,8 @@ const {
   state: websocketState,
   open: openWebSocket,
   sendListenState,
-  sendAudioFrame
+  sendAudioFrame,
+  allowReconnect
 } = websocket;
 const isWebSocketConnected = computed(
   () => websocketState.value === "connected"

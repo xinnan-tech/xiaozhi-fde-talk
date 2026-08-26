@@ -257,6 +257,7 @@
   "interview.status.ended": "已結束",
   "interview.action.start": "開始訪談",
   "interview.action.continue": "繼續訪談",
+  "interview.action.pause": "暫停訪談",
   "interview.action.enable_mic": "開啟麥克風",
   "interview.action.disable_mic": "關閉麥克風",
   "interview.action.end": "結束訪談",

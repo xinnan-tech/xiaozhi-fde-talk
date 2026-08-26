@@ -204,6 +204,23 @@ const setFieldValue = (
   }
 };
 
+/** 渲染时按当前 ASR type 解析选项。
+ *
+ * ASR 字段在 buildConfigGroups 时不烤入 options（不同 type 共享 fieldKey，
+ * 例如 funasr_server 和 doubao_stream 都有 language，但选项集合完全不同）；
+ * 改为渲染时按 config.asr.type 实时查表，避免 dedup 后切 type 时 options
+ * 沿用第一个遍历到的 type。 */
+const selectOptionsFor = (
+  groupKey: string,
+  fieldKey: string
+): SelectOption[] | undefined => {
+  if (groupKey === "asr") {
+    const type = config.asr?.type as string;
+    return SELECT_FIELD_OPTIONS[`asr.${type}.${fieldKey}`];
+  }
+  return SELECT_FIELD_OPTIONS[`${groupKey}.${fieldKey}`];
+};
+
 /** 获取配置分组图标 */
 const getGroupIcon = (key: string) =>
   icons[key as keyof typeof icons] ?? useRenderIcon("tabler:settings");
@@ -259,7 +276,11 @@ const buildConfigGroups = (data: SystemConfig) => {
           seenKeys.add(fieldKey);
           const isCheckbox = checkboxKeys.includes(fieldKey);
           const isPassword = sensitiveKeys.includes(fieldKey);
-          const selectOptions = SELECT_FIELD_OPTIONS[`asr.${typeKey}.${fieldKey}`];
+          // ASR 字段 options 不在 build 时烤入：不同 type 可能共享 fieldKey
+          // （funasr_server / doubao_stream 都有 language 但选项不同），渲染时
+          // 由 selectOptionsFor 按当前 config.asr.type 实时查。
+          const hasSelectOptions =
+            SELECT_FIELD_OPTIONS[`asr.${typeKey}.${fieldKey}`] !== undefined;
           fields.push({
             key: fieldKey,
             label: translateFieldLabel(fieldKey),
@@ -267,11 +288,11 @@ const buildConfigGroups = (data: SystemConfig) => {
               ? ("checkbox" as const)
               : isPassword
                 ? ("password" as const)
-                : selectOptions
+                : hasSelectOptions
                   ? ("select" as const)
                   : ("text" as const),
-            ...(selectOptions
-              ? { options: selectOptions, selectVariant: "dropdown" as const }
+            ...(hasSelectOptions
+              ? { selectVariant: "dropdown" as const }
               : {})
           });
         }
@@ -725,7 +746,7 @@ watch(locale, () => {
                       "
                     >
                       <el-option
-                        v-for="opt in field.options"
+                        v-for="opt in field.options ?? selectOptionsFor(group.key, field.key) ?? []"
                         :key="opt.value"
                         :value="opt.value"
                         :label="opt.labelKey ? t(opt.labelKey) : opt.label"
@@ -1380,6 +1401,36 @@ watch(locale, () => {
         background: #fff;
         border-color: #5a9df5;
         box-shadow: 0 0 0 2px rgb(64 158 255 / 12%);
+      }
+    }
+
+    /* el-select 内部覆盖：高度与 el-input 对齐（28px），字号与其他输入框一致（12px）。
+     * el-select 默认 wrapper min-height ~32px、字号 14px，单独压不住父容器。 */
+    &-select {
+      :deep(.el-select__wrapper) {
+        min-height: 28px;
+        height: 28px;
+        padding: 0 12px;
+        background: rgb(255 255 255 / 48%);
+        border: 1px solid #dfe5ee;
+        border-radius: 6px;
+        box-shadow: none;
+
+        &.is-focused,
+        &.is-hovering:not(.is-disabled) {
+          background: #fff;
+          border-color: #5a9df5;
+          box-shadow: 0 0 0 2px rgb(64 158 255 / 12%);
+        }
+      }
+
+      :deep(.el-select__selected-item),
+      :deep(.el-select__placeholder),
+      :deep(.el-select__input) {
+        height: 28px;
+        line-height: 28px;
+        color: #344054;
+        font-size: 12px;
       }
     }
 

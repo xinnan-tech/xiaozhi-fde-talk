@@ -43,6 +43,22 @@ async def get_current_user(
         )
 
 
+async def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+) -> Optional[CurrentUser]:
+    """可选鉴权：无 token / token 解析失败都返回 None，不抛 401。
+
+    给"全员可访问、登录用户额外返更多信息"的端点用（如 /version：匿名返
+    200 + 空版本号，已登录返真实版本号）。沿用 HTTPBearer(auto_error=False)
+    保证缺 token 时不进默认 403 分支。"""
+    if credentials is None:
+        return None
+    try:
+        return await extract_auth(credentials.credentials)
+    except AuthError:
+        return None
+
+
 async def require_admin(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     """要求 admin 角色。非 admin 抛 I18nError → 403 + code=http.admin.required。"""
     if user.role != "admin":

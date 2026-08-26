@@ -9,12 +9,13 @@ defineOptions({ name: "About" });
 
 const { t } = useI18n();
 const version = packageInfo.version;
-// 后端版本号：未拉到（请求中 / 失败 / 未登录）时为 null —— about 页降级为
-// 只显示前端版本，不向公网探测者暴露后端版本号。
+// 后端版本号：未拉到（请求失败）时为 null；匿名访问时后端返 200 + 空字符串
+// （issue #77），把空串等同 null —— about 页降级为只显示前端版本，不向
+// 公网探测者暴露后端版本号。
 const backendVersion = ref<string | null>(null);
-// 仅当后端版本号拿到且与前端不同 → 显示两行；否则（一行 / 一致 / 仅前端）→ 单行
+// 仅当后端版本号非空且与前端不同 → 显示两行；否则（null / 空 / 与前端一致）→ 单行
 const hasBothVersions = computed(
-  () => backendVersion.value !== null && backendVersion.value !== version,
+  () => !!backendVersion.value && backendVersion.value !== version,
 );
 const year = new Date().getFullYear();
 const productName = t("about.product_name");
@@ -35,7 +36,8 @@ onBeforeMount(async () => {
     const res = await getBackendVersion();
     backendVersion.value = res.version;
   } catch {
-    // 401（未登录）/ 网络错：保持 null —— 模板降级为单行
+    // 网络错：保持 null —— 模板降级为单行
+    // 注意：后端 /version 已去掉强鉴权，匿名访问不会 401
   }
 });
 </script>

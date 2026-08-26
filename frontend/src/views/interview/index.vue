@@ -712,9 +712,11 @@ const handleIgnoreSuggestion = (itemId: string) => {
       }
     } catch (e: unknown) {
       restoreIgnoredSuggestion(itemId);
-      ElMessage.error(
-        extractBackendError(e, t("interview.suggestion.ignore_failed"))
-      );
+      // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+      const hasResponse = (e as { response?: unknown })?.response !== undefined;
+      if (!hasResponse) {
+        ElMessage.error(t("interview.suggestion.ignore_failed"));
+      }
     }
   }, 3000);
 };
@@ -733,9 +735,11 @@ const handleUnignoreSuggestion = async (itemId: string) => {
     await unignoreInterviewItemApi(getInterviewSessionId(), itemId);
     restoreIgnoredSuggestion(itemId);
   } catch (e: unknown) {
-    ElMessage.error(
-      extractBackendError(e, t("interview.suggestion.unignore_failed"))
-    );
+    // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+    const hasResponse = (e as { response?: unknown })?.response !== undefined;
+    if (!hasResponse) {
+      ElMessage.error(t("interview.suggestion.unignore_failed"));
+    }
   }
 };
 
@@ -929,7 +933,11 @@ const kickFirstBatchIfNeeded = (detail: InterviewDetailType) => {
         ElMessage.warning(t("msg.first_batch_partial"));
       }
     } catch (e: unknown) {
-      ElMessage.warning(extractBackendError(e, t("msg.first_batch_partial")));
+      // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+      const hasResponse = (e as { response?: unknown })?.response !== undefined;
+      if (!hasResponse) {
+        ElMessage.warning(t("msg.first_batch_partial"));
+      }
     } finally {
       if (route.params.id === sessionId) {
         isFirstBatchPending.value = false;

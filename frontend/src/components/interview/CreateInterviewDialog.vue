@@ -452,8 +452,21 @@ const recognizePhoto = async () => {
   // readyState >= 1 表示视频已可以进行渲染
   if (!video || cameraRecognizing.value || video.readyState < 1) return;
 
+  // snap 内部可能因 canvas.getContext 返 null 或 canvas.toBlob 返 null 而
+  // throw（readyState 不覆盖这两种），必须在 click handler 里兜住，否则
+  // unhandled rejection 让按钮永久 loading+disabled。
+  let imageBase64: string;
+  try {
+    imageBase64 = await snapCamera(video);
+  } catch (error) {
+    message(
+      extractBackendError(error, t("create.dialog.camera_unavailable")),
+      { type: "error" }
+    );
+    return;
+  }
+
   // 截取当前帧作为定格画面，同时关闭摄像头释放资源
-  const imageBase64 = await snapCamera(video);
   frozenImageSrc.value = `data:image/jpeg;base64,${imageBase64}`;
   cameraFrozen.value = true;
   closeCamera();
@@ -474,7 +487,6 @@ const submitRecognition = async () => {
     const text = (response.text ?? "").trim();
     if (!text) {
       message(t("create.dialog.ocr_empty"), { type: "warning" });
-      cameraRecognizing.value = false;
       return;
     }
     await runExtractAndFill(text);
@@ -484,14 +496,23 @@ const submitRecognition = async () => {
       type: "error"
     });
     // 识别失败时保留定格画面，用户可点击"重拍"或再次点击"提交识别"重试
+  } finally {
+    // 成功 closeActivePanel / 空文本 early return / catch 三支都必须重置，
+    // 否则重新进入拍照面板时按钮永远 loading+disabled。
     cameraRecognizing.value = false;
   }
 };
 
-const retakePhoto = () => {
+const retakePhoto = async () => {
   cameraFrozen.value = false;
   frozenImageSrc.value = "";
-  void openCamera();
+  // 与 selectInputMethod('camera') 一致：openCamera 失败时 message +
+  // closeActivePanel，否则用户卡在无画面状态只能点"返回"。
+  const opened = await openCamera();
+  if (!opened) {
+    message(t("create.dialog.camera_unavailable"), { type: "error" });
+    closeActivePanel();
+  }
 };
 
 const triggerFileUpload = () => {
@@ -517,6 +538,9 @@ const handleFileChange = async (event: Event) => {
     const text = (response.text ?? "").trim();
     if (!text) {
       message(t("create.dialog.ocr_empty"), { type: "warning" });
+      // 关闭 panel 让用户回到方式选择可重试；否则 preview 区只剩无 srcObject
+      // 的 <video>，除了"返回"没恢复手段。
+      closeActivePanel();
       return;
     }
     await runExtractAndFill(text);
@@ -525,6 +549,8 @@ const handleFileChange = async (event: Event) => {
     message(extractBackendError(error, t("create.dialog.upload_failed")), {
       type: "error"
     });
+    // 识别异常也退出 panel，让用户决定重试还是换路径。
+    closeActivePanel();
   } finally {
     cameraRecognizing.value = false;
     // 重置 input 以便下次选择同一文件

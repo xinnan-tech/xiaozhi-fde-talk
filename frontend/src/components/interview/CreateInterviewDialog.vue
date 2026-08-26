@@ -18,6 +18,7 @@ import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import { AVMedia } from "vue-audio-visual";
 import { useAsrRecorder } from "@/composables/useAsrRecorder";
 import { useCameraCapture, blobToBase64 } from "@/composables/useCameraCapture";
+import { useAbortableRequests } from "@/composables/useAbortableRequests";
 import {
   extractInterviewFieldsApi,
   getInterviewsTemplatesApi,
@@ -81,6 +82,12 @@ const createDefaultForm = (): CreateInterviewForm => ({
   template_id: ""
 });
 const form = reactive<CreateInterviewForm>(createDefaultForm());
+const {
+  createSignal,
+  finish: finishRequest,
+  cancel: cancelRequest,
+  isCanceled
+} = useAbortableRequests();
 
 // 语音转写录音：/ws/v1/asr 专用 WS + 麦克风（区别于访谈会话 WS）
 const {
@@ -91,7 +98,8 @@ const {
   stopReason: asrStopReason,
   everRecorded: asrEverRecorded,
   start: startAsrRecording,
-  stop: stopAsrRecording
+  stop: stopAsrRecording,
+  cancel: cancelAsrRecording
 } = useAsrRecorder();
 
 // 拍照名片 OCR：取流 + 截帧，预览 <video> 挂在面板模板里
@@ -198,7 +206,8 @@ const durationOptions = computed(() => [
 
 const resetForm = async () => {
   // 兜底释放录音/摄像头（正常路径由 destroy-on-close 卸载时清理）
-  if (asrState.value !== "idle") void stopAsrRecording();
+  cancelRequest("extract");
+  cancelAsrRecording();
   closeCamera();
   formRef.value?.resetFields();
   Object.assign(form, createDefaultForm());
@@ -315,62 +324,77 @@ const runExtractAndFill = async (transcript: string) => {
     if (value) currentValues[key] = String(value);
   }
 
-  // 后端根据文本和字段定义返回提取结果
-  const response = await extractInterviewFieldsApi({
-    transcript,
-    template_id: form.template_id,
-    fields: fieldKeys,
-    field_labels: fieldLabels,
-    field_types: fieldTypes,
-    current_values: currentValues
-  });
+  // 创建extract的controller.signal
+  const signal = createSignal("extract");
+  try {
+    // 后端根据文本和字段定义返回提取结果
+    const response = await extractInterviewFieldsApi(
+      {
+        transcript,
+        template_id: form.template_id,
+        fields: fieldKeys,
+        field_labels: fieldLabels,
+        field_types: fieldTypes,
+        current_values: currentValues
+      },
+      signal
+    );
 
-  // 将提取结果写回表单控件；值与当前一致的回显不计入 filled，filled表示更新字段数
-  let filled = 0;
-  for (const [key, rawValue] of Object.entries(response.values ?? {})) {
-    if (!rawValue) continue;
-    const value = normalizeExtractedValue(key, String(rawValue));
-    if (!value) continue;
-    if (key !== "title" && key !== "goal" && !(key in form.base_info)) {
-      continue;
+    // 请求返回前已取消时，不再回填表单或显示结果消息
+    if (signal.aborted) return null;
+
+    // 将提取结果写回表单控件；值与当前一致的回显不计入 filled，filled表示更新字段数
+    let filled = 0;
+    for (const [key, rawValue] of Object.entries(response.values ?? {})) {
+      if (!rawValue) continue;
+      const value = normalizeExtractedValue(key, String(rawValue));
+      if (!value) continue;
+      if (key !== "title" && key !== "goal" && !(key in form.base_info)) {
+        continue;
+      }
+
+      const previous =
+        key === "title"
+          ? form.base_info.title
+          : key === "goal"
+            ? form.goal
+            : baseInfo[key];
+      if (previous === value) continue;
+
+      if (key === "title") {
+        form.base_info.title = value;
+      } else if (key === "goal") {
+        form.goal = value;
+        goalError.value = "";
+      } else {
+        baseInfo[key] = value;
+      }
+      filled += 1;
     }
 
-    const previous =
-      key === "title"
-        ? form.base_info.title
-        : key === "goal"
-          ? form.goal
-          : baseInfo[key];
-    if (previous === value) continue;
-
-    if (key === "title") {
-      form.base_info.title = value;
-    } else if (key === "goal") {
-      form.goal = value;
-      goalError.value = "";
-    } else {
-      baseInfo[key] = value;
+    message(
+      filled > 0
+        ? t("create.dialog.clipboard_success", { count: filled })
+        : t("create.dialog.clipboard_no_fields"),
+      { type: filled > 0 ? "success" : "warning" }
+    );
+    if (filled > 0) {
+      formRef.value?.clearValidate([
+        "base_info.title",
+        "base_info.project",
+        "base_info.interviewee",
+        "base_info.start_time",
+        "base_info.duration",
+        "goal"
+      ]);
     }
-    filled += 1;
+    return filled;
+  } catch (error) {
+    if (isCanceled(error)) return null;
+    throw error;
+  } finally {
+    finishRequest("extract", signal);
   }
-
-  message(
-    filled > 0
-      ? t("create.dialog.clipboard_success", { count: filled })
-      : t("create.dialog.clipboard_no_fields"),
-    { type: filled > 0 ? "success" : "warning" }
-  );
-  if (filled > 0) {
-    formRef.value?.clearValidate([
-      "base_info.title",
-      "base_info.project",
-      "base_info.interviewee",
-      "base_info.start_time",
-      "base_info.duration",
-      "goal"
-    ]);
-  }
-  return filled;
 };
 
 const extractClipboardText = async () => {
@@ -383,13 +407,16 @@ const extractClipboardText = async () => {
 
   clipboardExtracting.value = true;
   try {
-    await runExtractAndFill(transcript);
+    const filled = await runExtractAndFill(transcript);
+    if (filled === null) return;
     clipboardText.value = "";
     closeActivePanel();
   } catch (error) {
-    message(extractBackendError(error, t("create.dialog.clipboard_failed")), {
-      type: "error"
-    });
+    if (!isCanceled(error)) {
+      message(extractBackendError(error, t("create.dialog.clipboard_failed")), {
+        type: "error"
+      });
+    }
   } finally {
     clipboardExtracting.value = false;
   }
@@ -434,12 +461,15 @@ const extractVoiceTranscript = async () => {
       closeActivePanel();
       return;
     }
-    await runExtractAndFill(transcript);
+    const filled = await runExtractAndFill(transcript);
+    if (filled === null) return;
     closeActivePanel();
   } catch (error) {
-    message(extractBackendError(error, t("create.dialog.voice_failed")), {
-      type: "error"
-    });
+    if (!isCanceled(error)) {
+      message(extractBackendError(error, t("create.dialog.voice_failed")), {
+        type: "error"
+      });
+    }
     // 提取失败同样退回入口列表，面板不留不可操作的僵尸态
     closeActivePanel();
   } finally {
@@ -489,7 +519,8 @@ const submitRecognition = async () => {
       message(t("create.dialog.ocr_empty"), { type: "warning" });
       return;
     }
-    await runExtractAndFill(text);
+    const filled = await runExtractAndFill(text);
+    if (filled === null) return;
     closeActivePanel();
   } catch (error) {
     message(extractBackendError(error, t("create.dialog.ocr_failed")), {
@@ -627,10 +658,22 @@ const calculateEndTime = () => {
     .format("YYYY-MM-DD HH:mm:ss");
 };
 
+const handleModelValueChange = (value: boolean) => {
+  if (!value) {
+    cancelRequest("extract");
+    cancelAsrRecording();
+  }
+  emit("update:modelValue", value);
+};
+
 const handleClose = () => {
   cameraFrozen.value = false;
   frozenImageSrc.value = "";
   closeCamera();
+  // 取消extract请求
+  cancelRequest("extract");
+  // 取消asr录音,释放ws连接
+  cancelAsrRecording();
   emit("update:modelValue", false);
 };
 
@@ -666,7 +709,7 @@ watch(
     align-center
     destroy-on-close
     class="create-interview-dialog"
-    @update:model-value="emit('update:modelValue', $event)"
+    @update:model-value="handleModelValueChange"
     @closed="formRef?.clearValidate()"
   >
     <template #header>

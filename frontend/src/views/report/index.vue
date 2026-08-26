@@ -785,7 +785,7 @@ onMounted(async () => {
 
   .report-content :deep(h3) {
     margin: 16px 0 8px;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 850;
     line-height: 1.2;
     color: #3c73c7;
@@ -793,7 +793,7 @@ onMounted(async () => {
 
   .report-content :deep(p) {
     margin: 0 0 12px;
-    font-size: 11px;
+    font-size: 14px;
     font-weight: 650;
     line-height: 1.72;
     color: #52617a;
@@ -810,7 +810,7 @@ onMounted(async () => {
     position: relative;
     margin-bottom: 6px;
     padding-left: 13px;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 650;
     line-height: 1.72;
     color: #52617a;

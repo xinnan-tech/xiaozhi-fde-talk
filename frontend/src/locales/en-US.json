@@ -257,6 +257,7 @@
   "interview.status.ended": "Ended",
   "interview.action.start": "Start",
   "interview.action.continue": "Resume",
+  "interview.action.pause": "Pause",
   "interview.action.enable_mic": "Mic on",
   "interview.action.disable_mic": "Mic off",
   "interview.action.end": "End",

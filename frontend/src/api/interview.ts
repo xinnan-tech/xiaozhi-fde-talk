@@ -115,11 +115,14 @@ export type ExtractInterviewResponse = {
 };
 
 /** 从粘贴文本中提取访谈表单字段 */
-export const extractInterviewFieldsApi = (data: ExtractInterviewRequest) => {
+export const extractInterviewFieldsApi = (
+  data: ExtractInterviewRequest,
+  signal?: AbortSignal
+) => {
   return http.request<ExtractInterviewResponse>(
     "post",
     baseUrlApi("/api/v1/interviews/extract"),
-    { data }
+    { data, signal }
   );
 };
 

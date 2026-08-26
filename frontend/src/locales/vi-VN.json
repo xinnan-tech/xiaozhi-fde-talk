@@ -264,6 +264,7 @@
   "interview.status.ended": "Đã kết thúc",
   "interview.action.start": "Bắt đầu",
   "interview.action.continue": "Tiếp tục",
+  "interview.action.pause": "Tạm dừng",
   "interview.action.enable_mic": "Bật mic",
   "interview.action.disable_mic": "Tắt mic",
   "interview.action.end": "Kết thúc",

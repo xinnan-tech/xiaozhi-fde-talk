@@ -8,7 +8,8 @@
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
-from starlette.middleware.gzip import GZipMiddleware
+
+from app.middleware.compressible_gzip import CompressibleGZipMiddleware
 
 
 def _build_app():
@@ -29,8 +30,22 @@ def _build_app():
             media_type="image/png",
         )
 
+    @app.get("/font-woff2")
+    def font_woff2():
+        return Response(
+            content=b"wOF2" + b"\x00" * 4096,
+            media_type="font/woff2",
+        )
+
+    @app.get("/zip-file")
+    def zip_file():
+        return Response(
+            content=b"PK\x03\x04" + b"\x00" * 4096,
+            media_type="application/zip",
+        )
+
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
-    app.add_middleware(GZipMiddleware, minimum_size=1024)
+    app.add_middleware(CompressibleGZipMiddleware, minimum_size=1024)
     return app
 
 
@@ -57,22 +72,33 @@ def test_small_response_not_gzipped():
 
 
 def test_binary_not_regzipped():
-    """二进制 content-type（image/png）不应被 GZipMiddleware 二次压缩。
+    """二进制 content-type（image/png）应被中间件跳过，不被服务端二次压缩。
 
-    starlette 0.41.3+ 的 GZipMiddleware 默认从 image/png 等二进制类型跳过压缩。
-    修复前断言 r.headers["content-encoding"] is None 仅在 httpx 不主动声明
-    Accept-Encoding 时通过——CI 上 Python 3.12 httpx 0.28.1 给二进制 endpoint 也
-    塞 gzip，导致服务端把4096 字节压成 51，断言挂。改成「服务端不该在 image/png 上
-    声明 Content-Encoding」+ body 头仍是 PNG magic 双断言，不依赖 httpx 行为。
+    历史背景：starlette 0.41.x GZipMiddleware 不支持 exclude_content_types，
+    会主动压所有 ≥1024 B 响应（image/png/font/woff/application/zip 全部中招）；
+    starlette 0.42+ 才加 DEFAULT_EXCLUDED_CONTENT_TYPES。fastapi 0.115.6 锁
+    starlette<0.42，业务侧用自实现的 CompressibleGZipMiddleware 兜底。
     """
     client = TestClient(_build_app())
     r = client.get("/image-png", headers={"Accept-Encoding": "gzip"})
-    # 强断言：image/png 在 starlette 默认 exclude 里，服务端不该加 gzip 头
     assert r.headers.get("content-encoding") is None
-    # 弱兜底：即便未来 starlette 改了默认 exclude，body 头 8 字节也必须是 PNG magic
-    assert r.content[:8] == b"\x89PNG\r\n\x1a\n", (
-        f"image/png 响应被破坏：{r.content[:8]!r}"
-    )
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_font_woff2_not_regzipped():
+    """font/woff2（已压缩字体）应被中间件跳过。"""
+    client = TestClient(_build_app())
+    r = client.get("/font-woff2", headers={"Accept-Encoding": "gzip"})
+    assert r.headers.get("content-encoding") is None
+    assert r.content[:4] == b"wOF2"
+
+
+def test_zip_not_regzipped():
+    """application/zip（已是压缩包）应被中间件跳过。"""
+    client = TestClient(_build_app())
+    r = client.get("/zip-file", headers={"Accept-Encoding": "gzip"})
+    assert r.headers.get("content-encoding") is None
+    assert r.content[:4] == b"PK\x03\x04"
 
 
 def test_cors_preflight_not_gzipped():

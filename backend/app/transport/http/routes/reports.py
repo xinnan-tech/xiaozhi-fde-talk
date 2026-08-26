@@ -5,6 +5,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, Response
 
+from app.core.config_store import get_config_store
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
@@ -64,8 +65,14 @@ async def export_interview_report(
     status_str, md = await get_or_generate(session_id)
     if status_str != "ready" or not md:
         raise I18nError(Keys.HTTP_REPORT_NOT_READY, http_status=409)
+    # word 格式按 llm.output_language 选 ascii/eastAsia 字体；md/html 不读 language。
+    # 与 generator.py:331-333 「一次性读 llm.output_language 全程共用」一致——避免
+    # 导出与报告内容两个 lang 的「错位」（用户界面 en 但报告落库 zh_cn，word 仍按 zh_cn 选字体）。
+    language = (
+        get_config_store().get_sync("llm.output_language") or "en"
+    ).strip().lower() or "en"
     try:
-        data, media_type = await asyncio.to_thread(export_report, md, format)
+        data, media_type = await asyncio.to_thread(export_report, md, format, language)
     except I18nError:
         # FormatNotImplementedError (501) / 其它已结构化的 I18nError 直接冒泡，
         # 由 app.py:239 的 I18nError handler 转 {detail, code} 响应。

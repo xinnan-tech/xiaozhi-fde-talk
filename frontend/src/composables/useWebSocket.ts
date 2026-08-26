@@ -112,7 +112,10 @@ export const getInterviewWebSocketUrl = (
 
   // 显式 wsBaseUrl 走自定义网关；其余一律走运行时宿主（dev vite proxy / prod 反代）
   if (wsBaseUrl) {
-    const url = new URL(path, wsBaseUrl.endsWith("/") ? wsBaseUrl : `${wsBaseUrl}/`);
+    const url = new URL(
+      path,
+      wsBaseUrl.endsWith("/") ? wsBaseUrl : `${wsBaseUrl}/`
+    );
     if (url.protocol === "http:") url.protocol = "ws:";
     if (url.protocol === "https:") url.protocol = "wss:";
     return url.toString();
@@ -194,6 +197,9 @@ export function useWebSocket(options: useWebSocketOptions) {
       options.onMessage?.(message);
 
       if (message.type === "hello") {
+        // 接管复用现有 WebSocket，不会再次触发底层 onConnected；
+        // hello 是接管完成的握手确认，必须同步退出 pending 状态。
+        isPendingTakeover.value = false;
         isHandshakeComplete.value = true;
         sequence.value = message.resume_from_seq || 0;
         options.onConnected?.(message);

@@ -527,6 +527,21 @@ const handleFileChange = async (event: Event) => {
     return;
   }
 
+  // 客户端前置校验（与后端 10MB 阈值对齐）：<input accept="image/*"> 只是
+  // 系统选择器的提示，DevTools 可改、桌面端"全部文件"能绕过；不先拒的话
+  // FileReader 会把任意二进制转 base64（约 4/3 倍内存）再 POST，等服务器
+  // 回 413 已浪费上行带宽与解析时间。前端先拦，错误立即可见。
+  if (file.size > 10 * 1024 * 1024) {
+    message(t("create.dialog.image_too_large"), { type: "error" });
+    input.value = "";
+    return;
+  }
+  if (!file.type.startsWith("image/")) {
+    message(t("create.dialog.invalid_file_type"), { type: "error" });
+    input.value = "";
+    return;
+  }
+
   // 选择文件后开始识别时才关闭摄像头
   closeCamera();
   cameraRecognizing.value = true;

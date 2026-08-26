@@ -237,6 +237,8 @@
   "create.dialog.upload_image": "Upload and extract",
   "create.dialog.upload_failed": "Upload failed. Please check the file format",
   "create.dialog.upload_empty": "No image selected",
+  "create.dialog.image_too_large": "Image exceeds 10MB limit",
+  "create.dialog.invalid_file_type": "Please select an image file",
   "create.dialog.ocr_failed": "Text recognition failed. Please try again later",
   "create.dialog.ocr_empty": "No text recognized, please retake",
   "create.dialog.back": "Back",

@@ -95,3 +95,46 @@ def test_handle_file_change_closes_panel_on_empty_and_error():
     assert "closeActivePanel()" in catch_branch, (
         "catch 分支也必须 closeActivePanel，让用户决定重试或换路径"
     )
+
+
+def test_handle_file_change_pre_validates_size_and_type():
+    """handleFileChange 必须先于 closeCamera 校验 file.size 与 file.type。
+
+    <input accept="image/*"> 可被 DevTools / 桌面"全部文件"绕过，不先拦
+    的话 FileReader 把任意二进制转 base64（约 4/3 倍内存）再 POST，等
+    服务器回 413 浪费上行带宽与解析时间。
+    """
+    script = _script_block(DIALOG.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleFileChange = async (event: Event) => {")
+    assert "file.size > 10 * 1024 * 1024" in body, (
+        "必须校验 file.size > 10MB 与后端阈值对齐"
+    )
+    assert 'file.type.startsWith("image/")' in body, (
+        "必须校验 file.type 以 image/ 开头"
+    )
+    # 两道校验必须在 closeCamera() 之前；否则大文件先关摄像头再拒体验差
+    size_check_idx = body.index("file.size > 10 * 1024 * 1024")
+    close_camera_idx = body.index("closeCamera();")
+    assert size_check_idx < close_camera_idx, (
+        "10MB 校验必须在 closeCamera() 之前，否则大文件先关摄像头再拒"
+    )
+
+
+def test_new_upload_validation_keys_present_in_all_locales():
+    """i18n parity：新增的 image_too_large / invalid_file_type 必须 4 locale 齐平。
+
+    缺一个 locale 就 build 失败——改 SELECT_FIELD_OPTIONS / 新加 toast 文本
+    都必须同步补齐 zh-CN / zh-TW / en-US / vi-VN。"""
+    import json
+
+    LOCALES = (
+        ROOT / "src" / "locales" / "zh-CN.json",
+        ROOT / "src" / "locales" / "zh-TW.json",
+        ROOT / "src" / "locales" / "en-US.json",
+        ROOT / "src" / "locales" / "vi-VN.json",
+    )
+    needed = ("create.dialog.image_too_large", "create.dialog.invalid_file_type")
+    for path in LOCALES:
+        keys = set(json.loads(path.read_text(encoding="utf-8")).keys())
+        missing = [k for k in needed if k not in keys]
+        assert not missing, f"{path.name} 缺 {missing}"

@@ -244,6 +244,8 @@
   "create.dialog.upload_image": "Tải lên và trích xuất",
   "create.dialog.upload_failed": "Tải lên thất bại. Vui lòng kiểm tra định dạng tệp",
   "create.dialog.upload_empty": "Chưa chọn hình ảnh",
+  "create.dialog.image_too_large": "Ảnh vượt quá giới hạn 10MB",
+  "create.dialog.invalid_file_type": "Vui lòng chọn tệp hình ảnh",
   "create.dialog.ocr_failed": "Nhận diện văn bản thất bại, vui lòng thử lại sau",
   "create.dialog.ocr_empty": "Không nhận diện được văn bản, vui lòng chụp lại",
   "create.dialog.back": "Quay lại",

@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SYSTEM_VUE = ROOT / "src" / "views" / "system" / "index.vue"
 LOCALES_ZH = ROOT / "src" / "locales" / "zh-CN.json"
 LOCALES_EN = ROOT / "src" / "locales" / "en-US.json"
+LOCALES_VI = ROOT / "src" / "locales" / "vi-VN.json"
+LOCALES_TW = ROOT / "src" / "locales" / "zh-TW.json"
 
 
 def _script_block(text: str) -> str:
@@ -99,17 +101,20 @@ def test_template_radio_branch_intact_for_asr_type():
 
 
 def test_i18n_keys_for_new_locales_present():
-    """新增的 7 个语种 i18n key 必填，否则 el-select 显示 raw key。"""
-    zh = _all_locale_keys(LOCALES_ZH)
-    en = _all_locale_keys(LOCALES_EN)
-    for key in (
-        "config.opt.ja_jp",
-        "config.opt.ko_kr",
-        "config.opt.es_mx",
-        "config.opt.fr_fr",
-        "config.opt.de_de",
-        "config.opt.ru_ru",
-        "config.opt.pt_br",
-    ):
-        assert key in zh, f"zh-CN 缺 {key}"
-        assert key in en, f"en-US 缺 {key}"
+    """新增的 7 个语种 i18n key 必填，否则 el-select 显示 raw key。
+
+    i18n parity CI 要求所有 locale（zh-CN / zh-TW / en-US / vi-VN）齐平——
+    缺一个就 build 失败。修改 SELECT_FIELD_OPTIONS 加新 locale 也必须同步。
+    """
+    for locale_path in (LOCALES_ZH, LOCALES_EN, LOCALES_VI, LOCALES_TW):
+        keys = _all_locale_keys(locale_path)
+        for opt_key in (
+            "config.opt.ja_jp",
+            "config.opt.ko_kr",
+            "config.opt.es_mx",
+            "config.opt.fr_fr",
+            "config.opt.de_de",
+            "config.opt.ru_ru",
+            "config.opt.pt_br",
+        ):
+            assert opt_key in keys, f"{locale_path.name} 缺 {opt_key}"

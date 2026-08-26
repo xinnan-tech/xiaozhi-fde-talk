@@ -128,6 +128,32 @@ export function useAsrRecorder() {
     return stopPromise;
   };
 
+  /** 取消录音，不提取转写结果，立即释放麦克风和 WebSocket。 */
+  const cancel = () => {
+    stopRecording();
+    clearDurationTimer();
+
+    const socket = ws.value;
+    ws.value = null;
+    stopPromise = null;
+
+    if (socket) {
+      // 连接仍在建立时，保留初始 onclose 以结束 start() 的等待。
+      if (socket.readyState !== WebSocket.CONNECTING) {
+        socket.onmessage = null;
+        socket.onclose = null;
+        socket.onerror = null;
+      }
+      try {
+        socket.close();
+      } catch {
+        // 忽略：连接可能已经关闭
+      }
+    }
+
+    state.value = "idle";
+  };
+
   const start = async () => {
     if (state.value !== "idle") return false;
 
@@ -164,7 +190,7 @@ export function useAsrRecorder() {
 
     if (!opened || ws.value !== socket) {
       error.value = new Error("ASR WebSocket connection failed");
-      ws.value = null;
+      if (ws.value === socket) ws.value = null;
       return false;
     }
 
@@ -225,6 +251,7 @@ export function useAsrRecorder() {
     everRecorded,
     error,
     start,
-    stop
+    stop,
+    cancel
   };
 }

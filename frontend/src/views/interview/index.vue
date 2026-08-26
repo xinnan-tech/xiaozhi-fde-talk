@@ -337,6 +337,7 @@ const startInterviewTimer = (reset = true) => {
 const handleStartInterview = async () => {
   // 会话已结束时不可重启：等待确认期间后端可能再推 session.ended，
   // 此处若不拦就把 ended 改回 in_progress，状态机被弹框异步路径撕坏。
+  // 每个 await 之后再各查一次，覆盖 acquireStream / openMicrophone 窗口。
   if (interviewDetail.value?.status === "ended") return;
   if (isInterviewStarted.value) return;
   isInterviewStarted.value = true;
@@ -346,6 +347,14 @@ const handleStartInterview = async () => {
   // 在点击事件中立即请求权限，避免等待 WebSocket 握手后丢失浏览器用户手势。
   shouldResumeMicrophone.value = true;
   const microphoneStarted = await acquireStream();
+  if (interviewDetail.value?.status === "ended") {
+    // await 期间后端推了 session.ended：handleServerMessage 已经清理过
+    // 状态/麦/表，这里不再写回 in_progress，直接放弃重启。
+    shouldResumeMicrophone.value = false;
+    isInterviewStarted.value = false;
+    stopInterviewTimer();
+    return;
+  }
   if (!microphoneStarted) {
     shouldResumeMicrophone.value = false;
     isInterviewStarted.value = false;
@@ -365,6 +374,11 @@ const handleStartInterview = async () => {
   // WebSocket 已经连接时直接开始监听；尚未连接时由 onConnected 处理。
   if (isWebSocketConnected.value) {
     const listeningStarted = await openMicrophone();
+    if (interviewDetail.value?.status === "ended") {
+      // 麦克风热启等待期间若后端推了 ended，同上不写回。
+      shouldResumeMicrophone.value = false;
+      return;
+    }
     if (listeningStarted) shouldResumeMicrophone.value = false;
   }
 };

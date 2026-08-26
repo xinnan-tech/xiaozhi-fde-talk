@@ -171,3 +171,30 @@ def test_handle_start_interview_guards_against_ended_status():
     assert "return;" in body[:body.index("isInterviewStarted")], (
         "ended 状态命中后必须 return，否则继续往下跑改 status"
     )
+
+
+def test_handle_start_interview_rechecks_ended_after_each_await():
+    """每个 await 之后必须再查一次 status === 'ended'，覆盖弹框异步窗口。
+
+    acquireStream / openMicrophone 是 await 窗口，期间后端若推
+    session.ended，handleServerMessage 会把 status 写为 ended；await
+    返回后若不重查就接着 status = "in_progress"，ended 状态被复活。
+    """
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleStartInterview = async () => {")
+    # acquireStream 之后必须再查一次
+    acquire_idx = body.index("await acquireStream()")
+    # acquireStream 之后到 in_progress 赋值之间的片段
+    next_status_mutate = body.index('status = "in_progress"', acquire_idx)
+    after_acquire = body[acquire_idx:next_status_mutate]
+    assert 'status === "ended"' in after_acquire, (
+        "await acquireStream() 之后必须再查 status === 'ended'，否则 ended "
+        "在 acquireStream 期间到达会被复活成 in_progress"
+    )
+    # openMicrophone 之后同样要查
+    if "await openMicrophone()" in body:
+        open_mic_idx = body.index("await openMicrophone()")
+        after_open_mic = body[open_mic_idx:]
+        assert 'status === "ended"' in after_open_mic, (
+            "await openMicrophone() 之后必须再查 status === 'ended'"
+        )

@@ -26,7 +26,13 @@ defineOptions({
 
 /** 页面编辑器使用的配置项值 */
 type ConfigValue = string | boolean;
+/** select 选项：asrTypeOptions 用纯 label 字面量（动态探测的 type 名），
+ * 静态语种用 labelKey + i18n 翻译。两形态并存便于一处渲染。 */
 type AsrTypeOption = { value: string; label: string };
+type SelectOption = { value: string; label?: string; labelKey?: string };
+/** select 渲染分支：radio 用于 ASR.type 这类 2~4 项的紧凑选择，
+ * dropdown 用于语种这种 5+ 项的下拉。 */
+type SelectVariant = "radio" | "dropdown";
 type ConfigField = {
   /** 配置项key */
   key: string;
@@ -35,7 +41,9 @@ type ConfigField = {
   /** 配置项类型 */
   type?: "text" | "password" | "checkbox" | "select";
   /** select 类型的选项列表 */
-  options?: AsrTypeOption[];
+  options?: SelectOption[];
+  /** select 类型的渲染分支；未设则按 key=='type' 推断 radio（ASR.type 兼容旧默认） */
+  selectVariant?: SelectVariant;
 };
 type ConfigGroup = {
   /** 配置分组key */
@@ -111,6 +119,36 @@ const checkboxKeys = [
   "allow_registration",
   "enable_multilingual"
 ];
+/** select 字段的预定义选项。key 形如 "<group>.<field>"——与 config_store
+ * 的存储路径一致，方便直接 lookup。
+ *
+ * 真相之源在 backend/app/core/config_store.py:ENUM_KEYS；本常量是 admin
+ * UI 引导提示，让 admin 点选不手填。Doubao 完整 22 语种只暴露常用 10 个，
+ * 其余 locale 切走时回退到 el-input 手动输入。改枚举时必须两边同步。 */
+const SELECT_FIELD_OPTIONS: Record<string, SelectOption[]> = {
+  "asr.funasr_server.language": [
+    { value: "zh", labelKey: "config.opt.zh" },
+    { value: "yue", labelKey: "config.opt.yue" },
+    { value: "en", labelKey: "config.opt.en" }
+  ],
+  "asr.doubao_stream.language": [
+    { value: "zh-CN", labelKey: "config.opt.zh_cn" },
+    { value: "en-US", labelKey: "config.opt.en" },
+    { value: "ja-JP", labelKey: "config.opt.ja_jp" },
+    { value: "yue-CN", labelKey: "config.opt.yue" },
+    { value: "ko-KR", labelKey: "config.opt.ko_kr" },
+    { value: "es-MX", labelKey: "config.opt.es_mx" },
+    { value: "fr-FR", labelKey: "config.opt.fr_fr" },
+    { value: "de-DE", labelKey: "config.opt.de_de" },
+    { value: "ru-RU", labelKey: "config.opt.ru_ru" },
+    { value: "pt-BR", labelKey: "config.opt.pt_br" }
+  ],
+  "llm.output_language": [
+    { value: "zh_cn", labelKey: "config.opt.zh_cn" },
+    { value: "zh_tw", labelKey: "config.opt.zh_tw" },
+    { value: "en", labelKey: "config.opt.en" }
+  ]
+};
 /** ASR 类型选项（运行时从嵌套结构填充） */
 const asrTypeOptions = ref<AsrTypeOption[]>([]);
 /** ASR type → 该类型拥有的字段 key 集合（运行时填充） */
@@ -205,7 +243,8 @@ const buildConfigGroups = (data: SystemConfig) => {
           key: "type",
           label: translateFieldLabel("type"),
           type: "select" as const,
-          options: asrTypeOptions.value
+          options: asrTypeOptions.value as SelectOption[],
+          selectVariant: "radio" as const
         }
       ];
 
@@ -220,6 +259,7 @@ const buildConfigGroups = (data: SystemConfig) => {
           seenKeys.add(fieldKey);
           const isCheckbox = checkboxKeys.includes(fieldKey);
           const isPassword = sensitiveKeys.includes(fieldKey);
+          const selectOptions = SELECT_FIELD_OPTIONS[`asr.${typeKey}.${fieldKey}`];
           fields.push({
             key: fieldKey,
             label: translateFieldLabel(fieldKey),
@@ -227,7 +267,12 @@ const buildConfigGroups = (data: SystemConfig) => {
               ? ("checkbox" as const)
               : isPassword
                 ? ("password" as const)
-                : ("text" as const)
+                : selectOptions
+                  ? ("select" as const)
+                  : ("text" as const),
+            ...(selectOptions
+              ? { options: selectOptions, selectVariant: "dropdown" as const }
+              : {})
           });
         }
       }
@@ -258,17 +303,25 @@ const buildConfigGroups = (data: SystemConfig) => {
         }
       }
     } else {
-      fields = Object.entries(section).map(([fieldKey, value]) => ({
-        key: fieldKey,
-        label: translateFieldLabel(fieldKey),
-        type: checkboxKeys.includes(fieldKey)
-          ? ("checkbox" as const)
-          : sensitiveKeys.includes(fieldKey)
-            ? ("password" as const)
-            : typeof value === "boolean"
-              ? ("checkbox" as const)
-              : ("text" as const)
-      }));
+      fields = Object.entries(section).map(([fieldKey, value]) => {
+        const selectOptions = SELECT_FIELD_OPTIONS[`${groupKey}.${fieldKey}`];
+        return {
+          key: fieldKey,
+          label: translateFieldLabel(fieldKey),
+          type: checkboxKeys.includes(fieldKey)
+            ? ("checkbox" as const)
+            : sensitiveKeys.includes(fieldKey)
+              ? ("password" as const)
+              : typeof value === "boolean"
+                ? ("checkbox" as const)
+                : selectOptions
+                  ? ("select" as const)
+                  : ("text" as const),
+          ...(selectOptions
+            ? { options: selectOptions, selectVariant: "dropdown" as const }
+            : {})
+        };
+      });
 
       loadedConfig[groupKey] = Object.fromEntries(
         Object.entries(section).map(([fieldKey, value]) => [
@@ -646,9 +699,9 @@ watch(locale, () => {
                   class="field-row"
                 >
                   <span class="field-label">{{ field.label }}</span>
-                  <!-- ASR type: radio button group -->
+                  <!-- select 类型：radio-button（紧凑 2~4 项）或 dropdown（5+ 项） -->
                   <template v-if="field.type === 'select'">
-                    <div class="asr-type-radios">
+                    <div v-if="field.selectVariant === 'radio'" class="asr-type-radios">
                       <el-radio-group
                         v-model="config[group.key][field.key] as string"
                         size="small"
@@ -662,6 +715,22 @@ watch(locale, () => {
                         </el-radio-button>
                       </el-radio-group>
                     </div>
+                    <el-select
+                      v-else
+                      :model-value="getFieldValue(group.key, field.key) as string"
+                      class="field-input field-select"
+                      :aria-label="field.label"
+                      @update:model-value="
+                        setFieldValue(group.key, field.key, $event as ConfigValue)
+                      "
+                    >
+                      <el-option
+                        v-for="opt in field.options"
+                        :key="opt.value"
+                        :value="opt.value"
+                        :label="opt.labelKey ? t(opt.labelKey) : opt.label"
+                      />
+                    </el-select>
                   </template>
                   <el-input
                     v-else-if="field.type !== 'checkbox'"

@@ -10,6 +10,7 @@
   "lang.vi_vn": "越南語",
 
   "msg.session_expired": "登入狀態已過期，請重新登入",
+  "msg.server_error": "伺服器內部錯誤",
 
   "menu.home": "訪談首頁",
   "menu.system": "系統設定",

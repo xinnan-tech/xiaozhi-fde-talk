@@ -138,6 +138,11 @@ class PureHttp {
               type: response.status === 401 ? "warning" : "error",
               grouping: true
             });
+          } else if (response.status === 500) {
+            message(i18n.global.t("msg.server_error"), {
+              type: "error",
+              grouping: true
+            });
           }
         }
 

@@ -10,6 +10,7 @@
   "lang.vi_vn": "Tiếng Việt",
 
   "msg.session_expired": "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
+  "msg.server_error": "Lỗi máy chủ nội bộ.",
 
   "menu.home": "Phỏng vấn",
   "menu.system": "Cấu hình hệ thống",

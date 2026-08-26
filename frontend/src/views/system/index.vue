@@ -986,13 +986,15 @@ watch(locale, () => {
     gap: 12px;
     align-items: flex-start;
     justify-content: space-between;
+    position: relative;
+    padding-right: 8px;
+    box-sizing: border-box;
   }
 
   .self-check-close-button {
     flex: 0 0 auto;
     width: 32px;
     height: 32px;
-    margin: -4px -8px 0 0;
     color: #718096;
     font-size: 18px;
   }
@@ -1498,6 +1500,9 @@ watch(locale, () => {
   gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
+  position: relative;
+  padding-right: 8px;
+  box-sizing: border-box;
 }
 
 :global(.self-check-drawer .self-check-title-row) {
@@ -1531,7 +1536,6 @@ watch(locale, () => {
   flex: 0 0 auto;
   width: 32px;
   height: 32px;
-  margin: -4px -8px 0 0;
   color: #718096;
   font-size: 18px;
 

@@ -144,6 +144,7 @@ const rules = computed<FormRules>(() => ({
   ],
   goal: [
     {
+      required: true,
       trigger: "blur",
       validator: (_rule, value, callback) => {
         if (!value?.trim()) {
@@ -569,7 +570,7 @@ watch(
       :model="form"
       :rules="rules"
       label-position="top"
-      hide-required-asterisk
+      require-asterisk-position="right"
       class="create-interview-form"
     >
       <section class="form-section">

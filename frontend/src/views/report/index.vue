@@ -61,19 +61,50 @@ const tabValue = ref(0);
 const interviewDetail = ref<InterviewDetailType>();
 const suggestions = ref<InterviewDetailItem[]>([]);
 
-const stats = computed(() => [
-  { value: "--", unit: "%", label: t("report.stats.coverage") },
-  {
-    value: "--",
-    unit: t("report.stats.characters_unit"),
-    label: t("report.stats.transcript")
-  },
-  {
-    value: "--",
-    unit: t("report.stats.turns_unit"),
-    label: t("report.stats.conversations")
-  }
-]);
+// 派生报告页左上 3 块指标。
+// 不走新接口——interviewDetail 里已经带了 transcript + items 完整数据，
+// 现算成本 < 1ms。后端列表接口 _session_summary 用的「done 且 coverage 非空」
+// 覆盖率口径（backend/app/transport/http/routes/interviews.py:67-73），前端
+// 复用同一规则，保证两处显示一致。
+// 转录文本字数：优先 corrected_text（最终改后）> text（ASR 原稿），同
+// backend/app/services/reports/generator.py:232-235 的口径。
+const stats = computed(() => {
+  const detail = interviewDetail.value;
+  const items = detail?.items ?? [];
+  const transcript = detail?.transcript ?? [];
+  const coverage = (detail?.coverage ?? {}) as Record<string, unknown>;
+
+  const covered = items.filter(
+    it =>
+      it.status === "done" &&
+      Array.isArray(coverage[it.id]) &&
+      (coverage[it.id] as unknown[]).length > 0
+  ).length;
+  const coveragePct =
+    items.length === 0
+      ? 0
+      : Math.round((covered / items.length) * 100);
+
+  const transcriptChars = transcript.reduce(
+    (sum, seg) =>
+      sum + (seg.corrected_text?.length || seg.text?.length || 0),
+    0
+  );
+
+  return [
+    { value: String(coveragePct), unit: "%", label: t("report.stats.coverage") },
+    {
+      value: String(transcriptChars),
+      unit: t("report.stats.characters_unit"),
+      label: t("report.stats.transcript")
+    },
+    {
+      value: String(transcript.length),
+      unit: t("report.stats.turns_unit"),
+      label: t("report.stats.conversations")
+    }
+  ];
+});
 
 const activeTab = computed(() => tabOptions.value[tabValue.value].key);
 

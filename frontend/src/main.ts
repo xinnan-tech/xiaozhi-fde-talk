@@ -30,6 +30,7 @@ Object.keys(directives).forEach(key => {
 
 // 全局注册 @iconify/vue 图标库
 import { IconifyIconOffline, FontIcon } from "./components/ReIcon";
+import "./components/ReIcon/src/offlineIcon";
 // 不再注册 IconifyIconOnline：内网访问不到 api.iconify.design / unisvg，
 // 任何 useRenderIcon("prefix:name") 都交给离线 storage 处理；
 // 白名单由 scripts/build-offline-icons.py 生成到 offlineIconBundle.generated.ts。

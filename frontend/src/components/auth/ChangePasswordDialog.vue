@@ -3,7 +3,6 @@ import { computed, reactive, ref } from "vue";
 import type { FormInstance, FormRules } from "element-plus/es/components/form";
 import { useI18n } from "vue-i18n";
 import { message } from "@/utils/message";
-import { extractBackendError } from "@/utils/error";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { changePasswordApi } from "@/api/user";
@@ -74,14 +73,13 @@ async function submit(formEl: FormInstance | undefined) {
     dialogStore.openLogin();
     reset();
   } catch (e: unknown) {
-    // 后端 I18nError 已返回精确文案（"当前密码错误"/新密码强度不足等），
-    // 直接交给 helper 解析 detail；取不到再走 i18n 兜底。
-    // 401 业务错（response.data.code 非空）由 http 拦截器按业务 401 处理，
-    // 不会强制登出；裸 401（JWT 过期等）由拦截器清 token + 提示重登，
-    // 这里看到的 detail 仍是后端返回的字符串。
-    message(extractBackendError(e, t("auth.change_password_failed")), {
-      type: "error"
-    });
+    // 后端 4xx/5xx 错误已由 http 响应拦截器统一 toast（带 grouping 去重），
+    // 这里再 message() 会形成两条 toast（issue #62 同源反馈）。
+    // 仅当网络错误（无 response）时给兜底——拦截器只处理有 response 的情况。
+    const hasResponse = (e as { response?: unknown })?.response !== undefined;
+    if (!hasResponse) {
+      message(t("auth.change_password_failed"), { type: "error" });
+    }
   } finally {
     loading.value = false;
   }

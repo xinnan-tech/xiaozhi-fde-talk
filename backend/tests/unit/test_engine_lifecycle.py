@@ -25,7 +25,7 @@ async def test_recompute_serializes_under_lock(make_state):
     in_flight = 0
     max_overlap = 0
 
-    async def slow(*a):
+    async def slow(*a, **kw):  # engine 调 chat_text(s, u, json_mode=True)，**kw 兼容
         nonlocal in_flight, max_overlap
         in_flight += 1
         max_overlap = max(max_overlap, in_flight)
@@ -41,7 +41,7 @@ async def test_recompute_serializes_under_lock(make_state):
 
 async def test_track_holds_strong_reference(make_state):
     e = _engine(make_state)
-    e._llm.chat_text = AsyncMock(side_effect=lambda *a: asyncio.sleep(0.05, result='{"items": []}'))
+    e._llm.chat_text = AsyncMock(side_effect=lambda *a, **kw: asyncio.sleep(0.05, result='{"items": []}'))
     _ = e._track(e._recompute())
     assert len(e._bg) >= 1
     await asyncio.sleep(0.2)
@@ -50,7 +50,7 @@ async def test_track_holds_strong_reference(make_state):
 
 async def test_drain_bg_cancels_inflight(make_state):
     e = _engine(make_state)
-    e._llm.chat_text = AsyncMock(side_effect=lambda *a: asyncio.sleep(10, result='{"items": []}'))
+    e._llm.chat_text = AsyncMock(side_effect=lambda *a, **kw: asyncio.sleep(10, result='{"items": []}'))
     e._track(e._recompute())
     await asyncio.sleep(0.02)  # 让它进入 LLM 等待
     await e._drain_bg()
@@ -73,7 +73,7 @@ async def test_on_end_final_runs_after_inflight(make_state):
     """end 时若有在途 _recompute，final 排在其后跑（都落盘），结果新鲜。"""
     e = _engine(make_state)
     started = asyncio.Event()
-    async def slow(*a):
+    async def slow(*a, **kw):  # engine 调 chat_text(s, u, json_mode=True)，**kw 兼容
         started.set()
         await asyncio.sleep(0.05)
         return '{"items": [{"id": "pain", "text": "在途结果", "status": "todo"}]}'
@@ -89,7 +89,7 @@ async def test_on_end_best_effort_on_timeout(make_state):
     """final 超时 → 不卡死，best-effort 落盘。"""
     e = _engine(make_state)
     e._llm_timeout_s = 0.01
-    async def hang(*a):
+    async def hang(*a, **kw):  # engine 调 chat_text(s, u, json_mode=True)，**kw 兼容
         await asyncio.sleep(10)
     e._llm.chat_text = AsyncMock(side_effect=hang)
     await asyncio.wait_for(e.on_end(), timeout=5)

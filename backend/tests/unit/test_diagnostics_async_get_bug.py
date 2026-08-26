@@ -33,6 +33,50 @@ async def test_diagnose_asr_short_circuits_on_missing_ws_url():
 
 
 @pytest.mark.asyncio
+async def test_diagnose_asr_doubao_short_circuits_on_missing_credentials():
+    """豆包流式无 ws_url 字段，靠 appid + access_token 判定；缺其一即 config_missing。"""
+    with patch.object(diagnostics, "get_config_store") as gcs:
+        store = {"asr.type": "doubao_stream", "asr.doubao_stream.appid": "", "asr.doubao_stream.access_token": "tok"}
+        gcs.return_value.get_sync = lambda key, default=None: store.get(key, default)
+        res = await diagnostics.diagnose_asr()
+    assert res["code"] == "config_missing"
+
+
+@pytest.mark.asyncio
+async def test_diagnose_asr_doubao_short_circuits_on_missing_access_token():
+    """豆包流式缺 access_token（appid 已有）→ 仍返 config_missing。"""
+    with patch.object(diagnostics, "get_config_store") as gcs:
+        store = {"asr.type": "doubao_stream", "asr.doubao_stream.appid": "app", "asr.doubao_stream.access_token": ""}
+        gcs.return_value.get_sync = lambda key, default=None: store.get(key, default)
+        res = await diagnostics.diagnose_asr()
+    assert res["code"] == "config_missing"
+
+
+@pytest.mark.asyncio
+async def test_diagnose_asr_unknown_asr_type_does_not_force_ws_url_check():
+    """未知 asr.type（如 funasr_mock 不需要 ws_url）→ 不应被强制走 ws_url 早判。
+
+    验证方法：asr.type=funasr_mock，ws_url 留空，但通过 stub provider 让 diagnose_asr
+    能跑到 provider.start_stream 阶段——证明不会被 ws_url 早判截胡。
+    """
+    class StubProvider:
+        def __init__(self):
+            self._ws_url = ""
+            self._sample_rate = 16000
+
+        async def start_stream(self, _on_utterance):
+            return None  # 不真连，立刻返回
+
+    with patch.object(diagnostics, "get_config_store") as gcs, \
+         patch.object(diagnostics, "FunASRServerProvider", StubProvider):
+        store = {"asr.type": "funasr_mock", "asr.funasr_mock.sample_rate": "16000"}
+        gcs.return_value.get_sync = lambda key, default=None: store.get(key, default)
+        res = await diagnostics.diagnose_asr()
+    # 不应是 config_missing（早判放行了未知 type）
+    assert res.get("code") != "config_missing"
+
+
+@pytest.mark.asyncio
 async def test_diagnose_asr_parses_sample_rate_as_int():
     """sample_rate 是字符串 "16000" → 必须被解析为 int 16000（不能是 coroutine）。
 

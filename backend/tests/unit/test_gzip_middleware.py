@@ -57,9 +57,22 @@ def test_small_response_not_gzipped():
 
 
 def test_binary_not_regzipped():
+    """二进制 content-type（image/png）不应被 GZipMiddleware 二次压缩。
+
+    starlette 0.41.3+ 的 GZipMiddleware 默认从 image/png 等二进制类型跳过压缩。
+    修复前断言 r.headers["content-encoding"] is None 仅在 httpx 不主动声明
+    Accept-Encoding 时通过——CI 上 Python 3.12 httpx 0.28.1 给二进制 endpoint 也
+    塞 gzip，导致服务端把4096 字节压成 51，断言挂。改成「服务端不该在 image/png 上
+    声明 Content-Encoding」+ body 头仍是 PNG magic 双断言，不依赖 httpx 行为。
+    """
     client = TestClient(_build_app())
     r = client.get("/image-png", headers={"Accept-Encoding": "gzip"})
+    # 强断言：image/png 在 starlette 默认 exclude 里，服务端不该加 gzip 头
     assert r.headers.get("content-encoding") is None
+    # 弱兜底：即便未来 starlette 改了默认 exclude，body 头 8 字节也必须是 PNG magic
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n", (
+        f"image/png 响应被破坏：{r.content[:8]!r}"
+    )
 
 
 def test_cors_preflight_not_gzipped():

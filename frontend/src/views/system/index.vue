@@ -1404,6 +1404,36 @@ watch(locale, () => {
       }
     }
 
+    /* el-select 内部覆盖：高度与 el-input 对齐（28px），字号与其他输入框一致（12px）。
+     * el-select 默认 wrapper min-height ~32px、字号 14px，单独压不住父容器。 */
+    &-select {
+      :deep(.el-select__wrapper) {
+        min-height: 28px;
+        height: 28px;
+        padding: 0 12px;
+        background: rgb(255 255 255 / 48%);
+        border: 1px solid #dfe5ee;
+        border-radius: 6px;
+        box-shadow: none;
+
+        &.is-focused,
+        &.is-hovering:not(.is-disabled) {
+          background: #fff;
+          border-color: #5a9df5;
+          box-shadow: 0 0 0 2px rgb(64 158 255 / 12%);
+        }
+      }
+
+      :deep(.el-select__selected-item),
+      :deep(.el-select__placeholder),
+      :deep(.el-select__input) {
+        height: 28px;
+        line-height: 28px;
+        color: #344054;
+        font-size: 12px;
+      }
+    }
+
     &-checkbox {
       margin: 0;
 

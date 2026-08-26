@@ -8,6 +8,7 @@
   "lang.en_us": "English",
   "lang.vi_vn": "Vietnamese",
   "msg.session_expired": "Your session has expired. Please sign in again.",
+  "msg.server_error": "Internal server error.",
   "menu.home": "Interviews",
   "menu.system": "System config",
   "menu.users": "Users",

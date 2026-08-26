@@ -17,7 +17,7 @@ import { extractBackendError } from "@/utils/error";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import { AVMedia } from "vue-audio-visual";
 import { useAsrRecorder } from "@/composables/useAsrRecorder";
-import { useCameraCapture } from "@/composables/useCameraCapture";
+import { useCameraCapture, blobToBase64 } from "@/composables/useCameraCapture";
 import {
   extractInterviewFieldsApi,
   getInterviewsTemplatesApi,
@@ -64,7 +64,10 @@ const clipboardText = ref("");
 const clipboardExtracting = ref(false);
 const voiceExtracting = ref(false);
 const cameraRecognizing = ref(false);
+const cameraFrozen = ref(false);
 const cameraVideoRef = ref<HTMLVideoElement>();
+const fileInputRef = ref<HTMLInputElement>();
+const frozenImageSrc = ref("");
 const createDefaultForm = (): CreateInterviewForm => ({
   base_info: {
     title: "欣南科技公司售前业务洽谈助手",
@@ -206,6 +209,8 @@ const resetForm = async () => {
   clipboardExtracting.value = false;
   voiceExtracting.value = false;
   cameraRecognizing.value = false;
+  cameraFrozen.value = false;
+  frozenImageSrc.value = "";
   goalError.value = "";
   await nextTick();
   formRef.value?.clearValidate();
@@ -214,6 +219,8 @@ const resetForm = async () => {
 const closeActivePanel = () => {
   selectedInputMethod.value = "";
   activePanel.value = "";
+  cameraFrozen.value = false;
+  frozenImageSrc.value = "";
   closeCamera();
 };
 
@@ -442,11 +449,68 @@ const extractVoiceTranscript = async () => {
 
 const recognizePhoto = async () => {
   const video = cameraVideoRef.value;
-  if (!video || cameraRecognizing.value) return;
+  // readyState >= 1 表示视频已可以进行渲染
+  if (!video || cameraRecognizing.value || video.readyState < 1) return;
+
+  // 截取当前帧作为定格画面，同时关闭摄像头释放资源
+  const imageBase64 = await snapCamera(video);
+  frozenImageSrc.value = `data:image/jpeg;base64,${imageBase64}`;
+  cameraFrozen.value = true;
+  closeCamera();
+};
+
+const submitRecognition = async () => {
+  if (!frozenImageSrc.value || cameraRecognizing.value) return;
 
   cameraRecognizing.value = true;
   try {
-    const imageBase64 = await snapCamera(video);
+    // frozenImageSrc 是 data:image/jpeg;base64,... 格式，需要去掉前缀
+    const imageBase64 = frozenImageSrc.value.slice(
+      frozenImageSrc.value.indexOf(",") + 1
+    );
+    const response = await ocrInterviewImageApi({
+      image_base64: imageBase64
+    });
+    const text = (response.text ?? "").trim();
+    if (!text) {
+      message(t("create.dialog.ocr_empty"), { type: "warning" });
+      cameraRecognizing.value = false;
+      return;
+    }
+    await runExtractAndFill(text);
+    closeActivePanel();
+  } catch (error) {
+    message(extractBackendError(error, t("create.dialog.ocr_failed")), {
+      type: "error"
+    });
+    // 识别失败时保留定格画面，用户可点击"重拍"或再次点击"提交识别"重试
+    cameraRecognizing.value = false;
+  }
+};
+
+const retakePhoto = () => {
+  cameraFrozen.value = false;
+  frozenImageSrc.value = "";
+  void openCamera();
+};
+
+const triggerFileUpload = () => {
+  fileInputRef.value?.click();
+};
+
+const handleFileChange = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) {
+    // 用户取消了文件选择，什么都不做，摄像头继续正常使用
+    return;
+  }
+
+  // 选择文件后开始识别时才关闭摄像头
+  closeCamera();
+  cameraRecognizing.value = true;
+  try {
+    const imageBase64 = await blobToBase64(file);
     const response = await ocrInterviewImageApi({
       image_base64: imageBase64
     });
@@ -458,11 +522,13 @@ const recognizePhoto = async () => {
     await runExtractAndFill(text);
     closeActivePanel();
   } catch (error) {
-    message(extractBackendError(error, t("create.dialog.ocr_failed")), {
+    message(extractBackendError(error, t("create.dialog.upload_failed")), {
       type: "error"
     });
   } finally {
     cameraRecognizing.value = false;
+    // 重置 input 以便下次选择同一文件
+    input.value = "";
   }
 };
 
@@ -521,6 +587,9 @@ const calculateEndTime = () => {
 };
 
 const handleClose = () => {
+  cameraFrozen.value = false;
+  frozenImageSrc.value = "";
+  closeCamera();
   emit("update:modelValue", false);
 };
 
@@ -776,17 +845,54 @@ watch(
               class="camera-input-panel"
             >
               <div class="camera-preview">
-                <video ref="cameraVideoRef" autoplay playsinline muted />
+                <video
+                  v-show="!cameraFrozen"
+                  ref="cameraVideoRef"
+                  autoplay
+                  playsinline
+                  muted
+                />
+                <img
+                  v-if="cameraFrozen"
+                  :src="frozenImageSrc"
+                  class="frozen-preview"
+                />
               </div>
               <div class="panel-actions">
-                <el-button
-                  type="primary"
-                  :loading="cameraRecognizing"
-                  :disabled="cameraRecognizing"
-                  @click="recognizePhoto"
-                >
-                  {{ $t("create.dialog.camera_snap") }}
-                </el-button>
+                <template v-if="!cameraFrozen">
+                  <el-button
+                    type="primary"
+                    :loading="cameraRecognizing"
+                    :disabled="cameraRecognizing"
+                    @click="recognizePhoto"
+                  >
+                    {{ $t("create.dialog.camera_snap") }}
+                  </el-button>
+                  <el-button
+                    plain
+                    :disabled="cameraRecognizing"
+                    @click="triggerFileUpload"
+                  >
+                    {{ $t("create.dialog.upload_image") }}
+                  </el-button>
+                </template>
+                <template v-else>
+                  <el-button
+                    type="primary"
+                    :loading="cameraRecognizing"
+                    :disabled="cameraRecognizing"
+                    @click="submitRecognition"
+                  >
+                    {{ $t("create.dialog.camera_submit") }}
+                  </el-button>
+                  <el-button
+                    plain
+                    :disabled="cameraRecognizing"
+                    @click="retakePhoto"
+                  >
+                    {{ $t("create.dialog.camera_retake") }}
+                  </el-button>
+                </template>
                 <el-button
                   plain
                   :disabled="cameraRecognizing"
@@ -795,6 +901,13 @@ watch(
                   {{ $t("create.dialog.back") }}
                 </el-button>
               </div>
+              <input
+                ref="fileInputRef"
+                type="file"
+                accept="image/*"
+                class="hidden-file-input"
+                @change="handleFileChange"
+              />
             </div>
 
             <div v-else key="methods" class="input-method-list">
@@ -1167,6 +1280,25 @@ watch(
         height: 100%;
         object-fit: contain;
       }
+
+      .frozen-preview {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+    }
+
+    .hidden-file-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
 
     .panel-actions {

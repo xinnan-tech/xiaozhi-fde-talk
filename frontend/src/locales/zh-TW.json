@@ -303,6 +303,10 @@
   "interview.runtime.go_config": "前往設定",
   "interview.runtime.kicked": "目前訪談已被其他連線接管",
   "interview.runtime.low_volume": "聲音較小，請靠近麥克風",
+  "interview.runtime.suspend_dialog.title": "訪談已暫停",
+  "interview.runtime.suspend_dialog.message": "系統偵測到長時間沒有聲音，已暫停本次訪談。點擊「繼續」可立即恢復麥克風與連線，或先處理其他事情稍後再繼續。",
+  "interview.runtime.suspend_dialog.confirm": "繼續",
+  "interview.runtime.suspend_dialog.cancel": "暫不",
   "interview.runtime.speaker": "說話人 {number}",
 
   "report.default_title": "訪談報告",

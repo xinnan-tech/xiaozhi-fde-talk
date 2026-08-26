@@ -583,6 +583,7 @@ const handleTakeoverConflict = async (message: string) => {
 };
 
 let isAsrUnavailableDialogOpen = false;
+let isSuspendConfirmDialogOpen = false;
 
 const handleAsrUnavailable = async (message: string) => {
   if (isAsrUnavailableDialogOpen) return;
@@ -603,6 +604,30 @@ const handleAsrUnavailable = async (message: string) => {
     // 用户选择继续留在当前访谈页面。
   } finally {
     isAsrUnavailableDialogOpen = false;
+  }
+};
+
+// 后端检测到长静默会推 session.suspended：仅更新状态不够明显，弹一个
+// 确认框让用户感知到「音频已暂停」、确认后由前端重启麦克风 + WebSocket
+// 重连回 in_progress。取消则停留在 suspended 状态，控制按钮仍可继续。
+const handleSessionSuspended = async () => {
+  if (isSuspendConfirmDialogOpen) return;
+  isSuspendConfirmDialogOpen = true;
+  try {
+    await ElMessageBox.confirm(
+      t("interview.runtime.suspend_dialog.message"),
+      t("interview.runtime.suspend_dialog.title"),
+      {
+        confirmButtonText: t("interview.runtime.suspend_dialog.confirm"),
+        cancelButtonText: t("interview.runtime.suspend_dialog.cancel"),
+        type: "warning"
+      }
+    );
+    await handleStartInterview();
+  } catch {
+    // 用户选择暂不继续：维持 suspended，控制按钮下次再点。
+  } finally {
+    isSuspendConfirmDialogOpen = false;
   }
 };
 
@@ -672,6 +697,9 @@ const handleServerMessage = (message: InterviewServerMessage) => {
     stopRecording();
     isInterviewStarted.value = false;
     stopInterviewTimer();
+    if (message.type === "session.suspended") {
+      void handleSessionSuspended();
+    }
   }
 };
 

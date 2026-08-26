@@ -48,12 +48,12 @@ test("recording flow: create → navigate → start → recording status → sto
   //    fake audio 由 --use-file-for-fake-audio-capture 注入，MediaRecorder 会循环读 wav。
   await startBtn.click()
 
-  // 5. 等 UI 状态翻：徽章文本变「进行中」/「In progress」
-  await expect(
-    page
-      .locator(".transcribing-badge")
-      .getByText(/进行中|In progress/i)
-  ).toBeVisible({ timeout: 20_000 })
+  // 5. 等 UI 状态翻：控制按钮变为「暂停访谈」/「Pause」。
+  //    状态徽章已与控制按钮合并，in_progress 状态下按钮显示暂停操作。
+  const controlBtn = page
+    .getByRole("button", { name: /暂停访谈|Pause/i })
+    .first()
+  await expect(controlBtn).toBeVisible({ timeout: 20_000 })
 
   // 让录音链路跑几秒，浏览器持续录制 fake audio，opus 帧经 WebSocket 发到
   // 后端，再被后端转送到真 FunASR 做识别。fake audio 是 backend/tests/e2e/audio/
@@ -67,16 +67,12 @@ test("recording flow: create → navigate → start → recording status → sto
   // 30s 也不一定出字。面板可见 = 录音链路通 + ASR provider 已建。
   await expect(page.locator(".transcript-card")).toBeVisible({ timeout: 10_000 })
 
-  // 6. 停麦：点击「关闭麦克风」/「Mic off」按钮。
-  //    button class .session-action-secondary（两个 secondary：开始/继续 + mic toggle）
-  //    按 role 选文案最稳。
-  const micToggleBtn = page
-    .getByRole("button", { name: /关闭麦克风|Mic off|^Mic off/i })
-    .first()
+  // 6. 暂停：点击「暂停访谈」/「Pause」按钮。
+  //    麦克风切换按钮已移除，统一通过控制按钮暂停/继续。
   if (
-    await micToggleBtn.isVisible({ timeout: 2_000 }).catch(() => false)
+    await controlBtn.isVisible({ timeout: 2_000 }).catch(() => false)
   ) {
-    await micToggleBtn.click()
+    await controlBtn.click()
   }
 
   // 7. 弱断言：URL 仍在 /interview/:id（没跳走；说明录音没崩出路由）

@@ -48,8 +48,6 @@ const handwritingIcon = useRenderIcon("boxicons:pencil-draw");
 const ignoreIcon = useRenderIcon("lucide:eye-off");
 const aiLineIcon = useRenderIcon("si:ai-line");
 const newItemIcon = useRenderIcon("clarity:new-solid");
-const microphoneIcon = useRenderIcon("lucide:mic");
-const microphoneOffIcon = useRenderIcon("lucide:mic-off");
 
 /** 访谈详情 */
 const interviewDetail = ref<InterviewDetailType>();
@@ -57,28 +55,9 @@ const startedAtDisplay = computed(() => {
   const startedAt = interviewDetail.value?.started_at;
   return startedAt ? dayjs(startedAt).format("YYYY-MM-DD HH:mm:ss") : "--";
 });
-const startInterviewButtonText = computed(() => {
-  const status = interviewDetail.value?.status;
-  return status === "in_progress" || status === "suspended"
-    ? t("interview.action.continue")
-    : t("interview.action.start");
-});
-const interviewStatusText = computed(() => {
-  switch (interviewDetail.value?.status) {
-    case "in_progress":
-      return t("interview.status.in_progress");
-    case "suspended":
-      return t("interview.status.suspended");
-    case "ended":
-    case "extracting":
-    case "done":
-      return t("interview.status.ended");
-    default:
-      return t("interview.status.created");
-  }
-});
 const interviewStatusClass = computed(() => {
-  switch (interviewDetail.value?.status) {
+  const status = interviewDetail.value?.status;
+  switch (status) {
     case "in_progress":
       return "status-in_progress";
     case "suspended":
@@ -87,10 +66,56 @@ const interviewStatusClass = computed(() => {
     case "extracting":
     case "done":
       return "status-ended";
-    default:
+    case "created":
+    case "setting_up":
       return "status-created";
+    default:
+      return "";
   }
 });
+
+const controlButtonText = computed(() => {
+  switch (interviewDetail.value?.status) {
+    case "in_progress":
+      return t("interview.action.pause");
+    case "suspended":
+      return t("interview.action.continue");
+    case "ended":
+    case "extracting":
+    case "done":
+      return t("interview.status.ended");
+    default:
+      return t("interview.action.start");
+  }
+});
+
+const controlButtonIcon = computed(() => {
+  switch (interviewDetail.value?.status) {
+    case "in_progress":
+      return VideoPause;
+    case "suspended":
+      return VideoPlay;
+    case "ended":
+    case "extracting":
+    case "done":
+      return CircleCheck;
+    default:
+      return VideoPlay;
+  }
+});
+
+const isControlButtonDisabled = computed(() => {
+  const status = interviewDetail.value?.status;
+  return (
+    !status ||
+    status === "ended" ||
+    status === "extracting" ||
+    status === "done"
+  );
+});
+const isInterviewInProgress = computed(
+  () => interviewDetail.value?.status === "in_progress"
+);
 const activeMode = ref("transcript");
 const activeModeIndex = ref(2);
 type SuggestionStatus = InterviewDetailItem["status"];
@@ -301,9 +326,9 @@ const stopInterviewTimer = () => {
   }
 };
 
-const startInterviewTimer = () => {
+const startInterviewTimer = (reset = true) => {
   stopInterviewTimer();
-  interviewElapsedSeconds.value = 0;
+  if (reset) interviewElapsedSeconds.value = 0;
   interviewTimerId = window.setInterval(() => {
     interviewElapsedSeconds.value += 1;
   }, 1000);
@@ -312,7 +337,8 @@ const startInterviewTimer = () => {
 const handleStartInterview = async () => {
   if (isInterviewStarted.value) return;
   isInterviewStarted.value = true;
-  startInterviewTimer();
+  const wasSuspended = interviewDetail.value?.status === "suspended";
+  startInterviewTimer(!wasSuspended);
 
   // 在点击事件中立即请求权限，避免等待 WebSocket 握手后丢失浏览器用户手势。
   shouldResumeMicrophone.value = true;
@@ -338,14 +364,24 @@ const handleStartInterview = async () => {
   }
 };
 
-const toggleMicrophone = async () => {
+const handlePauseInterview = () => {
   if (!isInterviewStarted.value) return;
-  if (isMicrophoneEnabled.value) {
-    sendListenState("stop");
-    stopRecording();
-    return;
+  sendListenState("stop");
+  stopRecording();
+  isInterviewStarted.value = false;
+  stopInterviewTimer();
+  if (interviewDetail.value) {
+    interviewDetail.value.status = "suspended";
   }
-  await openMicrophone();
+};
+
+const handleControlButtonClick = () => {
+  const status = interviewDetail.value?.status;
+  if (status === "created" || status === "suspended") {
+    void handleStartInterview();
+  } else if (status === "in_progress") {
+    handlePauseInterview();
+  }
 };
 
 const metrics = computed<
@@ -1050,15 +1086,15 @@ onMounted(() => {
                   covered: item.status === 'done' || item.status === 'skipped'
                 }"
               >
+                <component
+                  :is="newItemIcon"
+                  v-if="item.isNew && isPendingStatus(item.status)"
+                  class="suggestion-new-icon"
+                  :aria-label="$t('interview.suggestion.new_question')"
+                />
                 <div class="suggestion-head">
                   <h3 class="suggestion-title">
                     <span class="suggestion-title-text">{{ item.title }}</span>
-                    <component
-                      :is="newItemIcon"
-                      v-if="item.isNew && isPendingStatus(item.status)"
-                      class="suggestion-new-icon"
-                      :aria-label="$t('interview.suggestion.new_question')"
-                    />
                   </h3>
                   <span class="suggestion-tag" :class="item.tagClass">
                     {{ suggestionStatusLabel(item.status) }}
@@ -1176,38 +1212,24 @@ onMounted(() => {
             </div>
 
             <div class="session-actions">
-              <span class="transcribing-badge" :class="interviewStatusClass">
-                <span class="transcribing-main">
-                  <span class="transcribing-dot" />
-                  <span>{{ $t("interview.in_progress") }}</span>
-                </span>
-                <small>{{ interviewStatusText }}</small>
-              </span>
               <el-button
-                class="session-action-button session-action-secondary"
-                :icon="VideoPlay"
-                :disabled="isInterviewStarted"
-                @click="handleStartInterview"
+                class="session-action-button session-control-button"
+                :class="interviewStatusClass"
+                :icon="controlButtonIcon"
+                :disabled="isControlButtonDisabled"
+                @click="handleControlButtonClick"
               >
+                <span
+                  v-if="isInterviewInProgress"
+                  class="rec-badge"
+                  aria-hidden="true"
+                >
+                  <span class="rec-dot" />
+                  <span class="rec-text">REC</span>
+                </span>
                 <span class="session-action-label">{{
-                  startInterviewButtonText
+                  controlButtonText
                 }}</span>
-              </el-button>
-              <el-button
-                class="session-action-button session-action-secondary"
-                :icon="isMicrophoneEnabled ? microphoneIcon : microphoneOffIcon"
-                :disabled="!isInterviewStarted || !isWebSocketConnected"
-                @click="toggleMicrophone"
-              >
-                <span class="session-action-label session-microphone-label">
-                  {{
-                    $t(
-                      isMicrophoneEnabled
-                        ? "interview.action.disable_mic"
-                        : "interview.action.enable_mic"
-                    )
-                  }}
-                </span>
               </el-button>
               <el-button
                 type="primary"
@@ -1608,6 +1630,7 @@ onMounted(() => {
   }
 
   .suggestion-card {
+    position: relative;
     padding: 16px 16px 14px;
     background: rgb(255 255 255 / 70%);
     border: 1px solid rgb(219 227 240 / 96%);
@@ -1668,11 +1691,12 @@ onMounted(() => {
   }
 
   .suggestion-new-icon {
-    display: inline-block;
-    width: 34px;
-    height: 34px;
-    margin-left: 5px;
-    vertical-align: middle;
+    position: absolute;
+    top: -8px;
+    left: 6px;
+    z-index: 2;
+    width: 30px;
+    height: 30px;
     color: #dc2626;
   }
 
@@ -1992,84 +2016,97 @@ onMounted(() => {
     margin-left: auto;
   }
 
-  .transcribing-badge {
-    display: inline-flex;
-    flex-direction: column;
-    gap: 2px;
-    align-items: center;
-    justify-content: center;
-    min-width: 104px;
-    height: 56px;
-    padding: 0 14px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #334155;
-    background: rgb(255 255 255 / 92%);
-    border: 1px solid rgb(219 227 240 / 95%);
-    border-radius: 8px;
-  }
-
-  .transcribing-main {
-    display: inline-flex;
-    gap: 7px;
-    align-items: center;
-  }
-
-  .transcribing-badge small {
-    font-size: 12px;
-    font-weight: 400;
+  .session-control-button.el-button {
+    min-width: 120px;
     color: #64748b;
+    background: #fff;
+    border-color: #cbd5e1;
+    transition: all 0.2s ease;
   }
 
-  .transcribing-badge.status-created {
-    color: #722ed1;
+  .session-control-button.el-button:hover,
+  .session-control-button.el-button:focus-visible {
+    color: #475569;
+    background: #f1f5f9;
+    border-color: #94a3b8;
   }
 
-  .transcribing-badge.status-created .transcribing-dot {
-    background: #722ed1;
-    box-shadow: none;
-    animation: none;
+  .session-control-button.status-created.el-button {
+    color: #fff;
+    background: #2563eb;
+    border-color: #2563eb;
   }
 
-  .transcribing-badge.status-in_progress {
-    color: #409eff;
+  .session-control-button.status-created.el-button:hover,
+  .session-control-button.status-created.el-button:focus-visible {
+    color: #fff;
+    background: #1d4ed8;
+    border-color: #1d4ed8;
   }
 
-  .transcribing-badge.status-in_progress .transcribing-dot {
-    background: #409eff;
-    box-shadow: none;
-  }
-
-  .transcribing-badge.status-suspended {
-    color: #d48806;
-  }
-
-  .transcribing-badge.status-suspended .transcribing-dot {
-    background: #d48806;
-    box-shadow: none;
-    animation: none;
-  }
-
-  .transcribing-badge.status-ended {
-    color: #8c8c8c;
-  }
-
-  .transcribing-badge.status-ended .transcribing-dot {
-    background: #8c8c8c;
-    box-shadow: none;
-    animation: none;
-  }
-
-  .transcribing-dot {
-    width: 10px;
-    height: 10px;
+  .session-control-button.status-in_progress.el-button {
+    color: #fff;
     background: #10b981;
+    border-color: #10b981;
+    animation: controlButtonPulse 1.6s ease-in-out infinite;
+  }
+
+  .session-control-button.status-in_progress.el-button:hover,
+  .session-control-button.status-in_progress.el-button:focus-visible {
+    color: #fff;
+    background: #059669;
+    border-color: #059669;
+  }
+
+  .session-control-button.status-suspended.el-button {
+    color: #fff;
+    background: #f59e0b;
+    border-color: #f59e0b;
+  }
+
+  .session-control-button.status-suspended.el-button:hover,
+  .session-control-button.status-suspended.el-button:focus-visible {
+    color: #fff;
+    background: #d97706;
+    border-color: #d97706;
+  }
+
+  .session-control-button.status-ended.el-button,
+  .session-control-button.status-ended.el-button:hover,
+  .session-control-button.status-ended.el-button:focus-visible {
+    color: #fff;
+    cursor: not-allowed;
+    background: #94a3b8;
+    border-color: #94a3b8;
+  }
+
+  .rec-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    display: inline-flex;
+    gap: 3px;
+    align-items: center;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    background: #ef4444;
     border-radius: 999px;
-    box-shadow: 0 0 0 4px rgb(16 185 129 / 14%);
-    animation: transcribingPulse 1.6s ease-in-out infinite;
+    box-shadow: 0 2px 6px rgb(239 68 68 / 40%);
+  }
+
+  .rec-dot {
+    width: 6px;
+    height: 6px;
+    background: #fff;
+    border-radius: 999px;
+    animation: recPulse 1.2s ease-in-out infinite;
   }
 
   .session-action-button.el-button {
+    position: relative;
     flex-direction: column;
     gap: 5px;
     min-width: 92px;
@@ -2110,14 +2147,16 @@ onMounted(() => {
   }
 
   .session-action-primary.el-button {
-    background: #2878e8;
-    border-color: #2878e8;
+    color: #ef4444;
+    background: #fff;
+    border-color: #ef4444;
   }
 
   .session-action-primary.el-button:hover,
   .session-action-primary.el-button:focus-visible {
-    background: #1f6ed8;
-    border-color: #1f6ed8;
+    color: #fff;
+    background: #ef4444;
+    border-color: #ef4444;
   }
 
   .transcript-card {
@@ -2195,23 +2234,34 @@ onMounted(() => {
     gap: 6px;
   }
 
-  @keyframes transcribingPulse {
+  @keyframes controlButtonPulse {
     0% {
-      transform: scale(0.88);
-      box-shadow: 0 0 0 0 rgb(16 185 129 / 24%);
-      opacity: 0.72;
+      box-shadow: 0 0 0 0 rgb(16 185 129 / 40%);
     }
 
-    50% {
-      transform: scale(1);
-      box-shadow: 0 0 0 8px rgb(16 185 129 / 0%);
-      opacity: 1;
+    70% {
+      box-shadow: 0 0 0 10px rgb(16 185 129 / 0%);
     }
 
     100% {
-      transform: scale(0.88);
       box-shadow: 0 0 0 0 rgb(16 185 129 / 0%);
-      opacity: 0.72;
+    }
+  }
+
+  @keyframes recPulse {
+    0% {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    50% {
+      opacity: 0.5;
+      transform: scale(0.75);
+    }
+
+    100% {
+      opacity: 1;
+      transform: scale(1);
     }
   }
 
@@ -2535,9 +2585,9 @@ onMounted(() => {
     height: 16px;
   }
 
-  .interview-page .transcribing-badge {
-    min-width: 82px;
-    height: 45px;
+  .interview-page .session-control-button.el-button {
+    min-width: 100px;
+    height: 40px;
     padding: 0 10px;
   }
 }
@@ -2701,19 +2751,10 @@ onMounted(() => {
     height: 36px;
   }
 
-  .interview-page .transcribing-badge {
-    width: 76px;
-    min-width: 76px;
+  .interview-page .session-control-button.el-button {
+    min-width: 0;
     padding: 0 6px;
     font-size: 12px;
-  }
-
-  .interview-page .transcribing-badge small {
-    display: none;
-  }
-
-  .interview-page .transcribing-main {
-    gap: 5px;
   }
 
   .interview-page .transcript-head {

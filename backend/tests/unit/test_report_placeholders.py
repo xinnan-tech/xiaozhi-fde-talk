@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.services.reports.generator import _prefill_session_placeholders
@@ -42,25 +42,26 @@ def test_prefill_session_basic():
     assert "彭经理" in out
 
 
-def test_prefill_session_time_falls_back_to_started_at():
-    """base_info 没填 start_time → 从 started_at 取。"""
+def test_prefill_session_time_prefers_started_at():
+    """实际 started_at 存在时，报告时间不应使用创建时填写的计划时间。"""
     state = _FakeState(
         session=_FakeSession(
-            base_info={"project": "X"},
-            started_at=datetime(2026, 8, 11, 14, 30),
+            base_info={"project": "X", "start_time": "计划时间"},
+            started_at=datetime(2026, 8, 11, 14, 30, tzinfo=timezone.utc),
         )
     )
     doc = "开始：{{session.start_time}}"
     out = _prefill_session_placeholders(doc, state)
-    assert "2026-08-11 14:30" in out
+    assert "计划时间" not in out
+    expected = datetime(2026, 8, 11, 14, 30, tzinfo=timezone.utc).astimezone()
+    assert expected.strftime("%Y-%m-%d %H:%M:%S") in out
 
 
-def test_prefill_session_time_prefers_base_info():
-    """base_info 有 start_time → 用它，不退到 started_at。"""
+def test_prefill_session_time_falls_back_to_base_info_before_start():
+    """访谈尚未实际开始时，报告时间暂时使用计划时间。"""
     state = _FakeState(
         session=_FakeSession(
             base_info={"start_time": "手动填的时间"},
-            started_at=datetime(2026, 8, 11, 14, 30),
         )
     )
     doc = "开始：{{session.start_time}}"

@@ -13,6 +13,7 @@ import html
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
 import bleach
@@ -54,17 +55,23 @@ def _transcript_signature(transcript: list[TranscriptSegment]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+def _format_session_datetime(value: datetime) -> str:
+    """格式化实际访谈时间；数据库时间统一按 UTC 解释后转服务器本地时区。"""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _prefill_session_placeholders(doc: str, state: SessionState) -> str:
     bi = state.session.base_info or {}
 
     def _resolve(name: str) -> str:
+        if name == "start_time" and state.session.started_at is not None:
+            return _format_session_datetime(state.session.started_at)
+        if name == "end_time" and state.session.ended_at is not None:
+            return _format_session_datetime(state.session.ended_at)
         if name in bi and bi[name] not in (None, ""):
             return str(bi[name])
-        # base_info 没填时，start/end_time 从 Session 字段取（setup.extract_to 默认含这俩）
-        if name == "start_time" and state.session.started_at is not None:
-            return state.session.started_at.strftime("%Y-%m-%d %H:%M")
-        if name == "end_time" and state.session.ended_at is not None:
-            return state.session.ended_at.strftime("%Y-%m-%d %H:%M")
         return ""
 
     return _SESSION_PLACEHOLDER_RE.sub(lambda m: _resolve(m.group(1)), doc)

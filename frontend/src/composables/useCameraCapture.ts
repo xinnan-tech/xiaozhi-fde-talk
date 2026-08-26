@@ -1,9 +1,6 @@
 import { onBeforeUnmount, ref, shallowRef } from "vue";
 
-/** 灰度化对比度增强系数 */
-const CONTRAST_FACTOR = 1.5;
-
-const blobToBase64 = (blob: Blob) =>
+export const blobToBase64 = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -53,7 +50,7 @@ export function useCameraCapture() {
     }
   };
 
-  /** 截取当前帧 → 灰度 + 对比度增强 → JPEG base64（无 data: 前缀）。 */
+  /** 截取当前帧 → JPEG base64（无 data: 前缀）。 */
   const snap = async (video: HTMLVideoElement) => {
     if (!video.videoWidth || !video.videoHeight) {
       throw new Error("camera_not_ready");
@@ -66,15 +63,6 @@ export function useCameraCapture() {
     if (!context) throw new Error("canvas_unsupported");
 
     context.drawImage(video, 0, 0);
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      const diff = gray - 128;
-      const output = Math.min(255, Math.max(0, 128 + diff * CONTRAST_FACTOR));
-      data[i] = data[i + 1] = data[i + 2] = output;
-    }
-    context.putImageData(imageData, 0, 0);
 
     const blob = await new Promise<Blob | null>(resolve =>
       canvas.toBlob(resolve, "image/jpeg", 0.9)

@@ -191,10 +191,13 @@ def create_app() -> FastAPI:
     from app.core.i18n.middleware import I18nHTTPMiddleware
     app.add_middleware(I18nHTTPMiddleware)
 
-    # gzip 中间件：text 类响应 ≥ 1024 B 自动压缩；4 MB 静态资源 → ~1 MB。
-    # 顺序：CORS → I18n → GZip → request_id。
-    from starlette.middleware.gzip import GZipMiddleware
-    app.add_middleware(GZipMiddleware, minimum_size=1024)
+    # gzip 中间件：text 类响应 ≥ 1024 B 自动压缩；image/* / font / 已压缩格式跳过。
+    # 不用 starlette.middleware.gzip.GZipMiddleware：0.41.x 不支持 exclude_content_types
+    # 会把所有 ≥1024 B 响应（含 image/png）都压一遍，CPU 白烧还变大。
+    # 自实现 CompressibleGZipMiddleware 复刻 starlette 0.42+ 的 DEFAULT_EXCLUDED 语义。
+    # 顺序：CORS → I18n → CompressibleGZip → request_id。
+    from app.middleware.compressible_gzip import CompressibleGZipMiddleware
+    app.add_middleware(CompressibleGZipMiddleware, minimum_size=1024)
 
     @app.middleware("http")
     async def request_id_middleware(request, call_next):

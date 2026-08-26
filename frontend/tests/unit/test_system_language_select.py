@@ -100,6 +100,33 @@ def test_template_radio_branch_intact_for_asr_type():
     )
 
 
+def test_asr_field_options_resolved_at_render_time():
+    """ASR 字段 options 在 buildConfigGroups 时不烤入；渲染时按当前 type 实时查。
+
+    不同 type 共享 fieldKey（funasr_server / doubao_stream 都有 language 但
+    选项不同），build 时烤入 dedup 后切 type 会沿用第一个遍历到的 type 的
+    选项，导致 doubao_stream.language 下拉仍是 {zh, yue, en}，admin 选 "en"
+    保存被 400 拒绝；stored "zh-CN" 因选项不匹配只能当 raw text 显示。
+    """
+    script = _script_block(SYSTEM_VUE.read_text(encoding="utf-8"))
+    assert "const selectOptionsFor" in script, (
+        "缺 selectOptionsFor 渲染时查表函数"
+    )
+
+
+def test_template_select_uses_selectOptionsFor_fallback():
+    """模板 el-option v-for 走 field.options ?? selectOptionsFor 兜底链。
+
+    ASR 字段 options 不烤入，必须有兜底；非 ASR 字段（llm.output_language）
+    options 烤入，chain 走 field.options 一支。
+    """
+    template = _template_block(SYSTEM_VUE.read_text(encoding="utf-8"))
+    assert "field.options ?? selectOptionsFor" in template, (
+        "el-option v-for 必须走 field.options ?? selectOptionsFor 兜底链，"
+        "否则 ASR 字段渲染时仍用 buildConfigGroups 时烤死的第一个 type 的选项"
+    )
+
+
 def test_i18n_keys_for_new_locales_present():
     """新增的 7 个语种 i18n key 必填，否则 el-select 显示 raw key。
 

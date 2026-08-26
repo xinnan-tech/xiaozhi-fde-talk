@@ -963,7 +963,7 @@ watch(
     box-sizing: border-box;
     min-width: 0;
     padding: 16px;
-    background: transparent;
+    background-color: rgb(255 255 255 / 60%);
     border: 1px solid rgb(255 255 255 / 65%);
     border-radius: 16px;
     box-shadow: 0 0 10px rgb(0 0 0 / 8%);

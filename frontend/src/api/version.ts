@@ -9,8 +9,9 @@ export interface BackendVersion {
 /**
  * 拉取后端 app 版本号。
  *
- * 鉴权：依赖后端 get_current_user —— 未登录（401）或网络失败时直接抛错，
- * 调用方在 about 页降级为仅显示前端版本（设计：版本号不外泄给公网）。
+ * 鉴权：后端用 get_current_user_optional，匿名返 200 + {"version": ""}，
+ * 已登录返真实版本号。调用方在 about 页把空串等同 null —— 降级为仅显示
+ * 前端版本（设计：版本号不外泄给公网探测者）。
  */
 export const getBackendVersion = (): Promise<BackendVersion> =>
   http.request<BackendVersion>("get", baseUrlApi("/api/v1/version"));

@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
@@ -13,6 +13,8 @@ import Calendar from "~icons/ep/calendar";
 import SwitchButton from "~icons/ep/switch-button";
 import User from "~icons/ep/user";
 import VideoPlay from "~icons/ep/video-play";
+import VideoPause from "~icons/ep/video-pause";
+import CircleCheck from "~icons/ep/circle-check";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import ReSegmented from "@/components/ReSegmented";
 import LayFooter from "@/layout/components/lay-footer/index.vue";
@@ -1062,60 +1064,71 @@ onMounted(() => {
                     {{ suggestionStatusLabel(item.status) }}
                   </span>
                 </div>
-                <p v-if="item.goal" class="suggestion-goal">
-                  <strong>{{ $t("interview.suggestion.goal") }}</strong>
-                  <span>{{ item.goal }}</span>
-                </p>
-                <p class="suggestion-hint">{{ item.hint }}</p>
                 <div
                   v-if="
+                    item.goal ||
                     (item.isNew && isPendingStatus(item.status)) ||
                     isPendingStatus(item.status) ||
                     item.status === 'ignored' ||
                     item.ignoreCountdown !== null
                   "
-                  class="suggestion-head-actions"
+                  class="suggestion-goal-row"
                 >
-                  <button
+                  <p v-if="item.goal" class="suggestion-goal">
+                    <strong>{{ $t("interview.suggestion.goal") }}</strong>
+                    <span>{{ item.goal }}</span>
+                  </p>
+                  <div
                     v-if="
+                      (item.isNew && isPendingStatus(item.status)) ||
                       isPendingStatus(item.status) ||
                       item.status === 'ignored' ||
                       item.ignoreCountdown !== null
                     "
-                    type="button"
-                    class="suggestion-ignore-button"
-                    :class="{ countdown: item.ignoreCountdown !== null }"
-                    :aria-label="
-                      $t(
-                        item.ignoreCountdown !== null
-                          ? 'interview.suggestion.undo_ignore'
-                          : item.status === 'ignored'
-                            ? 'interview.suggestion.unignore'
-                            : 'interview.suggestion.ignore'
-                      )
-                    "
-                    @click="
-                      item.ignoreCountdown !== null
-                        ? handleUndoIgnore(item.itemId)
-                        : item.status === 'ignored'
-                          ? handleUnignoreSuggestion(item.itemId)
-                          : handleIgnoreSuggestion(item.itemId)
-                    "
+                    class="suggestion-head-actions"
                   >
-                    <component
-                      :is="ignoreIcon"
-                      v-if="item.status !== 'ignored'"
-                      class="suggestion-ignore-icon"
-                    />
-                    <span>{{
-                      item.ignoreCountdown !== null
-                        ? `${item.ignoreCountdown}s`
-                        : item.status === "ignored"
-                          ? $t("interview.suggestion.unignore")
-                          : $t("interview.suggestion.ignore_short")
-                    }}</span>
-                  </button>
+                    <button
+                      v-if="
+                        isPendingStatus(item.status) ||
+                        item.status === 'ignored' ||
+                        item.ignoreCountdown !== null
+                      "
+                      type="button"
+                      class="suggestion-ignore-button"
+                      :class="{ countdown: item.ignoreCountdown !== null }"
+                      :aria-label="
+                        $t(
+                          item.ignoreCountdown !== null
+                            ? 'interview.suggestion.undo_ignore'
+                            : item.status === 'ignored'
+                              ? 'interview.suggestion.unignore'
+                              : 'interview.suggestion.ignore'
+                        )
+                      "
+                      @click="
+                        item.ignoreCountdown !== null
+                          ? handleUndoIgnore(item.itemId)
+                          : item.status === 'ignored'
+                            ? handleUnignoreSuggestion(item.itemId)
+                            : handleIgnoreSuggestion(item.itemId)
+                      "
+                    >
+                      <component
+                        :is="ignoreIcon"
+                        v-if="item.status !== 'ignored'"
+                        class="suggestion-ignore-icon"
+                      />
+                      <span>{{
+                        item.ignoreCountdown !== null
+                          ? `${item.ignoreCountdown}s`
+                          : item.status === "ignored"
+                            ? $t("interview.suggestion.unignore")
+                            : $t("interview.suggestion.ignore_short")
+                      }}</span>
+                    </button>
+                  </div>
                 </div>
+                <p class="suggestion-hint">{{ item.hint }}</p>
               </article>
             </TransitionGroup>
           </el-scrollbar>
@@ -1610,11 +1623,11 @@ onMounted(() => {
 
   .suggestion-head-actions {
     display: inline-flex;
-    margin-top: 10px;
     gap: 12px;
     align-items: center;
     justify-content: flex-end;
     min-height: 26px;
+    flex-shrink: 0;
   }
 
   /* .suggestion-head-actions::before {
@@ -1756,6 +1769,20 @@ onMounted(() => {
   .suggestion-card.ignored .suggestion-goal,
   .suggestion-card.ignored .suggestion-hint {
     color: #94a3b8;
+  }
+
+  .suggestion-goal-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .suggestion-goal-row .suggestion-goal {
+    flex: 1;
+    min-width: 0;
+    margin-top: 0;
   }
 
   .suggestion-goal {

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.persistence.db import SessionLocal
 from app.persistence.models import User
+from app.services.auth._pwd_ver_clock import next_pwd_ver_ts
 
 # 内存缓存（user_id → (monotonic_ts, password_changed_at)）；TTL 60s。
 # 简单 dict 不引外部依赖；大用户量场景后续可换 LRU + 事件失效。
@@ -72,7 +73,7 @@ class UserRepository:
             id=str(uuid.uuid4()),
             username=username.lower(),
             password_hash=password_hash,
-            password_changed_at=datetime.now(timezone.utc),
+            password_changed_at=next_pwd_ver_ts(),
             role=role,
         )
         db.add(user)
@@ -86,7 +87,7 @@ class UserRepository:
         if row is None:
             return
         row.password_hash = password_hash
-        row.password_changed_at = datetime.now(timezone.utc)
+        row.password_changed_at = next_pwd_ver_ts()
         await db.commit()
         _pwd_cache.pop(user_id, None)
 
@@ -108,7 +109,7 @@ class UserRepository:
             if row is None:
                 return False
             row.password_hash = new_hash
-            row.password_changed_at = datetime.now(timezone.utc)
+            row.password_changed_at = next_pwd_ver_ts()
             await db.commit()
         # 失效缓存 → 旧 token pwd_ver 不匹配 → 立即吊销
         _pwd_cache.pop(row.id, None)

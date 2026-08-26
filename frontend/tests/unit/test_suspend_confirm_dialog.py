@@ -196,27 +196,50 @@ def test_handle_start_interview_guards_against_ended_status():
 
 
 def test_handle_start_interview_rechecks_ended_after_each_await():
-    """每个 await 之后必须再查一次 status === 'ended'，覆盖弹框异步窗口。
+    """每个 await 之后必须再查一次 status，涵盖 ended 与 suspended 两种终态。
 
     acquireStream / openMicrophone 是 await 窗口，期间后端若推
-    session.ended，handleServerMessage 会把 status 写为 ended；await
-    返回后若不重查就接着 status = "in_progress"，ended 状态被复活。
+    session.ended 或再推 session.suspended（idle 超时叠加 / admin 手动
+    暂停），handleServerMessage 会把 status 写为 ended/suspended；await
+    返回后若不重查就接着 status = "in_progress"，把后端的终态翻成进行中。
     """
     script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
     body = _function_body(script, "const handleStartInterview = async () => {")
-    # acquireStream 之后必须再查一次
+    # acquireStream 之后必须再查 ended + suspended
     acquire_idx = body.index("await acquireStream()")
-    # acquireStream 之后到 in_progress 赋值之间的片段
     next_status_mutate = body.index('status = "in_progress"', acquire_idx)
     after_acquire = body[acquire_idx:next_status_mutate]
     assert 'status === "ended"' in after_acquire, (
-        "await acquireStream() 之后必须再查 status === 'ended'，否则 ended "
-        "在 acquireStream 期间到达会被复活成 in_progress"
+        "await acquireStream() 之后必须再查 status === 'ended'"
     )
-    # openMicrophone 之后同样要查
+    assert 'status === "suspended"' in after_acquire, (
+        "await acquireStream() 之后必须再查 status === 'suspended'，"
+        "否则 idle 超时叠加期间推过来的 suspended 会被复活成 in_progress"
+    )
+    # openMicrophone 之后同样要查两个终态
     if "await openMicrophone()" in body:
         open_mic_idx = body.index("await openMicrophone()")
         after_open_mic = body[open_mic_idx:]
         assert 'status === "ended"' in after_open_mic, (
             "await openMicrophone() 之后必须再查 status === 'ended'"
         )
+        assert 'status === "suspended"' in after_open_mic, (
+            "await openMicrophone() 之后必须再查 status === 'suspended'"
+        )
+
+
+def test_handle_start_interview_entry_does_not_block_suspended_resume():
+    """入口守卫只拦 ended 不能拦 suspended。
+
+    handleControlButtonClick / handleSessionSuspended 都会在 status 为
+    suspended 时主动调 handleStartInterview「继续」。入口若把 suspended
+    也算"终态"拦截，continue 路径就废了。"""
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleStartInterview = async () => {")
+    # 入口 ended 守卫单独一句 if，且不含 suspended
+    entry_ended_line = body.index('status === "ended"')
+    next_line_idx = body.index("\n", entry_ended_line)
+    entry_check = body[entry_ended_line:next_line_idx]
+    assert 'suspended' not in entry_check, (
+        "入口 ended 守卫不能扩展到 suspended，否则 continue 流程被废"
+    )

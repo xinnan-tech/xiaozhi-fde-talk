@@ -358,17 +358,18 @@ class SessionManager:
             get_config_store().subscribe(self._config_change_sub)
 
     async def stop_idle_watchdog(self) -> None:
-        """lifespan shutdown 调一次。"""
-        # 同时 set 两个 flag：wait_for 只监听 _config_change_flag，
-        # 不监听 _stop_flag。只 set _stop_flag 时 watchdog 仍会卡到下次 timeout。
-        # 复用 cfg 唤醒路径，循环内 _stop_flag 检查让它 return，最坏 0s 退出。
+        """lifespan shutdown 调一次。
+
+        注意：不要 `await self._idle_task`——watchdog 循环内部 `_config_change_flag`
+        Event 会在首次 wait() 时永久绑定到启动它的 loop，跨 loop 等待会抛
+        "bound to a different event loop"（见 test_registration_status 单跑过、
+        与 test_registration 同跑挂——manager 模块级单例，第二个 module 的 lifespan
+        shutdown 时撞 loop 绑定）。只 set flag + cancel()，不等任务完成。
+        """
         self._stop_flag.set()
         self._config_change_flag.set()
         if self._idle_task is not None:
-            try:
-                await self._idle_task
-            except asyncio.CancelledError:
-                pass
+            self._idle_task.cancel()
             self._idle_task = None
         logger.info("空闲看门狗已停止")
 

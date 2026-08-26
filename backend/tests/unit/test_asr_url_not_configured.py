@@ -14,13 +14,17 @@ from app.core.i18n.messages import Keys
 
 
 def _make_provider_with_ws_url(ws_url: str):
-    """构造一个不连真 WS 的 provider，注入 asr.ws_url = ws_url。"""
+    """构造一个不连真 WS 的 provider，注入 asr.funasr_server.ws_url = ws_url。
+
+    注意：provider 实际读的是 `asr.funasr_server.*`（per-provider 前缀），
+    不是裸 `asr.*`——之前 mock 写成裸键 `_ws_url` 永远拿到默认空串。
+    """
     with patch("app.adapters.asr.funasr_server.get_config_store") as gcs:
         store = MagicMock()
         store.get_sync.side_effect = lambda k, default="": {
-            "asr.ws_url": ws_url,
-            "asr.sample_rate": "16000",
-            "asr.language": "zh",
+            "asr.funasr_server.ws_url": ws_url,
+            "asr.funasr_server.sample_rate": "16000",
+            "asr.funasr_server.language": "zh",
         }.get(k, default)
         gcs.return_value = store
         from app.adapters.asr.funasr_server import FunASRServerProvider

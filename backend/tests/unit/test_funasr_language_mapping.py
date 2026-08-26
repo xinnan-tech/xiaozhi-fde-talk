@@ -1,16 +1,21 @@
-"""asr.language（zh/yue/en）→ FunASR init_msg 合法值映射。"""
+"""asr.funasr_server.language（zh/yue/en）→ FunASR init_msg 合法值映射。"""
 from unittest.mock import MagicMock, patch
 
 
 def _make_provider(config_value: str):
-    """构造一个不连真 WS 的 FunASRServerProvider，注入 config 值。"""
+    """构造一个不连真 WS 的 FunASRServerProvider，注入 config 值。
+
+    注意：provider 实际读的 key 是 `asr.funasr_server.*`（per-provider 前缀），
+    不是裸 `asr.*`——之前 mock 写成裸键，导致 provider 永远拿到默认空串，
+    5 条测试表面「3 失败 2 巧合过」，实际是 mock 没真打到映射路径。
+    """
     with patch("app.adapters.asr.funasr_server.get_config_store") as gcs:
         store = MagicMock()
         store.get_sync.side_effect = lambda k, default="": {
-            "asr.ws_url": "wss://localhost:10096",
-            "asr.sample_rate": "16000",
-            "asr.ws_verify_ssl": "false",
-            "asr.language": config_value,
+            "asr.funasr_server.ws_url": "wss://localhost:10096",
+            "asr.funasr_server.sample_rate": "16000",
+            "asr.funasr_server.ws_verify_ssl": "false",
+            "asr.funasr_server.language": config_value,
         }.get(k, default)
         gcs.return_value = store
         from app.adapters.asr.funasr_server import FunASRServerProvider

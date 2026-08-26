@@ -277,7 +277,7 @@ def validate_password_strength(password: str) -> None:
     """校验密码强度。失败抛 I18nError（http_status=400）。
 
     规则：
-    1. 长度 ≥ MIN_LENGTH（12）
+    1. 长度 ≥ MIN_LENGTH（8）
     2. ≥ 3 of {小写, 大写, 数字, 符号}
     3. UTF-8 字节数 ≤ _BCRYPT_MAX_BYTES（72）
     4. 不在弱密码表中（不区分大小写）

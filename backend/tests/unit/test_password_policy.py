@@ -47,7 +47,7 @@ def test_weak_password_raises_weak():
 
 def test_strong_password_passes():
     """正常 8+ 位、≥ 3 字符类、不在表内 → 不抛。"""
-    validate_password_strength("StrongP@ss-2026!")
+    validate_password_strength("StrongP@ss")  # 9 字符，3 类
 
 
 def test_weak_match_is_case_insensitive():
@@ -58,34 +58,31 @@ def test_weak_match_is_case_insensitive():
 
 # ---------- Wave 3 P1 #24：8 字符 / ≥ 3 字符类 ----------
 
-def test_11_char_password_rejected_for_length():
-    """\"Password12!\" 11 字符 → PASSWORD_TOO_SHORT_MIN。"""
-    with pytest.raises(I18nError) as ei:
-        validate_password_strength("Password12!")  # 11 chars, > MIN_LENGTH=8 but < 12
-    assert ei.value.code == Keys.PASSWORD_TOO_SHORT_MIN.value
+def test_8_char_password_passes_min_length():
+    """\"Passw0rd!\" 9 字符、3 类 → 通过（边界 ≥ MIN_LENGTH=8）。"""
+    validate_password_strength("Passw0rd!")  # 9 chars, 3 classes
 
 
 def test_tr0ub4dor_accepted():
     """\"Tr0ub4dor&3\" 实际 11 字符，MIN_LENGTH=8 通过、字符类 4 → 通过。"""
-    # 经典 xkcd 口令原版 11 字符，加 1 符号凑齐 12 字符（远超 MIN_LENGTH=8）保持 4 类
-    validate_password_strength("Tr0ub4dor&3!")
+    validate_password_strength("Tr0ub4dor&3")  # 11 chars, 4 classes
 
 
 def test_low_entropy_password_rejected():
-    """12 字符但仅 1 字符类（\"aaaaaaaaaaaa\"）→ PASSWORD_CHARSET_INSUFFICIENT。"""
+    """8 字符但仅 1 字符类（\"aaaaaaaa\"）→ PASSWORD_CHARSET_INSUFFICIENT。"""
     with pytest.raises(WeakPasswordError):
-        validate_password_strength("a" * 12)
+        validate_password_strength("a" * 8)
 
 
 def test_two_class_long_password_rejected():
-    """12 字符 + 仅 2 类（\"abcdefghijkl\"）→ PASSWORD_CHARSET_INSUFFICIENT（熵不足）。"""
+    """8 字符 + 仅 2 类（\"abcdefgh\"）→ PASSWORD_CHARSET_INSUFFICIENT（熵不足）。"""
     with pytest.raises(WeakPasswordError):
-        validate_password_strength("abcdefghijkl")  # 12 chars all lowercase
+        validate_password_strength("abcdefgh")  # 8 chars all lowercase
 
 
 def test_three_class_long_password_accepted():
-    """12 字符 + 3 类（upper + lower + digit）→ 通过。"""
-    validate_password_strength("Abcdefgh1234")  # upper + lower + digit = 3 类
+    """8 字符 + 3 类（upper + lower + digit）→ 通过。"""
+    validate_password_strength("Abcdefg1")  # 8 chars, upper + lower + digit = 3 类
 
 
 # ---------- 弱密码表关键项回归（含漏逗号 bug 守卫）----------

@@ -41,7 +41,9 @@ const filteredUsers = computed(() => {
 
 const formatDateTime = (value: string | null) => {
   if (!value) return "--";
-  return value;
+  // 后端返回 UTC 时间（带 +00:00），转为本地时间后展示
+  const date = new Date(value);
+  return date.toLocaleString();
 };
 
 const roleLabel = (role: AdminUserInfo["role"]) =>
@@ -212,7 +214,7 @@ async function submitReset() {
         >
           <template #default="{ row }">
             <span v-if="row.password_changed_at" class="datetime-value">
-              {{ row.password_changed_at }}
+              {{ formatDateTime(row.password_changed_at) }}
             </span>
             <span v-else class="muted-text">{{ t("users.never_changed") }}</span>
           </template>

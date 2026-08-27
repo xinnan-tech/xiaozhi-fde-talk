@@ -298,3 +298,38 @@ def test_post_await_suspended_guard_distinguishes_was_suspended():
         assert '!wasSuspended' in body[mic_guard_idx:], (
             "openMicrophone 之后的 suspended 分支同样必须加 !wasSuspended"
         )
+
+
+def test_handle_server_message_skips_cleanup_when_dialog_in_flight():
+    """session.suspended 弹框流程仍在处理时，本端 cleanup 必须跳过。
+
+    用户点继续但 handleStartInterview 尚未跑完（isSuspendConfirmDialogOpen
+    仍为 true）期间，后端若再推 session.suspended，handleServerMessage
+    若正常 cleanup，会把 isInterviewStarted/mic/timer 改写——而
+    handleStartInterview 跑完会写入新 status 但读不到这些 ref 的最新值，
+    留下半开状态（status=in_progress 但 isInterviewStarted=false / 麦未启）。"""
+    text = INTERVIEW_VUE.read_text(encoding="utf-8")
+    script = _script_block(text)
+    # 找 session.ended/suspended 合并分支：session.suspended 与 dialog 标志的交互
+    suspended_branch_idx = script.index('message.type === "session.suspended"')
+    # 找分支的尾部（再下一个顶层 const/function/export）
+    tail = script[suspended_branch_idx:]
+    next_const = tail.find("\nconst ", 100)
+    next_function = tail.find("\nfunction ", 100)
+    next_close = tail.find("\n};", 100)
+    end_candidates = [i for i in (next_const, next_function, next_close) if i > 0]
+    end = min(end_candidates) if end_candidates else len(tail)
+    branch = tail[:end]
+    # 守卫逻辑：suspended + isSuspendConfirmDialogOpen 时跳过 cleanup
+    assert "isSuspendConfirmDialogOpen" in branch, (
+        "session.suspended 分支必须看 isSuspendConfirmDialogOpen，"
+        "决定是否跳过本端 cleanup"
+    )
+    # cleanup 三件套（shouldResumeMicrophone/stopRecording/isInterviewStarted/
+    # stopInterviewTimer）必须在守卫逻辑控制下，不能无条件跑
+    cleanup_block_must_be_guarded = (
+        "stopRecording()" in branch and "stopInterviewTimer()" in branch
+    )
+    assert cleanup_block_must_be_guarded, (
+        "分支应包含 cleanup 操作但必须用 isSuspendConfirmDialogOpen 守住"
+    )

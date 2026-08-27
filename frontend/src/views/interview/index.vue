@@ -733,10 +733,19 @@ const handleServerMessage = (message: InterviewServerMessage) => {
       interviewDetail.value.status =
         message.type === "session.ended" ? "ended" : "suspended";
     }
-    shouldResumeMicrophone.value = false;
-    stopRecording();
-    isInterviewStarted.value = false;
-    stopInterviewTimer();
+    // session.suspended 在弹框流程仍在处理时（用户点继续但 handleStartInterview
+    // 尚未跑完）只更新 status，跳过本端 cleanup——否则 in-flight 的
+    // handleStartInterview 写回 in_progress 时会把刚被 cleanup 改写的
+    // isInterviewStarted / 麦 / 表留下半开状态。session.ended 是终态不受此
+    // 保护，永远清理。
+    const skipLocalCleanup =
+      message.type === "session.suspended" && isSuspendConfirmDialogOpen;
+    if (!skipLocalCleanup) {
+      shouldResumeMicrophone.value = false;
+      stopRecording();
+      isInterviewStarted.value = false;
+      stopInterviewTimer();
+    }
     if (message.type === "session.suspended") {
       void handleSessionSuspended();
     }

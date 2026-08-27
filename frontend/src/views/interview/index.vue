@@ -1035,7 +1035,6 @@ const kickFirstBatchIfNeeded = (detail: InterviewDetailType) => {
 
 const getInterviewDetail = async () => {
   const id = route.params.id as string;
-  console.log(id);
   if (!id) return;
   const res = await getInterviewDetailApi(id);
   interviewDetail.value = res;

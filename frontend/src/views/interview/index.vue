@@ -685,6 +685,7 @@ const websocket = useWebSocket({
     if (!shouldResumeMicrophone.value) return;
     void openMicrophone().then(started => {
       if (started) shouldResumeMicrophone.value = false;
+      else suspendLocalInterview();
     });
   },
   onTakeoverCompleted: () => {
@@ -748,6 +749,34 @@ const openMicrophone = async () => {
   const started = await startRecording();
   if (!started) sendListenState("stop");
   return started;
+};
+
+function suspendLocalInterview() {
+  shouldResumeMicrophone.value = false;
+  stopRecording();
+  isInterviewStarted.value = false;
+  stopInterviewTimer();
+  if (interviewDetail.value?.status === "in_progress") {
+    interviewDetail.value.status = "suspended";
+  }
+}
+
+const resumeInterviewAfterReload = async (detail: InterviewDetailType) => {
+  if (detail.status !== "in_progress") return;
+
+  // 页面刷新会丢失组件内状态，但服务端会话仍处于进行中。恢复本地状态并
+  // 重新握手，握手完成后由 onConnected 发送 listen:start 和启动录音。
+  isInterviewStarted.value = true;
+  startInterviewTimer();
+  shouldResumeMicrophone.value = true;
+  openWebSocket();
+
+  // WebSocket 可能因已有连接而立即可用；否则由 onConnected 接管启动录音。
+  if (isWebSocketConnected.value) {
+    const started = await openMicrophone();
+    if (started) shouldResumeMicrophone.value = false;
+    else suspendLocalInterview();
+  }
 };
 
 const handleIgnoreSuggestion = (itemId: string) => {
@@ -1006,6 +1035,7 @@ const kickFirstBatchIfNeeded = (detail: InterviewDetailType) => {
 
 const getInterviewDetail = async () => {
   const id = route.params.id as string;
+  console.log(id);
   if (!id) return;
   const res = await getInterviewDetailApi(id);
   interviewDetail.value = res;
@@ -1013,6 +1043,7 @@ const getInterviewDetail = async () => {
   transcriptEntries.value = createTranscriptEntries(res.transcript);
   void scrollTranscriptToTop();
   kickFirstBatchIfNeeded(res);
+  await resumeInterviewAfterReload(res);
 };
 
 onMounted(() => {

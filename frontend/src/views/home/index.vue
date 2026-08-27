@@ -116,16 +116,6 @@ const statusList = ref([
 ]);
 const interviewList = ref<InterviewItem[]>([]);
 
-const value = ref("md");
-const options = [
-  { label: "导出 Markdown", value: "md", icon: searchIcon },
-  { label: "导出 HTML", value: "html", icon: searchIcon },
-  { label: "导出 Word", value: "word", icon: searchIcon }
-];
-const handleChange = option => {
-  console.log("当前选择：", option.value);
-};
-
 /** 是否已登录 */
 const isLoggedIn = computed(() => Boolean(userStore.accessToken));
 

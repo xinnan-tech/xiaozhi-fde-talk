@@ -246,6 +246,7 @@
   "create.dialog.upload_empty": "未選擇圖片",
   "create.dialog.image_too_large": "圖片超過 10MB 上限",
   "create.dialog.invalid_file_type": "請選擇圖片檔案",
+  "create.dialog.image_format_unsupported": "僅支援 jpg / jpeg / jpe / png / bmp 格式",
   "create.dialog.ocr_failed": "文字辨識失敗，請稍後再試",
   "create.dialog.ocr_empty": "未辨識到文字，請重拍",
   "create.dialog.back": "返回",

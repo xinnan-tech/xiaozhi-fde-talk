@@ -120,8 +120,57 @@ def test_handle_file_change_pre_validates_size_and_type():
     )
 
 
+def test_input_accept_attribute_lists_whitelist_extensions():
+    """文件 input 的 accept 必须收敛到白名单扩展名，不能再用 image/*。"""
+    src = DIALOG.read_text(encoding="utf-8")
+    assert 'accept=".jpg,.jpeg,.jpe,.png,.bmp"' in src, (
+        "input accept 必须收敛到 jpg/jpeg/jpe/png/bmp 五个扩展名，"
+        "image/* 会让桌面文件选择器列出 GIF/WEBP 等非白名单格式"
+    )
+
+
+def test_allowed_image_exts_constant_matches_backend_whitelist():
+    """ALLOWED_IMAGE_EXTS 常量必须包含 5 个扩展名且与后端路由对齐。
+
+    后端 magic bytes sniff 只认 JPEG / PNG / BMP 三种图片编码，前端扩展
+    名白名单必须与之对齐——.jpg / .jpeg / .jpe 同源 JPEG、.png PNG、
+    .bmp BMP，其它任何扩展名进到后端都会 422。
+    """
+    src = DIALOG.read_text(encoding="utf-8")
+    assert "ALLOWED_IMAGE_EXTS" in src, (
+        "缺少 ALLOWED_IMAGE_EXTS 常量"
+    )
+    # 5 个扩展名都得在源码里，且为 lower-case
+    for ext in ("jpg", "jpeg", "jpe", "png", "bmp"):
+        assert ext in src, f"ALLOWED_IMAGE_EXTS 缺扩展名 {ext}"
+
+
+def test_handle_file_change_rejects_unsupported_extension():
+    """handleFileChange 必须在 size/type 校验之后嗅扩展名白名单。
+
+    file.type 在 macOS / 部分桌面 OS 上 .jpe/.bmp 可能不是 image/*；
+    仅靠 file.type 嗅不出这些格式，靠 file.name 后缀兜底一道。
+    """
+    src = DIALOG.read_text(encoding="utf-8")
+    body = _function_body(src, "const handleFileChange = async (event: Event) => {")
+    assert "ALLOWED_IMAGE_EXTS" in body, (
+        "handleFileChange 必须引用 ALLOWED_IMAGE_EXTS 做扩展名嗅探"
+    )
+    assert "image_format_unsupported" in body, (
+        "扩展名不符必须 toast image_format_unsupported"
+    )
+    # 扩展名嗅探必须在 image/* 校验之后、closeCamera() 之前
+    ext_check_idx = body.index("ALLOWED_IMAGE_EXTS")
+    close_camera_idx = body.index("closeCamera();")
+    image_type_idx = body.index('file.type.startsWith("image/")')
+    assert image_type_idx < ext_check_idx < close_camera_idx, (
+        "扩展名校验顺序：file.type.startsWith → ALLOWED_IMAGE_EXTS → closeCamera"
+    )
+
+
 def test_new_upload_validation_keys_present_in_all_locales():
-    """i18n parity：新增的 image_too_large / invalid_file_type 必须 4 locale 齐平。
+    """i18n parity：新增的 image_too_large / invalid_file_type /
+    image_format_unsupported 必须 4 locale 齐平。
 
     缺一个 locale 就 build 失败——改 SELECT_FIELD_OPTIONS / 新加 toast 文本
     都必须同步补齐 zh-CN / zh-TW / en-US / vi-VN。"""
@@ -133,7 +182,11 @@ def test_new_upload_validation_keys_present_in_all_locales():
         ROOT / "src" / "locales" / "en-US.json",
         ROOT / "src" / "locales" / "vi-VN.json",
     )
-    needed = ("create.dialog.image_too_large", "create.dialog.invalid_file_type")
+    needed = (
+        "create.dialog.image_too_large",
+        "create.dialog.invalid_file_type",
+        "create.dialog.image_format_unsupported",
+    )
     for path in LOCALES:
         keys = set(json.loads(path.read_text(encoding="utf-8")).keys())
         missing = [k for k in needed if k not in keys]

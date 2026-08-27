@@ -239,6 +239,7 @@
   "create.dialog.upload_empty": "No image selected",
   "create.dialog.image_too_large": "Image exceeds 10MB limit",
   "create.dialog.invalid_file_type": "Please select an image file",
+  "create.dialog.image_format_unsupported": "Only jpg / jpeg / jpe / png / bmp formats are supported",
   "create.dialog.ocr_failed": "Text recognition failed. Please try again later",
   "create.dialog.ocr_empty": "No text recognized, please retake",
   "create.dialog.back": "Back",

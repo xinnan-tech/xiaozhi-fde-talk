@@ -664,6 +664,15 @@ const handleSessionSuspended = async () => {
       return;
     }
     await handleStartInterview();
+    // post-await 守卫对 ended 静默 return：handleStartInterview 只回滚
+    // 状态不自 toast。这里再查一次 status，给用户感知到「会话已结束」
+    // 而非被静默吞掉；正常恢复路径下 status 已被 handleStartInterview
+    // 写过 in_progress，不会命中。用 string | undefined 承接避开上面
+    // 入口守卫把 ended 收窄掉导致的 TS2367。
+    const statusAfterResume: string | undefined = interviewDetail.value?.status;
+    if (statusAfterResume === "ended") {
+      ElMessage.warning(t("interview.runtime.suspend_dialog.ended_while_waiting"));
+    }
   } catch (error) {
     // Element Plus 用户取消 confirm 时 reject 的值是字符串 'cancel' /
     // 'close'（distinguishCancelAndClose 默认 false，只会有 'cancel'）。
@@ -671,7 +680,13 @@ const handleSessionSuspended = async () => {
     // 内部 toast 的路径外），属于意外，需给一条兜底提示并打日志，
     // 否则用户点「继续」后毫无反馈、状态卡死。
     if (error === "cancel" || error === "close") {
-      // 用户选择暂不继续：维持 suspended，控制按钮下次再点。
+      // 弹框被外部关闭（用户取消或 handleServerMessage 主动 close）时，
+      // 若关闭原因是后端推了 ended，则需要给一条 ended_while_waiting
+      // 兜底提示——handleServerMessage 只 close 弹框不直接 toast，避免
+      // 与 post-await 守护路径双弹。
+      if (interviewDetail.value?.status === "ended") {
+        ElMessage.warning(t("interview.runtime.suspend_dialog.ended_while_waiting"));
+      }
       return;
     }
     console.error("[handleSessionSuspended] resume failed:", error);
@@ -756,6 +771,14 @@ const handleServerMessage = (message: InterviewServerMessage) => {
       stopRecording();
       isInterviewStarted.value = false;
       stopInterviewTimer();
+    }
+    // ended 落地时如果弹框仍开着（用户在等点「继续」或 handleStartInterview
+    // 在 await 窗口），主动关掉弹框——否则 dialog 文案「暂停」与 status=ended
+    // 撕裂、用户点取消 finally 关弹框全程无 ended 反馈。toast 由
+    // handleSessionSuspended 的 catch / post-await re-check 统一发，避免
+    // 与 post-await 守护路径双弹。
+    if (message.type === "session.ended" && isSuspendConfirmDialogOpen) {
+      ElMessageBox.close();
     }
     if (message.type === "session.suspended") {
       void handleSessionSuspended();

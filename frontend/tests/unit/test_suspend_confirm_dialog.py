@@ -401,3 +401,84 @@ def test_handle_server_message_skips_status_overwrite_when_dialog_in_flight():
         "弹框期间再推的 suspended 不能推翻 in-flight handleStartInterview "
         "已经写回的 in_progress"
     )
+
+
+def test_handle_server_message_closes_dialog_when_ended_during_in_flight():
+    """ended 落地时若弹框仍开，必须主动关掉。
+
+    弹框文案「暂停」与 status=ended 撕裂、用户点取消 finally 关弹框
+    全程无 ended 反馈。修法：handleServerMessage 的 ended 分支若
+    isSuspendConfirmDialogOpen=true，调用 ElMessageBox.close()，
+    toast 留给 handleSessionSuspended 的 catch / post-await re-check
+    统一发，避免双弹。"""
+    text = INTERVIEW_VUE.read_text(encoding="utf-8")
+    script = _script_block(text)
+    ended_branch_idx = script.index('message.type === "session.ended"')
+    tail = script[ended_branch_idx:]
+    next_const = tail.find("\nconst ", 100)
+    next_function = tail.find("\nfunction ", 100)
+    next_close = tail.find("\n};", 100)
+    end_candidates = [i for i in (next_const, next_function, next_close) if i > 0]
+    end = min(end_candidates) if end_candidates else len(tail)
+    branch = tail[:end]
+    assert 'message.type === "session.ended" && isSuspendConfirmDialogOpen' in branch, (
+        "ended 分支必须显式判 isSuspendConfirmDialogOpen 才关弹框，"
+        "否则无差别 close 会误关其他场景的弹框"
+    )
+    assert "ElMessageBox.close()" in branch, (
+        "ended + 弹框开的情况下必须主动 ElMessageBox.close() 撕裂的 dialog"
+    )
+
+
+def test_handle_session_suspended_rechecks_ended_after_resume():
+    """post-await 守卫命中 ended 静默 return，handleSessionSuspended 必须自兜底。
+
+    handleStartInterview 的 post-await 守卫（acquireStream / openMicrophone
+    之后）对 ended 静默 return、不 throw；handleSessionSuspended 的 try
+    块正常返回、finally 只复位 flag，用户无反馈。修法：handleSessionSuspended
+    在 await handleStartInterview() 之后再查一次 status==ended，命中即
+    ended_while_waiting。"""
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleSessionSuspended = async () => {")
+    # 找 await handleStartInterview() 之后的 ended_while_waiting 调用
+    start_idx = body.index("await handleStartInterview()")
+    after = body[start_idx:]
+    assert "ended_while_waiting" in after, (
+        "handleStartInterview await 之后必须再查一次 status==ended 并给一条 "
+        "ended_while_waiting 兜底；post-await 守卫对 ended 静默 return "
+        "不会自 toast"
+    )
+    # 顺序：先 await，再 ended_while_waiting
+    warning_idx = after.index("ended_while_waiting")
+    # 不能在 await 之前出现 ended_while_waiting
+    pre = body[:start_idx]
+    pre_ended_count = pre.count("ended_while_waiting")
+    # 入场守卫那条 ended 检查的 ended_while_waiting 是合理的，不计入
+    # 这里只关心 post-await 段至少有一条
+    assert pre_ended_count >= 1, (
+        "sanity: 入场守卫也应当 ended_while_waiting"
+    )
+    assert warning_idx >= 0, "post-await 段必须含 ended_while_waiting"
+
+
+def test_handle_session_suspended_catch_shows_ended_when_dialog_closed_by_server():
+    """弹框被 handleServerMessage 主动 close 时 catch 必须兜底 ended。
+
+    弹框开着时后端推 ended，handleServerMessage 主动 ElMessageBox.close()
+    关闭弹框；confirm await reject 出 'close'，catch 分支必须再查一次
+    status==ended 并 ended_while_waiting，否则用户只看到弹框消失、无
+    ended 提示。"""
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleSessionSuspended = async () => {")
+    # 找 catch 块
+    catch_idx = body.index("} catch (")
+    tail = body[catch_idx:]
+    # catch 块中必须有 ended_while_waiting
+    assert "ended_while_waiting" in tail, (
+        "catch 分支必须再查 status==ended 并给 ended_while_waiting 兜底，"
+        "弹框被 handleServerMessage 主动 close 时用户需要 ended 反馈"
+    )
+    # catch 块的 ended_while_waiting 必须在 cancel/close 分支内
+    assert '"cancel"' in tail or '"close"' in tail, (
+        "sanity: catch 块必须先判 cancel/close 再走 ended 兜底"
+    )

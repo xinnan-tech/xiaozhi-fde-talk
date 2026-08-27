@@ -579,7 +579,7 @@ const handleFileChange = async (event: Event) => {
   // 部分桌面 OS 给 .jpe / .bmp 的 MIME 可能是 image/pjpeg 或空，仅靠
   // file.type 嗅不出这些格式，file.name 后缀兜底一道。
   const ext = file.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
-  if (!ALLOWED_IMAGE_EXTS.includes(ext)) {
+  if (!(ALLOWED_IMAGE_EXTS as readonly string[]).includes(ext)) {
     message(t("create.dialog.image_format_unsupported"), { type: "error" });
     input.value = "";
     return;

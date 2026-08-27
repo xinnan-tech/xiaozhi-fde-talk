@@ -111,7 +111,7 @@ class DoubaoStreamProvider(ASRProvider):
         try:
             self._ws = await websockets.connect(
                 self._ws_url,
-                extra_headers=headers, # 当前版本为13.1使用参数为 extra_headers，14.0以上版本需将 extra_headers 替换为 additional_headers
+                additional_headers=headers,
                 max_size=100_000_000,
                 ping_interval=None,
                 ping_timeout=None,

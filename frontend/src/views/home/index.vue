@@ -972,8 +972,7 @@ watch(
     padding: 6px 12px;
     border-radius: 20px;
     box-shadow: 0 2px 8px rgb(31 35 41 / 6%);
-    backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
+    backdrop-filter: none;
   }
 
   .card-status.status-created {

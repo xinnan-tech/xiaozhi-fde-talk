@@ -12,6 +12,7 @@ import ChangePasswordDialog from "@/components/auth/ChangePasswordDialog.vue";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import { ElMessage } from "element-plus";
 import { isSupportedLocale, setLocale, type SupportedLocale } from "@/i18n";
+import { SelectOption } from "@/components/base/types";
 import {
   type InterviewItem,
   type InterviewListType,
@@ -65,6 +66,10 @@ const tabOptions = computed(() => [
   { label: t("home.tab.suspended"), value: "suspended" },
   { label: t("home.tab.ended"), value: "ended" }
 ]);
+const userOperationOptions = computed(() => [
+  { label: t("auth.change_password"), value: "change_password", icon: keyIcon },
+  { label: t("home.logout"), value: "logout", icon: logoutIcon }
+]);
 const interviewStatusLabels: Record<string, string> = {
   created: "home.status.created",
   in_progress: "home.status.in_progress",
@@ -110,6 +115,16 @@ const statusList = ref([
   }
 ]);
 const interviewList = ref<InterviewItem[]>([]);
+
+const value = ref("md");
+const options = [
+  { label: "导出 Markdown", value: "md", icon: searchIcon },
+  { label: "导出 HTML", value: "html", icon: searchIcon },
+  { label: "导出 Word", value: "word", icon: searchIcon }
+];
+const handleChange = option => {
+  console.log("当前选择：", option.value);
+};
 
 /** 是否已登录 */
 const isLoggedIn = computed(() => Boolean(userStore.accessToken));
@@ -208,7 +223,8 @@ const clickUserAvatar = () => {
 // 头像菜单（登录后）：改密 + 登出
 const changePwdVisible = ref(false);
 
-const handleAvatarCommand = (command: string) => {
+const handleAvatarSelectChange = (option: SelectOption) => {
+  const command = option.value;
   if (command === "change_password") {
     changePwdVisible.value = true;
   } else if (command === "logout") {
@@ -327,57 +343,28 @@ watch(
         >
           <component :is="businessmanIcon" class="w-8 h-8" />
         </div>
-        <el-dropdown
+        <Select
           v-else
-          trigger="hover"
-          placement="bottom-end"
+          :options="userOperationOptions"
           class="user-avatar-dropdown"
-          @command="handleAvatarCommand"
+          @change="handleAvatarSelectChange"
         >
           <div
             class="user-avatar w-10 h-10 rounded-full flex items-center justify-center online"
           >
             <component :is="businessmanIcon" class="w-8 h-8" />
           </div>
-          <template #dropdown>
-            <el-dropdown-menu class="user-menu">
-              <el-dropdown-item command="change_password" :icon="keyIcon">
-                {{ t("auth.change_password") }}
-              </el-dropdown-item>
-              <el-dropdown-item command="logout" :icon="logoutIcon" divided>
-                {{ t("home.logout") }}
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <el-dropdown
-          class="locale-dropdown"
-          trigger="hover"
-          placement="bottom-end"
-          @command="handleLocaleChange"
+        </Select>
+        <Select
+          :model-value="locale"
+          :showSelectedState="true"
+          :options="localeOptions"
+          @update:modelValue="handleLocaleChange"
         >
-          <button
-            type="button"
-            class="locale-trigger"
-            :aria-label="$t('home.switch_language')"
-            :title="$t('home.switch_language')"
-          >
+          <div class="locale-trigger">
             <component :is="languageIcon" class="locale-icon" />
-          </button>
-          <template #dropdown>
-            <el-dropdown-menu class="locale-menu">
-              <el-dropdown-item
-                v-for="item in localeOptions"
-                :key="item.value"
-                :command="item.value"
-                :class="{ 'is-active': locale === item.value }"
-              >
-                <span>{{ item.label }}</span>
-                <span v-if="locale === item.value" class="locale-check">✓</span>
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+          </div>
+        </Select>
       </div>
     </header>
 
@@ -738,75 +725,24 @@ watch(
     display: inline-flex;
   }
 
-  :deep(.user-menu) {
-    min-width: 152px;
-    padding: 6px;
-    border-radius: 8px;
-  }
-
-  :deep(.user-menu .el-dropdown-menu__item) {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border-radius: 6px;
-  }
-
-  .locale-dropdown {
-    display: inline-flex;
-    align-items: center;
-  }
-
   .locale-trigger {
     display: flex;
     align-items: center;
     justify-content: center;
     width: 40px;
     height: 40px;
-    padding: 0;
     color: #666;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    outline: none;
-    transition:
-      box-shadow 0.2s,
-      color 0.2s,
-      background-color 0.2s;
 
-    &:hover,
-    &:focus-visible {
-      color: #409eff;
+    &:hover {
+      .locale-icon {
+        color: #409eff;
+      }
     }
   }
 
   .locale-icon {
     width: 22px;
     height: 22px;
-  }
-
-  :deep(.locale-menu) {
-    min-width: 132px;
-    padding: 6px;
-    border-radius: 8px;
-  }
-
-  :deep(.locale-menu .el-dropdown-menu__item) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding-right: 12px;
-    border-radius: 6px;
-  }
-
-  :deep(.locale-menu .el-dropdown-menu__item.is-active) {
-    color: var(--el-color-primary);
-    background-color: var(--el-color-primary-light-9);
-  }
-
-  .locale-check {
-    font-size: 14px;
-    font-weight: 600;
   }
 
   /* 与 .interview-list 使用同一套内容区断点，保持重排一致 */
@@ -877,6 +813,9 @@ watch(
   }
 
   .tab-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     padding: 20px 0;
   }
 

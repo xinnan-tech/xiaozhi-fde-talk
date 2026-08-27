@@ -6,6 +6,7 @@ import MarkdownIt from "markdown-it";
 import ReSegmented from "@/components/ReSegmented";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
+import { SelectOption } from "@/components/base/types";
 import {
   deleteInterviewApi,
   exportInterviewReportApi,
@@ -56,6 +57,29 @@ const tabOptions = computed(() => [
   { key: "note", label: t("report.tab.note"), disabled: true }
 ]);
 
+const moreOptions = computed(() => [
+  {
+    value: "md-md",
+    label: t("report.export", { extension: "md" }),
+    icon: downloadIcon
+  },
+  {
+    value: "html-html",
+    label: t("report.export", { extension: "html" }),
+    icon: downloadIcon
+  },
+  {
+    value: "word-docx",
+    label: t("report.export", { extension: "docx" }),
+    icon: downloadIcon
+  },
+  {
+    value: "delete",
+    label: t("report.delete"),
+    icon: deleteIcon
+  }
+]);
+
 const tabValue = ref(0);
 const interviewDetail = ref<InterviewDetailType>();
 const suggestions = ref<InterviewDetailItem[]>([]);
@@ -80,18 +104,19 @@ const stats = computed(() => {
       (coverage[it.id] as unknown[]).length > 0
   ).length;
   const coveragePct =
-    items.length === 0
-      ? 0
-      : Math.round((covered / items.length) * 100);
+    items.length === 0 ? 0 : Math.round((covered / items.length) * 100);
 
   const transcriptChars = transcript.reduce(
-    (sum, seg) =>
-      sum + (seg.corrected_text?.length || seg.text?.length || 0),
+    (sum, seg) => sum + (seg.corrected_text?.length || seg.text?.length || 0),
     0
   );
 
   return [
-    { value: String(coveragePct), unit: "%", label: t("report.stats.coverage") },
+    {
+      value: String(coveragePct),
+      unit: "%",
+      label: t("report.stats.coverage")
+    },
     {
       value: String(transcriptChars),
       unit: t("report.stats.characters_unit"),
@@ -179,6 +204,19 @@ const getInterviewDetail = async () => {
 
 const getInterviewId = () => route.params.id as string;
 
+const handleMoreChange = (option: SelectOption) => {
+  if (option.value === "delete") {
+    handleDeleteInterview();
+  } else {
+    if (typeof option.value === "string" && option.value.includes("-")) {
+      const parts = option.value.split("-");
+      const format = parts[0] as "md" | "html" | "word";
+      const extension = parts[1] as "md" | "html" | "docx";
+      handleExportReport(format, extension);
+    }
+  }
+};
+
 /** 导出访谈报告 */
 const handleExportReport = async (
   format: "md" | "html" | "word",
@@ -232,7 +270,8 @@ const handleDeleteInterview = async () => {
   } catch (error) {
     if (error !== "cancel" && error !== "close") {
       // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
-      const hasResponse = (error as { response?: unknown })?.response !== undefined;
+      const hasResponse =
+        (error as { response?: unknown })?.response !== undefined;
       if (!hasResponse) {
         ElMessage.error(t("report.delete_failed"));
       }
@@ -258,61 +297,14 @@ onMounted(async () => {
         </p>
       </div>
       <div class="header-actions">
-        <button
-          style="cursor: not-allowed"
-          type="button"
-          :aria-label="t('report.share')"
-          :title="t('report.share')"
-        >
+        <div class="round-box share-action">
           <component :is="shareIcon" />
-        </button>
-        <div class="more-action">
-          <button
-            type="button"
-            :aria-label="t('report.more')"
-            :title="t('report.more')"
-          >
-            <component :is="moreIcon" />
-          </button>
-          <div class="more-menu" role="menu">
-            <button
-              type="button"
-              role="menuitem"
-              :disabled="!canExportReport"
-              @click="handleExportReport('md', 'md')"
-            >
-              <component :is="downloadIcon" />
-              <span>{{ t("report.export", { extension: "md" }) }}</span>
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              :disabled="!canExportReport"
-              @click="handleExportReport('html', 'html')"
-            >
-              <component :is="downloadIcon" />
-              <span>{{ t("report.export", { extension: "html" }) }}</span>
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              :disabled="!canExportReport"
-              @click="handleExportReport('word', 'docx')"
-            >
-              <component :is="downloadIcon" />
-              <span>{{ t("report.export", { extension: "docx" }) }}</span>
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              class="danger"
-              @click="handleDeleteInterview"
-            >
-              <component :is="deleteIcon" />
-              <span>{{ t("report.delete") }}</span>
-            </button>
-          </div>
         </div>
+        <Select :options="moreOptions" @change="handleMoreChange">
+          <div class="round-box more-action">
+            <component :is="moreIcon" />
+          </div>
+        </Select>
       </div>
     </header>
 
@@ -472,11 +464,7 @@ onMounted(async () => {
     align-items: center;
   }
 
-  .more-action {
-    position: relative;
-  }
-
-  .header-actions button {
+  .round-box {
     display: grid;
     place-items: center;
     width: 44px;
@@ -488,78 +476,10 @@ onMounted(async () => {
     box-shadow:
       0 8px 20px rgb(107 126 154 / 12%),
       inset 0 1px 0 rgb(255 255 255 / 90%);
-  }
 
-  .more-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    z-index: 10;
-    display: grid;
-    width: 156px;
-    padding: 6px;
-    visibility: hidden;
-    background: rgb(255 255 255 / 96%);
-    border: 1px solid rgb(223 231 240 / 90%);
-    border-radius: 10px;
-    box-shadow: 0 10px 24px rgb(31 47 86 / 16%);
-    opacity: 0;
-    transform: translateY(-4px);
-    transition:
-      opacity 0.16s ease,
-      transform 0.16s ease,
-      visibility 0.16s ease;
-  }
-
-  .more-action:hover .more-menu,
-  .more-action:focus-within .more-menu {
-    visibility: visible;
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  .more-menu button {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    width: 100%;
-    height: 36px;
-    padding: 0 10px;
-    font-size: 13px;
-    color: #334155;
-    background: transparent;
-    border: 0;
-    border-radius: 6px;
-    box-shadow: none;
-  }
-
-  .more-menu button:hover,
-  .more-menu button:focus-visible {
-    background: #f1f5f9;
-    outline: none;
-  }
-
-  .more-menu button:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
-  }
-
-  .more-menu button:disabled:hover {
-    background: transparent;
-  }
-
-  .more-menu button :deep(svg) {
-    width: 16px;
-    margin-right: 8px;
-  }
-
-  .more-menu button.danger {
-    color: #e05252;
-  }
-
-  .more-menu button.danger:hover,
-  .more-menu button.danger:focus-visible {
-    background: #fff1f1;
+    &.share-action {
+      cursor: not-allowed;
+    }
   }
 
   .header-actions img {

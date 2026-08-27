@@ -52,6 +52,7 @@ declare module 'vue' {
     ReDialog: typeof import('./src/components/ReDialog/index.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    Select: typeof import('./src/components/base/Select.vue')['default']
     Src: typeof import('./src/components/ReText/src/index.vue')['default']
   }
   export interface GlobalDirectives {
@@ -101,5 +102,6 @@ declare global {
   const ReDialog: typeof import('./src/components/ReDialog/index.vue')['default']
   const RouterLink: typeof import('vue-router')['RouterLink']
   const RouterView: typeof import('vue-router')['RouterView']
+  const Select: typeof import('./src/components/base/Select.vue')['default']
   const Src: typeof import('./src/components/ReText/src/index.vue')['default']
 }

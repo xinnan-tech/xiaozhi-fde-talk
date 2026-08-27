@@ -61,7 +61,7 @@ def test_ocr_to_extract_pipeline_zh_cn(e2e_client):
         return None
     fake_store.get = fake_store_get
 
-    fake_image = b"\x89PNG_FAKE"
+    fake_image = b"\x89PNG\r\n\x1a\n_FAKE"
     b64 = base64.b64encode(fake_image).decode()
 
     with patch("app.adapters.ocr.factory.get_ocr") as mock_get_ocr, \
@@ -100,7 +100,7 @@ def test_ocr_to_extract_pipeline_en(e2e_client):
         return "en" if key == "llm.output_language" else None
     fake_store.get = fake_store_get
 
-    fake_image = b"\x89PNG_FAKE"
+    fake_image = b"\x89PNG\r\n\x1a\n_FAKE"
     b64 = base64.b64encode(fake_image).decode()
 
     with patch("app.adapters.ocr.factory.get_ocr") as mock_get_ocr, \
@@ -130,7 +130,7 @@ def test_ocr_prompt_constant_used_by_endpoint(e2e_client):
         captured_prompts.append(prompt)
         return ""
 
-    fake_image = b"\x89PNG_FAKE"
+    fake_image = b"\x89PNG\r\n\x1a\n_FAKE"
     b64 = base64.b64encode(fake_image).decode()
 
     with patch("app.adapters.ocr.factory.get_ocr") as mock_get_ocr:

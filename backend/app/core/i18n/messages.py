@@ -26,6 +26,7 @@ class Keys(StrEnum):
     HTTP_SKILL_INVOKE_FAILED = "http.skill.invoke_failed"
     HTTP_OCR_IMAGE_BASE64_INVALID = "http.ocr.image_base64_invalid"
     HTTP_OCR_IMAGE_TOO_LARGE = "http.ocr.image_too_large"
+    HTTP_OCR_IMAGE_FORMAT_UNSUPPORTED = "http.ocr.image_format_unsupported"
 
     # ---- WebSocket frames ----
     WS_INTERNAL = "ws.internal"

@@ -14,6 +14,7 @@
   "http.skill.invoke_failed": "Gọi skill thất bại: {reason}",
   "http.ocr.image_base64_invalid": "Giải mã base64 của ảnh thất bại; vui lòng xác minh dữ liệu còn nguyên vẹn",
   "http.ocr.image_too_large": "Ảnh vượt quá giới hạn 10MB (hiện tại {size_mb:.1f}MB)",
+  "http.ocr.image_format_unsupported": "Định dạng hình ảnh không được hỗ trợ. Chỉ cho phép jpg / jpeg / jpe / png / bmp",
   "ws.internal": "Lỗi máy chủ nội bộ, vui lòng thử lại hoặc liên hệ quản trị viên",
   "ws.handshake.timeout": "Không nhận được hello trong vòng 5 giây",
   "ws.bad_handshake": "Bắt tay không hợp lệ",

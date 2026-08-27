@@ -145,8 +145,8 @@ def detect_language_match_json(text: str, expected_lang: str) -> bool:
 
     主脚本校验收紧：除了「expected 脚本族任一出现」（detect_language_match 的
     「any script in expected」宽松规则），先跑 detect_script(values) 拿主脚本；
-    主脚本不在 expected 且不是 MIXED → 拒。这是同事 review 6.2 提的本 bug 主
-    场景——en/vi/fr/de/es 请求下 LLM 输出全中文 reason（含 AI/CTO/10K 等
+    主脚本不在 expected 且不是 MIXED → 拒。bug 主场景：en/vi/fr/de/es 请求下
+    LLM 输出全中文 reason（含 AI/CTO/10K 等
     Latin 缩写），原宽松规则因 Latin 缩写命中即放行 → pivot 漏触发；新规则
     主脚本 = CJK ∉ {LATIN} → 拒。
 
@@ -161,8 +161,8 @@ def detect_language_match_json(text: str, expected_lang: str) -> bool:
         if not values:
             return detect_language_match(text, expected_lang)
         joined = " ".join(values)
-        # 主脚本收紧：仅对 expected = {LATIN}（en/vi/fr/de/es）收紧——同事 6.2 本 bug
-        # 主场景：en 请求下 LLM 输中文 values（schema 字段是 Latin，会命中原宽松
+        # 主脚本收紧：仅对 expected = {LATIN}（en/vi/fr/de/es）收紧。bug 主场景：
+        # en 请求下 LLM 输中文 values（schema 字段是 Latin，会命中原宽松
         # {LATIN} 集合），主脚本 = CJK ∉ {LATIN} → 拒。
         # zh_cn/zh_tw 期望 {CJK}：schema 字段 Latin 会拉低 CJK 比例到主脚本 = LATIN，
         # 此场景下宽松规则（detect_language_match 命中 CJK content 字段）已足够，

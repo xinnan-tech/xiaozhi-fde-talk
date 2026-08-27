@@ -11,7 +11,7 @@ E. 横向隔离：bob 改密后旧 token 吊销；alice 的 token 不受影响
 `password_hash` 仍是旧值（`bcrypt.checkpw(plain, fresh_hash)` 验旧密码仍可用）。
 这是「改了不该改的人」的兜底断言——比单纯判 200 / 401 更严格。
 
-不依赖同事 conftest.py——`--noconftest` 跑（项目已有先例）。
+不依赖外部 conftest.py——`--noconftest` 跑。
 """
 from __future__ import annotations
 

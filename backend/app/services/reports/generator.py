@@ -147,7 +147,7 @@ def _report_system(output_language: str) -> str:
         fallback_phrase=phrases.get(lang, phrases["en"]),
     )
 
-# P3-9: 报告渲染为 HTML 前的白名单。strip=True 移除非白名单标签（含属性）。
+# 报告渲染为 HTML 前的白名单。strip=True 移除非白名单标签（含属性）。
 _ALLOWED_TAGS = [
     "h1", "h2", "h3", "h4", "h5", "h6",
     "p", "br", "hr",

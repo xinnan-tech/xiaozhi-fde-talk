@@ -1,4 +1,4 @@
-"""P3-1 · ASR WS 启用 ping_interval/ping_timeout，检测死连接（C-004）。
+"""· ASR WS 启用 ping_interval/ping_timeout，检测死连接（C-004）。
 
 原 connect_kwargs 显式 ping_interval=None / ping_timeout=None，禁用了 websockets
 内置心跳。ASR 服务端半挂（TCP 连接在但对面不回）时，客户端永远收不到 EOF，feed

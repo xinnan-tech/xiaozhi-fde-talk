@@ -1,4 +1,4 @@
-"""P3-4 · DateTime 列加 timezone=True（M-013）。
+"""· DateTime 列加 timezone=True（M-013）。
 
 时间戳原为 naive DateTime，sweep_stale_sessions 等处被迫手动 tz juggle
 （.astimezone(utc).replace(tzinfo=None)）。改 timezone=True 让 ORM 统一以 aware

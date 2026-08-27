@@ -86,8 +86,7 @@ class ChangePasswordRequest(BaseModel):
     不限 admin role——任何持有效 token 的登录用户都能改自己密码。
     旧密码错误 → 401；新密码强度不通过 → 400（路由层 validate_password_strength）。
     """
-    # extra="forbid" 防止注入 user_id / username 试图指定他人目标（cf70cee 提交加的
-    # schema 当时未 forbid，4f2eb2e 用 query / body 注入测试兜底；此处硬化前瞻）。
+    # extra="forbid" 防止注入 user_id / username 试图指定他人目标。
     model_config = ConfigDict(extra="forbid")
 
     old_password: str = Field(min_length=1, max_length=72)

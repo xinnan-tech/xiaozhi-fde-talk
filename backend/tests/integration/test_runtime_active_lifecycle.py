@@ -1,4 +1,4 @@
-"""P1-3 · 在线 runtime 生命周期集成测试（handler 与 shutdown 层）。
+"""· 在线 runtime 生命周期集成测试（handler 与 shutdown 层）。
 
 解耦契约（spec 铁律1）：WS 断开 → runtime 从 _active 移入 _parked（寄存，不销毁）；
 liveness 窗口内重连 → 复用同一 runtime。_active 的移除由 park/drop 内部完成，

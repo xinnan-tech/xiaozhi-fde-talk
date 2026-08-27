@@ -1,4 +1,4 @@
-"""P2-13 · save_state 会话级写串行锁。
+"""· save_state 会话级写串行锁。
 
 manager 定时器（_grace_expire / _suspend_idle）与 runtime flush 会并发对同一
 session 调 save_state_auto（各自开独立 SessionLocal 连接/事务）。SQLite 下并发写

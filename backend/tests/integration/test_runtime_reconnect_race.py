@@ -1,4 +1,4 @@
-"""P1-4 · registry._expire 的 end() 与重连竞态（M1）。
+"""· registry._expire 的 end() 与重连竞态（M1）。
 
 _expire 流程先从 _parked pop，再调 runtime.end()（含 LLM 终算，秒级）。期间该
 session 既不在 _active 也不在 _parked，并发重连 get_or_create 会落空 → 新建一个

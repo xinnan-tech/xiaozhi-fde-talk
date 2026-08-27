@@ -1,4 +1,4 @@
-"""P2-3 · engine 每次现取 LLM，避免持有 admin 改配置后已 aclose 的旧实例。
+"""· engine 每次现取 LLM，避免持有 admin 改配置后已 aclose 的旧实例。
 
 admin 改 llm.base_url → factory.invalidate aclose 旧 provider → get_llm 返回新 provider。
 若 engine 缓存 ainit 时的实例，重算会用到已关闭的 client。_llm_pivot_then_parse_json

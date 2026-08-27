@@ -1,4 +1,4 @@
-"""P0-3 · alembic 引入。
+"""· alembic 引入。
 
 事实级硬伤：仓内 alembic 配置 0 处；唯一建表途径 Base.metadata.create_all 非幂等无版本管理。
 P2-12/15/8c/P3-4 都强依赖 alembic。

@@ -1,4 +1,4 @@
-"""P2-10 · chat_text 外层 asyncio.wait_for 收紧总时长。
+"""· chat_text 外层 asyncio.wait_for 收紧总时长。
 
 L2：_request 自带 per-request read 超时 + 重试，但重试 + 退避累计可能很久；
 chat_text 缺一个跨所有重试的总预算，LLM 半挂（连得上但不回）会拖住报告生成。

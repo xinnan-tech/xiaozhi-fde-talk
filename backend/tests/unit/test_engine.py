@@ -63,13 +63,13 @@ async def test_engine_apply_ignored_overrides(make_state):
 async def test_engine_apply_preserves_ignored_when_llm_drops(make_state):
     """LLM 因对话已覆盖把已忽略项标 done 整条丢出 result：补回快照保留 IGNORED。"""
     state = make_state()
-    # 上一轮的快照里有 objective（用户已 ignore）
+    # state 已有 objective 项（用户已 ignore）
     state.items = [
         type(state.items[0])(id="objective", text="目标是什么", status=ItemStatus.TODO, reason="", priority=1, desc=""),
     ]
     state.ignored_ids.add("objective")
     engine = CoachingEngine(state, lambda m: None)
-    # LLM 这次只返回 pain，没返回 objective（认为它已覆盖）
+    # LLM 输出不含 objective（认为已覆盖）
     result = engine._apply(validate_llm_output([{"id": "pain", "text": "痛点", "status": "todo"}]))
     by_id = {it.id: it for it in result}
     assert "objective" in by_id, "用户忽略的项被 LLM 丢弃后必须补回"

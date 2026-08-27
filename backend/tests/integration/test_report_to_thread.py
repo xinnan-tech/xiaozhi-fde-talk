@@ -1,4 +1,4 @@
-"""P1-1：报告导出走 asyncio.to_thread，不在事件循环线程执行。
+"""报告导出走 asyncio.to_thread，不在事件循环线程执行。
 
 慢导出（markdown/bleach/docx）是纯 CPU/同步 IO，若在路由里同步调用，
 会占住事件循环线程、冻住所有并发连接。路由必须用 asyncio.to_thread 把

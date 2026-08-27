@@ -1,4 +1,4 @@
-"""P0-2 · _grace_expire 过期时清理 _active/_grace（不碰 registry）。
+"""· _grace_expire 过期时清理 _active/_grace（不碰 registry）。
 
 H2: 断线后不重连 → SUSPENDED 会话驻留 _active（含完整 SessionState）→ 内存无界增长。
 分层不变量：_grace_expire 只清 manager 自己的账目，绝不调 registry.drop / runtime.end()。

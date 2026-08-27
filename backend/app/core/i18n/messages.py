@@ -75,12 +75,10 @@ class Keys(StrEnum):
     # ---- OCR adapter ----
     OCR_NOT_CONFIGURED = "ocr.not_configured"
     OCR_INVOKE_FAILED = "ocr.invoke_failed"
-    OCR_BAD_RESPONSE = "ocr.bad_response"
 
     # ---- Diagnostics (LLM) ----
     DIAG_LLM_CONFIG_MISSING = "diag.llm.config_missing"
     DIAG_LLM_CONFIG_MISSING_RAW = "diag.llm.config_missing_raw"
-    DIAG_LLM_UNREACHABLE = "diag.llm.unreachable"
     DIAG_LLM_INVOKE_FAIL = "diag.llm.invoke_fail"
     DIAG_LLM_AUTH_FAIL = "diag.llm.auth_fail"
     DIAG_LLM_RATE_LIMIT = "diag.llm.rate_limit"
@@ -115,7 +113,6 @@ class Keys(StrEnum):
 
     # ---- Startup / settings / secrets ----
     STARTUP_CONFIG_INVALID = "startup.config_invalid"
-    STARTUP_DATABASE_MIGRATION_FAIL = "startup.database_migration_fail"
     SETTINGS_PROD_NO_SQLITE = "settings.prod_no_sqlite"
     SETTINGS_PROD_TYPO_ENV = "settings.prod_typo_env"
     SECRET_RESOLVE_FAILED = "secret.resolve_failed"

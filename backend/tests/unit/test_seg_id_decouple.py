@@ -1,4 +1,4 @@
-"""P2-8a · seg_id 独立计数器，与 transcript 长度解耦。
+"""seg_id 独立计数器，与 transcript 长度解耦。
 
 当前 next_seg_id() = f"s{len(transcript)+1}"：seg_id 完全由 transcript 长度推导。
 一旦 transcript 被截断（P2-8b 软上限 pop 最早段），len 下降 → seg_id 回退 →

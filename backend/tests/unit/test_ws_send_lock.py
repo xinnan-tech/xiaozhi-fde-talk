@@ -1,4 +1,4 @@
-"""P1-2 · WS 出站发送加锁：_raw_send 串行化并发调用（H4）。
+"""· WS 出站发送加锁：_raw_send 串行化并发调用（H4）。
 
 runtime 侧 _raw_send 与 ASR 收包、coaching 推送并发发送会在 safe_send 的
 await 点交错，破坏帧边界。_raw_send 持有与 ASR 客户端对称的 _send_lock。

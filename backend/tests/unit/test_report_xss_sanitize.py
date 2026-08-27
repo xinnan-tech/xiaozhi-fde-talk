@@ -1,4 +1,4 @@
-"""P3-9 · 报告 Markdown XSS 消毒（M-005）。
+"""· 报告 Markdown XSS 消毒（M-005）。
 
 generate_report 直接返回 LLM 生成的 Markdown，前端渲染为 HTML 时若含 <script> /
 事件处理器等存在 XSS。返回前用 bleach 消毒：strip=True 移除非白名单标签（含其

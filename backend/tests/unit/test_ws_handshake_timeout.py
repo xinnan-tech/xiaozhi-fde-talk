@@ -1,4 +1,4 @@
-"""P3-2 · WS handshake 等首条 hello 加超时（C-010）。
+"""· WS handshake 等首条 hello 加超时（C-010）。
 
 客户端建连后不发 hello 时，原 _handshake 的 receive_text() 无超时，连接被无限期
 挂住、资源累积。加 _handshake_timeout_s（默认 10s）超时：到点判 handshake_timeout、

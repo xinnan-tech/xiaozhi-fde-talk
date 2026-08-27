@@ -2,7 +2,7 @@
 
 /ready 只查 DB（SELECT 1）：探针被编排器高频轮询，绝不能挂真实
 LLM/ASR 调用（烧额度 + 占 ASR 并发 + 失败路径向未认证方回显 provider
-细节——P3-3 曾这样做过）。深度诊断在 admin 专用的 POST /api/v1/diagnostics。
+细节）。深度诊断在 admin 专用的 POST /api/v1/diagnostics。
 """
 from __future__ import annotations
 

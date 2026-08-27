@@ -49,7 +49,7 @@ class InterviewRepository:
     """访谈会话持久化。所有方法接受一个 AsyncSession（由调用方管理事务/生命周期）。"""
 
     def __init__(self) -> None:
-        # P2-13: per-session 写串行锁。manager 定时器与 runtime flush 并发对同一
+        # per-session 写串行锁。manager 定时器与 runtime flush 并发对同一
         # session 落盘（各自独立连接/事务），串行化 DB 写避免 SQLite 'database is
         # locked' 与事务交错。单进程粒度；共享 SessionState 下无 lost update。
         self._save_locks: dict[str, asyncio.Lock] = {}

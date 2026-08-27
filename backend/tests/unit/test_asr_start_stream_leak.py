@@ -1,4 +1,4 @@
-"""P2-5 · start_stream 在 send init_msg 失败时关闭已建立的 WS 连接，不泄漏句柄。
+"""· start_stream 在 send init_msg 失败时关闭已建立的 WS 连接，不泄漏句柄。
 
 start_stream 先 await websockets.connect(...)（建立 self._ws），再 send(init_msg)。
 若 send 失败，原代码 except 直接 raise ASRProviderError，self._ws（已建立）从不 close → 句柄泄漏。

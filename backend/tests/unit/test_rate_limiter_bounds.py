@@ -1,4 +1,4 @@
-"""P2-14c · RateLimiter._buckets 加 FIFO 上限 + TTL 清理，防无界增长 OOM。
+"""RateLimiter._buckets 加 FIFO 上限 + TTL 清理，防无界增长 OOM。
 
 L6：公网分布式猜密码攻击会不断造新 key，_buckets 无界增长直至 OOM。
 加 max_buckets（FIFO 淘汰）+ bucket_ttl_s（空闲桶过期清理）。

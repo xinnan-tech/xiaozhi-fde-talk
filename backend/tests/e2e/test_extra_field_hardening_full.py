@@ -12,7 +12,7 @@ AdminResetPasswordRequest）已有 test_extra_field_hardening.py 覆盖。本文
 | ExtractRequest      | POST /interviews/extract          | system_prompt   | 422  |
 | OCRRequest          | POST /interviews/ocr              | filename        | 422  |
 
-不依赖同事 conftest.py——`--noconftest` 跑。
+不依赖外部 conftest.py——`--noconftest` 跑。
 """
 from __future__ import annotations
 

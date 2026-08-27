@@ -1,4 +1,4 @@
-"""P0-1 · pipeline.flush 不阻塞事件循环。
+"""· pipeline.flush 不阻塞事件循环。
 
 C1: decoder.feed(b"", force=True) 同步触发 WebMDecoder O(n²) 全量重解码；
 事件循环冻结数十至数百毫秒。验证 flush 走 to_thread 后主事件循环不被冻结。

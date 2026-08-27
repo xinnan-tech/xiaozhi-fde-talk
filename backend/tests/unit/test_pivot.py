@@ -167,7 +167,7 @@ async def test_uppercase_lang_normalized():
     assert calls[0][0] == "<system lang=zh_cn>"
 
 
-# ── fallback 后复检：兜底真实有效率观测（同事 4）─────────────
+# ── fallback 后复检：兜底真实有效率观测 ─────────────
 
 
 @pytest.mark.asyncio
@@ -216,7 +216,7 @@ async def test_fallback_matches_no_error_log(caplog):
     )
 
 
-# ── observed_script 用 values 不被 raw JSON 稀释（同事 6.2）───
+# ── observed_script 用 values 不被 raw JSON 稀释 ───
 
 
 @pytest.mark.asyncio

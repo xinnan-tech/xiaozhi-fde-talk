@@ -1,4 +1,4 @@
-"""P2-12 · ReportRecord.interview_id 加 FK CASCADE + unique。
+"""· ReportRecord.interview_id 加 FK CASCADE + unique。
 
 原 interview_id 仅 String(36) index=True，无外键约束、无唯一约束：
 - 删 interview 后 report 成孤儿（无 CASCADE 清理）

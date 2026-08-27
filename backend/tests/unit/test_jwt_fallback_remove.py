@@ -1,4 +1,4 @@
-"""P2-15 · m-005 JWT fallback 移除 + 启动 fail-fast。
+"""· m-005 JWT fallback 移除 + 启动 fail-fast。
 
 旧行为：resolve() 无视 env，DB 无值就直接生成+持久化。
 - 缺幂等性保护（并发启动可生成多份 → token 全部失效）

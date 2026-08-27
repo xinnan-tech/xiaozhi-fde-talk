@@ -20,7 +20,7 @@
 | POST /auth/login               | （无多余字段）            | 200  |
 | POST /auth/register            | （无多余字段）            | 200  |
 
-不依赖同事 conftest.py——`--noconftest` 跑（项目已有先例）。
+不依赖外部 conftest.py——`--noconftest` 跑。
 """
 from __future__ import annotations
 

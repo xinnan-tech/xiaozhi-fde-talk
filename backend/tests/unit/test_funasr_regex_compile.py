@@ -1,4 +1,4 @@
-"""P3-7 · FunASR 响应解析正则预编译（m-009）。
+"""· FunASR 响应解析正则预编译（m-009）。
 
 _recv_loop 每条 ASR 消息都 re.search/re.sub 内联字面量模式，热路径上反复编译
 同一正则。提为模块级 _TAG_RE / _STRIP_RE 预编译 Pattern。

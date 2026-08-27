@@ -1,4 +1,4 @@
-"""P2-16 · prompt 注入防护：用户输入用 XML 标签隔离 + 转义。
+"""· prompt 注入防护：用户输入用 XML 标签隔离 + 转义。
 
 M-003：goal / transcript / items / skipped_ids 原直接拼进 prompt，攻击者可借语音
 注入「忽略上面的指令」之类改变 LLM 行为或泄露 system prompt。修复：用户输入一律

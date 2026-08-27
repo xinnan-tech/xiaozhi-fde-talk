@@ -164,7 +164,7 @@ class OpenAILLMProvider(LLMProvider):
     ) -> dict[str, Any]:
         """辅导重算用：强制 json_object，返回解析后的 dict。
 
-        P2-17：catch JSONDecodeError → LLMError；可选 pydantic schema 校验。
+        catch JSONDecodeError → LLMError；可选 pydantic schema 校验。
         """
         body = {
             "model": self._model,

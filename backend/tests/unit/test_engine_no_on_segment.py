@@ -1,4 +1,4 @@
-"""P3-8 · engine.on_segment 是死代码，删除并验证无调用方。
+"""· engine.on_segment 是死代码，删除并验证无调用方。
 
 S1: grep 确认仓内无 engine.on_segment 的订阅方（spec 推荐删）。本测试为防回归：
 任何改动重新添加 .on_segment() 调用必须显式更新此测试。

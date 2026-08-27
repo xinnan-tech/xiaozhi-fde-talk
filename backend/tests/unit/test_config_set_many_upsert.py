@@ -1,4 +1,4 @@
-"""P2-14b · ConfigStore.set_many 用方言级 upsert 取代 get-then-add。
+"""ConfigStore.set_many 用方言级 upsert 取代 get-then-add。
 
 L5：set_many 对缺失 key 先 session.get→None 再 session.add；并发两次写同一缺失 key
 都读到 None 都 add，commit 时第二个撞 PK 冲突（IntegrityError）。改为单条

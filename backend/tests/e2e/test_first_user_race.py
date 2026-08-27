@@ -6,7 +6,7 @@ DEFERRED 事务下两个并发请求都见 count==0 → 两个都成 admin → �
 PG/MySQL 由默认隔离级别 + username unique 约束的 INSERT 排他锁自然串行化。
 
 测试用 ASGITransport 在进程内跑完整 app + lifespan（与其他并发测试同款）。
-不依赖同事 e2e/conftest.py（`--noconftest` 跑）。
+不依赖外部 conftest.py（`--noconftest` 跑）。
 """
 from __future__ import annotations
 

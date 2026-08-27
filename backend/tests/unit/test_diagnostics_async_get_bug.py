@@ -1,6 +1,6 @@
 """diagnose_asr 同步读取 asr.sample_rate（不能 await）。
 
-P3-10 重构时漏改：diagnose_asr 把 cfg.get("asr.ws_url") 改成了 get_sync，
+diagnose_asr 把 cfg.get("asr.ws_url") 改成了 get_sync，
 但同行的 cfg.get("asr.sample_rate") 没改 —— 调用方是同步上下文（不 await），
 导致 int(coroutine) TypeError → 500。
 """
@@ -19,7 +19,7 @@ def test_diagnose_asr_uses_get_sync_not_async_get():
     src = inspect.getsource(diagnostics.diagnose_asr)
     assert "cfg.get(\"asr" not in src, (
         "diagnose_asr 仍在调 cfg.get()（async，未 await 会变 coroutine）。"
-        "P3-10 重构漏改——必须改用 cfg.get_sync()。"
+        "必须改用 cfg.get_sync()。"
     )
 
 

@@ -1,4 +1,4 @@
-"""P1-3 · RuntimeRegistry 在线 runtime 注册表不变量测试。
+"""· RuntimeRegistry 在线 runtime 注册表不变量测试。
 
 新增 _active 跟踪在线（bound）runtime；park 从 _active 移入 _parked（不删除）；
 drop 同时清两者。不变量：

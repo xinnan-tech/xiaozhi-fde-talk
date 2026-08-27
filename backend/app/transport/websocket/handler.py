@@ -138,8 +138,8 @@ class WSHandler:
         # 发起端的身份（前端 sessionStorage client_id）。缺省每连接唯一 → 等同总是不同身份。
         self.client_id: Optional[str] = None
         self._user: Optional[CurrentUser] = None
-        self._handshake_timeout_s: float = 5.0   # P3-2: 等首条 hello 的超时
-        self._max_frame_bytes: int = 64 * 1024   # P3-6: 单帧大小上限
+        self._handshake_timeout_s: float = 5.0   # 等首条 hello 的超时（避免客户端建连后不发 hello 永久挂住）
+        self._max_frame_bytes: int = 64 * 1024   # 单帧大小上限（text/bytes 任一 payload）
 
     # ---- IO 辅助 ----
     async def _send(self, obj: dict) -> None:
@@ -248,7 +248,7 @@ class WSHandler:
 
         # 获取或复用 Runtime（存活窗口内重连复用同一管线+引擎）
         policy = get_policy("ws")
-        # P1-4: liveness 已过、runtime 正在 _expire 的 end() 中——拒绝重连。
+        # liveness 已过、runtime 正在 _expire 的 end() 中——拒绝重连。
         # 必须在 get_or_create 之前判断，否则 _parked/_active 均空会新建孤儿 runtime
         # 漏进 _active 且无人回收。语义是终态：runtime 正在销毁，重试无意义。
         if registry.is_terminating(self.session_id):
@@ -305,7 +305,7 @@ class WSHandler:
                 logger.info("WebSocket 收到断开帧：session=%s code=%s reason=%r",
                             self.session_id, raw.get("code"), raw.get("reason"))
                 break
-            # P3-6: 单帧大小上限（text/bytes 任一 payload）
+            # 单帧大小上限（text/bytes 任一 payload）
             payload = raw.get("bytes") or raw.get("text") or ""
             if len(payload) > self._max_frame_bytes:
                 await _fail(self.ws, code="frame_too_large",

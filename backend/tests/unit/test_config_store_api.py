@@ -1,4 +1,4 @@
-"""P3-10 · ConfigStore 提供同步只读公开 API，替代外部直接访问 _cache（M-008）。
+"""· ConfigStore 提供同步只读公开 API，替代外部直接访问 _cache（M-008）。
 
 engine / llm factory / asr factory / funasr_server / diagnostics 都直接读
 get_config_store()._cache，破坏封装、难以 mock。ConfigStore.get_sync(key, default)

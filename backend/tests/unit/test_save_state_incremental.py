@@ -1,4 +1,4 @@
-"""P2-8c · save_state 字段分组增量写，避免每次全列重序列化。
+"""save_state 字段分组增量写，避免每次全列重序列化。
 
 原 save_state 每次都重写 transcript + coaching_items + skipped/ignored/coverage，
 即使本次只动了 transcript（utterance 去抖落盘）或只动了 coaching（重算落盘）。

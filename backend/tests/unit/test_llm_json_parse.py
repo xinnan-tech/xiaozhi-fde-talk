@@ -1,4 +1,4 @@
-"""P2-17 · chat_json 解析加固：catch JSONDecodeError + 可选 schema 校验。
+"""· chat_json 解析加固：catch JSONDecodeError + 可选 schema 校验。
 
 M-004：chat_json 用正则提 JSON 后直接 json.loads，未 catch JSONDecodeError；无 schema
 校验。LLM 返回异常结构时裸 JSONDecodeError 冒泡，下游崩溃。

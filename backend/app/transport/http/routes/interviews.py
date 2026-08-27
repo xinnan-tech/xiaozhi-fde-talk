@@ -55,6 +55,23 @@ def _utc_isoformat(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat()
 
 
+def _is_supported_image_format(image_bytes: bytes) -> bool:
+    """按 magic bytes 嗅探图片格式，仅接受 JPEG / PNG / BMP。
+
+    客户端 OCRRequest 不传文件名（extra=forbid），扩展名校验不适用；
+    引入 PIL 仅做 sniff 太重。百度 OCR 等 provider 对 WEBP / GIF / TIFF /
+    HEIC 等格式支持不一致或拒收，提前在路由层拒掉非白名单字节，避免
+    垃圾数据送上游再回错误。
+    """
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return True
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if image_bytes.startswith(b"BM"):
+        return True
+    return False
+
+
 def _session_summary(rec, tpl) -> dict:
     """ORM InterviewRecord + Template → summary dict（含派生计数与展示字段）。
 
@@ -421,10 +438,11 @@ async def recognize_image(
     """接收 base64 编码的图片，用后端视觉模型提取文字。
 
     错误响应统一走 I18nError：
-    - base64 解码失败 → 422 + code=http.ocr.image_base64_invalid
-    - 图片 > 10MB      → 413 + code=http.ocr.image_too_large
-    - OCR 未配置        → 502（adapter 抛 Keys.OCR_NOT_CONFIGURED）
-    - OCR 调用失败      → 502（adapter 抛 Keys.OCR_INVOKE_FAILED）
+    - base64 解码失败   → 422 + code=http.ocr.image_base64_invalid
+    - 图片 > 10MB        → 413 + code=http.ocr.image_too_large
+    - 图片格式不在白名单 → 422 + code=http.ocr.image_format_unsupported
+    - OCR 未配置          → 502（adapter 抛 Keys.OCR_NOT_CONFIGURED）
+    - OCR 调用失败        → 502（adapter 抛 Keys.OCR_INVOKE_FAILED）
     """
     from app.adapters.ocr.factory import get_ocr
     from app.core.i18n.errors import I18nError
@@ -440,6 +458,11 @@ async def recognize_image(
         raise I18nError(
             Keys.HTTP_OCR_IMAGE_TOO_LARGE, http_status=413,
             size_mb=len(image_bytes) / (1024 * 1024),
+        )
+
+    if not _is_supported_image_format(image_bytes):
+        raise I18nError(
+            Keys.HTTP_OCR_IMAGE_FORMAT_UNSUPPORTED, http_status=422,
         )
 
     ocr = get_ocr()

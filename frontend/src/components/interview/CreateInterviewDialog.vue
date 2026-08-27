@@ -31,6 +31,9 @@ import {
 
 dayjs.extend(customParseFormat);
 
+// 与后端 OCR 路由 magic bytes 白名单对齐：jpg / jpeg / jpe / png / bmp。
+const ALLOWED_IMAGE_EXTS = ["jpg", "jpeg", "jpe", "png", "bmp"] as const;
+
 defineOptions({
   name: "CreateInterviewDialog"
 });
@@ -572,6 +575,15 @@ const handleFileChange = async (event: Event) => {
     input.value = "";
     return;
   }
+  // 扩展名白名单与后端路由 magic bytes 一致（JPG / JPEG / JPE / PNG / BMP）。
+  // 部分桌面 OS 给 .jpe / .bmp 的 MIME 可能是 image/pjpeg 或空，仅靠
+  // file.type 嗅不出这些格式，file.name 后缀兜底一道。
+  const ext = file.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+  if (!(ALLOWED_IMAGE_EXTS as readonly string[]).includes(ext)) {
+    message(t("create.dialog.image_format_unsupported"), { type: "error" });
+    input.value = "";
+    return;
+  }
 
   // 选择文件后开始识别时才关闭摄像头
   closeCamera();
@@ -988,7 +1000,7 @@ watch(
               <input
                 ref="fileInputRef"
                 type="file"
-                accept="image/*"
+                accept=".jpg,.jpeg,.jpe,.png,.bmp"
                 class="hidden-file-input"
                 @change="handleFileChange"
               />

@@ -14,6 +14,7 @@
   "http.skill.invoke_failed": "skill 呼叫失敗：{reason}",
   "http.ocr.image_base64_invalid": "圖片 base64 解碼失敗，請確認資料完整性",
   "http.ocr.image_too_large": "圖片超過 10MB 上限（目前 {size_mb:.1f}MB）",
+  "http.ocr.image_format_unsupported": "不支援該圖片格式，僅允許 jpg / jpeg / jpe / png / bmp",
   "ws.internal": "服務內部錯誤，請重試或聯絡管理員",
   "ws.handshake.timeout": "5s 內未收到 hello",
   "ws.bad_handshake": "握手失敗",

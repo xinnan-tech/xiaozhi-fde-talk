@@ -202,6 +202,11 @@ def test_handle_start_interview_rechecks_ended_after_each_await():
     session.ended 或再推 session.suspended（idle 超时叠加 / admin 手动
     暂停），handleServerMessage 会把 status 写为 ended/suspended；await
     返回后若不重查就接着 status = "in_progress"，把后端的终态翻成进行中。
+
+    实现上为了避开 TS 控制流把 ended/suspended 收窄（入口守卫已 return
+    on ended，导致下游字面比较被收窄成无交集），这里用了一个 string |
+    undefined 类型的本地变量承接新读到的 status。守住这个模式即可，不
+    锁死变量名。
     """
     script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
     body = _function_body(script, "const handleStartInterview = async () => {")
@@ -209,22 +214,22 @@ def test_handle_start_interview_rechecks_ended_after_each_await():
     acquire_idx = body.index("await acquireStream()")
     next_status_mutate = body.index('status = "in_progress"', acquire_idx)
     after_acquire = body[acquire_idx:next_status_mutate]
-    assert 'status === "ended"' in after_acquire, (
-        "await acquireStream() 之后必须再查 status === 'ended'"
+    assert '=== "ended"' in after_acquire, (
+        "await acquireStream() 之后必须再查 === 'ended'"
     )
-    assert 'status === "suspended"' in after_acquire, (
-        "await acquireStream() 之后必须再查 status === 'suspended'，"
+    assert '=== "suspended"' in after_acquire, (
+        "await acquireStream() 之后必须再查 === 'suspended'，"
         "否则 idle 超时叠加期间推过来的 suspended 会被复活成 in_progress"
     )
     # openMicrophone 之后同样要查两个终态
     if "await openMicrophone()" in body:
         open_mic_idx = body.index("await openMicrophone()")
         after_open_mic = body[open_mic_idx:]
-        assert 'status === "ended"' in after_open_mic, (
-            "await openMicrophone() 之后必须再查 status === 'ended'"
+        assert '=== "ended"' in after_open_mic, (
+            "await openMicrophone() 之后必须再查 === 'ended'"
         )
-        assert 'status === "suspended"' in after_open_mic, (
-            "await openMicrophone() 之后必须再查 status === 'suspended'"
+        assert '=== "suspended"' in after_open_mic, (
+            "await openMicrophone() 之后必须再查 === 'suspended'"
         )
 
 

@@ -347,10 +347,10 @@ const handleStartInterview = async () => {
   // 在点击事件中立即请求权限，避免等待 WebSocket 握手后丢失浏览器用户手势。
   shouldResumeMicrophone.value = true;
   const microphoneStarted = await acquireStream();
-  if (
-    interviewDetail.value?.status === "ended" ||
-    interviewDetail.value?.status === "suspended"
-  ) {
+  // 显式标注 string | undefined，避免 TS 沿入口守卫控制流把 ended /
+  // suspended 收窄掉——handleServerMessage 在 await 期间可异步改写 status。
+  const statusAfterAcquire: string | undefined = interviewDetail.value?.status;
+  if (statusAfterAcquire === "ended" || statusAfterAcquire === "suspended") {
     // await 期间后端推了 session.ended / 再次 suspended：handleServerMessage
     // 已清理状态/麦/表（suspended 会另起一个确认框），这里不写回 in_progress。
     shouldResumeMicrophone.value = false;
@@ -377,10 +377,8 @@ const handleStartInterview = async () => {
   // WebSocket 已经连接时直接开始监听；尚未连接时由 onConnected 处理。
   if (isWebSocketConnected.value) {
     const listeningStarted = await openMicrophone();
-    if (
-      interviewDetail.value?.status === "ended" ||
-      interviewDetail.value?.status === "suspended"
-    ) {
+    const statusAfterMic: string | undefined = interviewDetail.value?.status;
+    if (statusAfterMic === "ended" || statusAfterMic === "suspended") {
       // 麦克风热启等待期间后端推了 ended / 再次 suspended，同上不写回。
       shouldResumeMicrophone.value = false;
       return;

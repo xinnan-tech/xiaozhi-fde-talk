@@ -333,3 +333,43 @@ def test_handle_server_message_skips_cleanup_when_dialog_in_flight():
     assert cleanup_block_must_be_guarded, (
         "分支应包含 cleanup 操作但必须用 isSuspendConfirmDialogOpen 守住"
     )
+
+
+def test_handle_server_message_skips_status_overwrite_when_dialog_in_flight():
+    """session.suspended 弹框流程仍在处理时，status 覆写也必须跳过。
+
+    只挡 cleanup 不挡 status 覆写会留半开状态：handleStartInterview 在
+    await openMicrophone() 之前写过 status=in_progress，等麦热启期间
+    后端再推 session.suspended 若把 status 翻回 suspended，post-await
+    守卫因 wasSuspended=true 漏命中、函数正常返回；用户再点「继续」
+    会被入口守卫 isInterviewStarted=true 静默吞。"""
+    text = INTERVIEW_VUE.read_text(encoding="utf-8")
+    script = _script_block(text)
+    suspended_branch_idx = script.index('message.type === "session.suspended"')
+    tail = script[suspended_branch_idx:]
+    next_const = tail.find("\nconst ", 100)
+    next_function = tail.find("\nfunction ", 100)
+    next_close = tail.find("\n};", 100)
+    end_candidates = [i for i in (next_const, next_function, next_close) if i > 0]
+    end = min(end_candidates) if end_candidates else len(tail)
+    branch = tail[:end]
+    # status 覆写代码字符串必须在 !skipLocalCleanup 块内：找 if (!skipLocalCleanup) {
+    # 与配对 } 之间的内容，断言 status 覆写在其中
+    guard_open = branch.index("if (!skipLocalCleanup")
+    # 找下一个 } 配对起点——用 block 内缩进对齐的 } 标记
+    # 简化做法：找下一个 "if (" 行之前最近的 "\n    }"（4 空格缩进）
+    rest = branch[guard_open:]
+    inner_close_candidates = [
+        rest.find("\n    }", 1),  # 跳过 if 自己
+    ]
+    inner_close_candidates = [i for i in inner_close_candidates if i > 0]
+    if not inner_close_candidates:
+        # 没匹配 4 空格缩进就放宽到任意 }
+        inner_close_candidates = [rest.find("\n  }", 1)]
+    inner_end = min(inner_close_candidates) if inner_close_candidates else len(rest)
+    guarded_block = rest[:inner_end]
+    assert "interviewDetail.value.status" in guarded_block, (
+        "status 覆写必须在 !skipLocalCleanup 块内；"
+        "弹框期间再推的 suspended 不能推翻 in-flight handleStartInterview "
+        "已经写回的 in_progress"
+    )

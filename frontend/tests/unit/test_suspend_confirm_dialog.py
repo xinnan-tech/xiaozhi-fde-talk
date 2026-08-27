@@ -63,6 +63,33 @@ def test_handle_session_suspended_calls_start_on_confirm():
     )
 
 
+def test_handle_session_suspended_distinguishes_cancel_from_real_errors():
+    """catch 必须区分用户取消与 handleStartInterview 内部异常。
+
+    Element Plus 用户取消 confirm 时 reject 的值是字符串 'cancel' /
+    'close'；handleStartInterview 内部抛出（除已被自身 toast 兜底的麦权限
+    失败等场景外）属于意外，需要给 ElMessage.error 兜底，否则用户点
+    「继续」后无任何反馈、状态卡死。
+    """
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleSessionSuspended = async () => {")
+    # catch 必须区分两种来源：Element Plus 取消 reject 的字符串 / 其他异常
+    assert '"cancel"' in body, (
+        "catch 必须显式判断 Element Plus 取消 reject 的字符串 'cancel'"
+    )
+    assert '"close"' in body or "distinguishCancelAndClose" in body, (
+        "catch 应同时识别 'close'（区分 cancel/close 时）或显式声明不区分"
+    )
+    # 真异常兜底：必须有 ElMessage.error，否则用户毫无反馈
+    assert "ElMessage.error" in body, (
+        "handleStartInterview 内部抛出未捕获时必须 ElMessage.error 兜底，"
+        "否则用户点「继续」后没有任何反馈"
+    )
+    assert "resume_failed" in body, (
+        "ElMessage.error 必须用 interview.runtime.suspend_dialog.resume_failed i18n key"
+    )
+
+
 def test_handle_session_suspended_rechecks_ended_after_confirm():
     """弹框期间后端推了 session.ended 时，用户点继续必须有可见反馈。
 
@@ -136,6 +163,7 @@ def test_suspend_dialog_i18n_keys_in_all_locales():
         "interview.runtime.suspend_dialog.confirm",
         "interview.runtime.suspend_dialog.cancel",
         "interview.runtime.suspend_dialog.ended_while_waiting",
+        "interview.runtime.suspend_dialog.resume_failed",
     )
     for path in locales:
         keys = set(json.loads(path.read_text(encoding="utf-8")).keys())

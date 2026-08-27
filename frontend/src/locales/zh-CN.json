@@ -301,6 +301,7 @@
   "interview.runtime.suspend_dialog.confirm": "继续",
   "interview.runtime.suspend_dialog.cancel": "暂不",
   "interview.runtime.suspend_dialog.ended_while_waiting": "会话已结束，无法继续",
+  "interview.runtime.suspend_dialog.resume_failed": "恢复访谈失败，请重试或刷新页面",
   "interview.runtime.speaker": "说话人{number}",
   "report.default_title": "访谈报告",
   "report.tab.report": "访谈报告",

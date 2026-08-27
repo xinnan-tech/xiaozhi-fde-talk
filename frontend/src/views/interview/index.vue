@@ -664,8 +664,18 @@ const handleSessionSuspended = async () => {
       return;
     }
     await handleStartInterview();
-  } catch {
-    // 用户选择暂不继续：维持 suspended，控制按钮下次再点。
+  } catch (error) {
+    // Element Plus 用户取消 confirm 时 reject 的值是字符串 'cancel' /
+    // 'close'（distinguishCancelAndClose 默认 false，只会有 'cancel'）。
+    // 其他异常来自 handleStartInterview 内部抛出（除麦权限失败等已被
+    // 内部 toast 的路径外），属于意外，需给一条兜底提示并打日志，
+    // 否则用户点「继续」后毫无反馈、状态卡死。
+    if (error === "cancel" || error === "close") {
+      // 用户选择暂不继续：维持 suspended，控制按钮下次再点。
+      return;
+    }
+    console.error("[handleSessionSuspended] resume failed:", error);
+    ElMessage.error(t("interview.runtime.suspend_dialog.resume_failed"));
   } finally {
     isSuspendConfirmDialogOpen = false;
   }

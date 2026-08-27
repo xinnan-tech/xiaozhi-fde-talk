@@ -308,6 +308,7 @@
   "interview.runtime.suspend_dialog.confirm": "Tiếp tục",
   "interview.runtime.suspend_dialog.cancel": "Để sau",
   "interview.runtime.suspend_dialog.ended_while_waiting": "Phiên đã kết thúc, không thể tiếp tục.",
+  "interview.runtime.suspend_dialog.resume_failed": "Không thể tiếp tục phỏng vấn. Vui lòng thử lại hoặc tải lại trang.",
   "interview.runtime.speaker": "Người nói {number}",
 
   "report.default_title": "Báo cáo phỏng vấn",

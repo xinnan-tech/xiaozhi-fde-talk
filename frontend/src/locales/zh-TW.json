@@ -308,6 +308,7 @@
   "interview.runtime.suspend_dialog.confirm": "繼續",
   "interview.runtime.suspend_dialog.cancel": "暫不",
   "interview.runtime.suspend_dialog.ended_while_waiting": "工作階段已結束，無法繼續",
+  "interview.runtime.suspend_dialog.resume_failed": "恢復訪談失敗，請重試或重新整理頁面",
   "interview.runtime.speaker": "說話人 {number}",
 
   "report.default_title": "訪談報告",

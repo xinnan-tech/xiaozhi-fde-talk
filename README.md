@@ -54,33 +54,22 @@ cp .env.example .env
 python main.py
 ```
 
-国内用户可在 `pip install` 后追加 `-i https://pypi.tuna.tsinghua.edu.cn/simple` 走清华镜像加速，默认走官方 PyPI。
+国内用户可在`pip install` 后追加 `-i https://pypi.tuna.tsinghua.edu.cn/simple` 走清华镜像加速，默认走官方 PyPI。
 
-访谈工作台页面由后端直接托管，浏览器打开 http://localhost:8000 即用，无需单独启动前端。
+启动后，后端接口可以在`http://localhost:8000/docs`查看
 
-#### 1.3. 首次启动：注册首位管理员
-
-1. 浏览器打开 http://localhost:8000 → 登录弹窗自动弹出
-2. 点"去注册" → 填用户名（4-32 位字母数字下划线连字符）+ 强密码 + 确认密码
-3. **第一个注册的用户自动成为超级管理员**，登录后侧边栏出现"系统配置"和"用户管理"
-
-后续用户由管理员在"用户管理"页创建。
-
-#### 1.4. 启动前端
-
+#### 1.3. 启动前端
 
 ```bash
 cd frontend
 pnpm install
-pnpm dev          # 默认监听 http://localhost:8848（VITE_PORT in .env.development）
+pnpm dev
 ```
 
-需要打生产包给后端托管时：
+#### 1.4. 首次启动：注册首位管理员
 
-```bash
-pnpm build
-cd ..
-rm -rf backend/static/*
-cp -rf frontend/dist/. backend/static/
-```
-执行后，访问 http://localhost:8000 即可支持前后端交互
+1. 浏览器打开 http://localhost:8848
+2. 点"去注册" → 填用户名（4-32 位字母数字下划线连字符）+ 强密码 + 确认密码
+3. 第一个注册的用户自动成为超级管理员，
+4. 登录先进行"系统配置"填入 LLM 密钥，点击右上角的`运行自检`查看各组件是否运行良好
+5. 创建访谈，尝试发出声音

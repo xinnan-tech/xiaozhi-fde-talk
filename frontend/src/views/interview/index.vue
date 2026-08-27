@@ -350,7 +350,12 @@ const handleStartInterview = async () => {
   // 显式标注 string | undefined，避免 TS 沿入口守卫控制流把 ended /
   // suspended 收窄掉——handleServerMessage 在 await 期间可异步改写 status。
   const statusAfterAcquire: string | undefined = interviewDetail.value?.status;
-  if (statusAfterAcquire === "ended" || statusAfterAcquire === "suspended") {
+  // ended 是终态；suspended 仅当「入口非 suspended、await 期间被改写」才算异常：
+  // 入口本就是 suspended 的合法 continue 路径要走完重连，否则自废。
+  if (
+    statusAfterAcquire === "ended" ||
+    (statusAfterAcquire === "suspended" && !wasSuspended)
+  ) {
     // await 期间后端推了 session.ended / 再次 suspended：handleServerMessage
     // 已清理状态/麦/表（suspended 会另起一个确认框），这里不写回 in_progress。
     shouldResumeMicrophone.value = false;
@@ -378,9 +383,14 @@ const handleStartInterview = async () => {
   if (isWebSocketConnected.value) {
     const listeningStarted = await openMicrophone();
     const statusAfterMic: string | undefined = interviewDetail.value?.status;
-    if (statusAfterMic === "ended" || statusAfterMic === "suspended") {
+    if (
+      statusAfterMic === "ended" ||
+      (statusAfterMic === "suspended" && !wasSuspended)
+    ) {
       // 麦克风热启等待期间后端推了 ended / 再次 suspended，同上不写回。
       shouldResumeMicrophone.value = false;
+      isInterviewStarted.value = false;
+      stopInterviewTimer();
       return;
     }
     if (listeningStarted) shouldResumeMicrophone.value = false;

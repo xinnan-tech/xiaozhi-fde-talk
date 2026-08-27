@@ -233,6 +233,30 @@ def test_handle_start_interview_rechecks_ended_after_each_await():
         )
 
 
+def test_open_microphone_guard_does_full_cleanup():
+    """openMicrophone 守卫命中必须复位 isInterviewStarted / 停表。
+
+    与 acquireStream 守卫对齐——否则命中后留下 isInterviewStarted=true
+    半开状态，下次 handleStartInterview 进不来；同时计时器也在空跑。"""
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleStartInterview = async () => {")
+    assert "statusAfterMic" not in body or body.index("statusAfterMic") > 0
+    # 找 openMicrophone 守卫的 if 块（statusAfterMic 之后的第一个 if）
+    if "statusAfterMic" not in body:
+        return
+    mic_idx = body.index("statusAfterMic")
+    guard_block = body[mic_idx:]
+    # 守卫块必须在 handleStartInterview 体内找到 isInterviewStarted 重置与 stopInterviewTimer
+    assert "isInterviewStarted.value = false" in guard_block, (
+        "openMicrophone 守卫命中必须 isInterviewStarted.value = false，"
+        "否则下次 handleStartInterview 被入口守卫拦掉"
+    )
+    assert "stopInterviewTimer()" in guard_block, (
+        "openMicrophone 守卫命中必须 stopInterviewTimer()，"
+        "否则计时器空跑"
+    )
+
+
 def test_handle_start_interview_entry_does_not_block_suspended_resume():
     """入口守卫只拦 ended 不能拦 suspended。
 
@@ -248,3 +272,29 @@ def test_handle_start_interview_entry_does_not_block_suspended_resume():
     assert 'suspended' not in entry_check, (
         "入口 ended 守卫不能扩展到 suspended，否则 continue 流程被废"
     )
+
+
+def test_post_await_suspended_guard_distinguishes_was_suspended():
+    """await 守卫的 suspended 分支必须用 !wasSuspended 区分入口状态。
+
+    入口本就是 suspended（continue 路径）的合法情况不能在 await 守卫里
+    误命中：必须用入口时记录的 wasSuspended 区分「入口是 suspended 的
+    合法 continue」与「await 期间后端又推了一次 suspended」。"""
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    body = _function_body(script, "const handleStartInterview = async () => {")
+    # wasSuspended 必须先于两个 await 守卫定义
+    was_suspended_idx = body.index("const wasSuspended")
+    acquire_guard_idx = body.index("statusAfterAcquire")
+    assert was_suspended_idx < acquire_guard_idx, (
+        "wasSuspended 必须在 await 守卫之前定义，否则守卫没法区分入口状态"
+    )
+    # 两个 await 守卫里都要带 !wasSuspended（仅在 suspended 分支）
+    assert '!wasSuspended' in body[acquire_guard_idx:], (
+        "acquireStream 之后的 suspended 分支必须加 !wasSuspended，"
+        "否则入口本就是 suspended 的 continue 流程被自废"
+    )
+    if "statusAfterMic" in body:
+        mic_guard_idx = body.index("statusAfterMic")
+        assert '!wasSuspended' in body[mic_guard_idx:], (
+            "openMicrophone 之后的 suspended 分支同样必须加 !wasSuspended"
+        )

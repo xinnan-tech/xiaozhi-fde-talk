@@ -1,12 +1,12 @@
 <div align="center">
-<img src="../docs/images/banner1.png" alt="xiaozhi-fde-talk" width="100%" />
+<img src="../images/banner1.png" alt="xiaozhi-fde-talk" width="100%" />
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![Node](https://img.shields.io/badge/node-22_LTS-green.svg)](https://nodejs.org/)
 [![e2e](https://github.com/xinnan-tech/xiaozhi-fde-talk/actions/workflows/frontend-e2e.yml/badge.svg)](https://github.com/xinnan-tech/xiaozhi-fde-talk/actions/workflows/frontend-e2e.yml)
 
-[![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-zh--CN-lightgrey.svg)](../README.md)
+[![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-zh--CN-lightgrey.svg)](../../README.md)
 [![English](https://img.shields.io/badge/English-en--US-lightgrey.svg)](README.en-US.md)
 [![Tiếng Việt](https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-current-green.svg)](README.vi-VN.md)
 
@@ -18,7 +18,7 @@
 
 Khác với các công cụ chuyển giọng nói hay ghi âm, hệ thống phân tích cuộc trò chuyện theo thời gian thực ngay trong buổi phỏng vấn, gợi ý bạn nên hỏi gì tiếp theo và những điểm quan trọng nào chưa được đề cập. Khi buổi phỏng vấn kết thúc, nó tự động tạo báo cáo yêu cầu có cấu trúc, giúp mỗi buổi phỏng vấn trọn vẹn và chuyên nghiệp hơn, giảm việc bổ sung sau buổi.
 
-[Bắt đầu nhanh](#quick-start) · [Giao thức WebSocket](../docs/websocket-protocol.md) · [HTTP API](../docs/http-api.md) · [Báo lỗi](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[Bắt đầu nhanh](#quick-start) · [Giao thức WebSocket](../websocket-protocol.md) · [HTTP API](../http-api.md) · [Báo lỗi](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 </div>
 

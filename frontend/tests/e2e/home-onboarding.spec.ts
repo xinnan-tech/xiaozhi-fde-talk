@@ -13,12 +13,19 @@ test.describe("home onboarding panel", () => {
     test.setTimeout(90_000)
 
     // 1) 未登录（全新 storage context）：面板可见、四步齐全
+    // fresh context 无 localStorage，getInitialLocale 走 detectBrowserLocale →
+    // navigator.language；CI headless chromium 默认 en-US，会渲染英文态「Start
+    // Your First Professional Interview」，断言 zh-CN 文案会失败。沿用
+    // i18n.spec.ts:11-18 的模式：goto 后钉 xz_locale=zh-CN 再 reload。
     const fresh = await browser.newContext({
       storageState: { cookies: [], origins: [] }
     })
     try {
       const guest = await fresh.newPage()
       await guest.goto("/")
+      await guest.evaluate(() => localStorage.setItem("xz_locale", "zh-CN"))
+      await guest.reload()
+      await guest.waitForLoadState("domcontentloaded")
       const guestPanel = guest.locator(".home-onboarding")
       await expect(guestPanel).toBeVisible({ timeout: 15_000 })
       await expect(guestPanel.locator(".step-card")).toHaveCount(4)

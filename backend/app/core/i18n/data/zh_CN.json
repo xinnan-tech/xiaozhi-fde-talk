@@ -65,7 +65,7 @@
   "diag.llm.ok": "LLM 连通 + 正常返回",
   "diag.asr.timeout": "ASR 连接超时",
   "diag.asr.unreachable": "ASR 服务连不上（端口未通 / 服务未启动），请确认 FunASR 已启动",
-  "diag.asr.tls_fail": "ASR TLS 握手失败：请检查 ws_url 协议（ws/wss）与证书",
+  "diag.asr.tls_fail": "ASR TLS 握手失败：请检查 ws_url 协议（ws/wss）与证书；若是自签证书可取消勾选「验证 SSL」",
   "diag.asr.bad_url": "ASR ws_url 格式不正确",
   "diag.asr.invoke_fail_typed": "ASR 调用异常：{type}：{detail}",
   "diag.asr.not_configured": "未配置 asr.ws_url，请到「⚙️ 后端配置」填写",

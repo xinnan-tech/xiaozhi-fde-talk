@@ -119,9 +119,25 @@ def test_asr_connect_fail_unreachable_reason_routes_to_unreachable():
     assert r["i18n_key"] == Keys.DIAG_ASR_UNREACHABLE.value
 
 
-def test_asr_connect_fail_tls_reason_routes_to_config_missing():
+def test_asr_connect_fail_tls_reason_routes_to_tls_fail():
+    """issue 87：SSL 握手失败应归 TLS 专属提示，不是 ws_url 格式错。
+
+    ssl.SSLError 走的是 _connect_reason 里 "TLS 握手失败（确认 wss/ws 协议与端口）"
+    这条 reason，**含 "wss/ws" 字符串**，原版用 `or "ws_url" in reason` 一并吞了，
+    把 TLS 错误归成 DIAG_ASR_BAD_URL（"ws_url 格式不正确"），文案与事实不符。
+    修复后 TLS 必须先判（DIAG_ASR_TLS_FAIL）；ws_url 格式错另走 bad_url 路径。
+    """
     exc = I18nError(Keys.ASR_CONNECT_FAIL.value, http_status=502,
                     ws_url="wss://x", reason="TLS handshake failed")
+    r = _extract_asr_error(exc)
+    assert r["code"] == "config_missing"
+    assert r["i18n_key"] == Keys.DIAG_ASR_TLS_FAIL.value
+
+
+def test_asr_connect_fail_invalid_uri_routes_to_bad_url():
+    """守住 ws_url 格式错这条路径：websockets.InvalidURI → reason 含 "ws_url"。"""
+    exc = I18nError(Keys.ASR_CONNECT_FAIL.value, http_status=502,
+                    ws_url="ws://", reason="ws_url 格式不正确")
     r = _extract_asr_error(exc)
     assert r["code"] == "config_missing"
     assert r["i18n_key"] == Keys.DIAG_ASR_BAD_URL.value

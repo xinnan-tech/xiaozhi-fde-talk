@@ -202,7 +202,7 @@ function isSessionExpired(e: unknown): boolean {
 - **裸 401**（`!hasCode`）+ 有 token：清 token + 提示登录过期
 - **业务 4xx / 5xx**（`hasCode`）：主动弹一次 `detail` 文案（用 `grouping: true` 防重），即使调用方 catch 漏写 `extractBackendError` 也不会"静默失败"
 
-> 本仓库当前拦截器已实现裸 401 清 token，但业务 4xx 仍依赖调用方各自 catch —— 见 `docs/http-api.md` §5 待办。
+> 本仓库当前拦截器已实现裸 401 清 token 与业务 4xx/5xx 主动弹 `detail`，详见 `frontend/src/utils/http/index.ts`。
 
 ---
 
@@ -272,17 +272,19 @@ function isSessionExpired(e: unknown): boolean {
 
 ### 6.4 访谈状态机
 
-| `code` | 状态码 |
-|--------|--------|
-| `session.concurrent_limit` | 409 |
-| `session.illegal_transition` | 409 |
-| `session.edit_forbidden` | 409 |
-| `session.delete_forbidden` | 409 |
+| `code` | 状态码 | 中文文案（zh-CN，含参数位）|
+|--------|--------|--------------------------|
+| `session.concurrent_limit` | 409 | 活跃访谈数已达上限（{limit}） |
+| `session.illegal_transition` | 409 | 非法状态转换：{from_state} → {to_state} |
+| `session.edit_forbidden` | 409 | 当前状态（{state}）不可编辑 |
+| `session.delete_forbidden` | 409 | 当前状态（{state}）不可删除 |
 
 ### 6.5 报告
 
 | `code` | 状态码 |
 |--------|--------|
+| `http.report.not_ready` | 409 |
+| `http.report.format_unsupported` | 400 |
 | `report.format_not_implemented` | 501 |
 
 ### 6.6 配置项校验

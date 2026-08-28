@@ -1,5 +1,5 @@
 <div align="center">
-<img src="../images/banner1.png" alt="xiaozhi-fde-talk" width="100%" />
+<img src="../images/banner1.svg" alt="xiaozhi-fde-talk" width="100%" />
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)

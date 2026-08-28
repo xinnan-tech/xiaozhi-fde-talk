@@ -265,6 +265,12 @@ export function useWebSocket(options: useWebSocketOptions) {
   const takeover = () =>
     isPendingTakeover.value && sendJson({ type: "connection.takeover" });
 
+  const allowReconnect = () => {
+    // 手动恢复可重连：被 session.suspended / error / connection.kicked 禁用后，
+    // 用户从暂停弹框选「继续」时需复位，下一次断开 autoReconnect 才能再触发。
+    isReconnectAllowed.value = true;
+  };
+
   const close = (code?: number, reason?: string) => {
     isReconnectAllowed.value = false;
     websocket.close(code, reason);
@@ -290,6 +296,7 @@ export function useWebSocket(options: useWebSocketOptions) {
     skipCoachingItem,
     ignoreCoachingItem,
     takeover,
+    allowReconnect,
     close
   };
 }

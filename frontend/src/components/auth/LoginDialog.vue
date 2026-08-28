@@ -148,6 +148,8 @@ function onKeydown(event: KeyboardEvent) {
           </div>
         </div>
         <img
+          width="144"
+          height="144"
           src="@/assets/images/login-chat-icon.png"
           class="w-36"
           alt="Login icon"

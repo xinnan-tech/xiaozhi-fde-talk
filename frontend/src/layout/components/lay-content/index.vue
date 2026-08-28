@@ -100,7 +100,9 @@ const transitionMain = defineComponent({
                 </transitionMain>
               </div>
               <LayFooter v-if="!hideFooter" class="content-footer" />
-              <div v-else class="not-footer h-[18px]" />
+              <!-- 高度归零：内容视口底已与侧边栏 24px inset 对齐，
+                   不再需要额外底部占位（否则内容底线超出侧边栏底线） -->
+              <div v-else class="not-footer h-0" />
             </el-scrollbar>
           </template>
         </LayFrame>
@@ -118,8 +120,11 @@ const transitionMain = defineComponent({
   overflow-x: hidden;
 }
 
+/* 底部留出与侧边栏（big-sidebar-container 的 24px inset）一致的安全区：
+   收窄滚动视口可视高度，内容卡片底边与侧边栏圆角条底线对齐，
+   滚动条也止于同一底线 */
 .content-scroll {
-  height: 100%;
+  height: calc(100% - 24px);
 }
 
 .content-wrapper {

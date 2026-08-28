@@ -9,6 +9,7 @@ import { useDialogStoreHook } from "@/store/modules/dialog";
 import { useInterviewStoreHook } from "@/store/modules/interview";
 import ReSegmented from "@/components/ReSegmented";
 import ChangePasswordDialog from "@/components/auth/ChangePasswordDialog.vue";
+import HomeOnboarding from "@/components/home/HomeOnboarding.vue";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import { ElMessage } from "element-plus";
 import { isSupportedLocale, setLocale, type SupportedLocale } from "@/i18n";
@@ -137,6 +138,19 @@ const filteredInterviewList = computed(() => {
     return item.base_info?.title?.toLowerCase().includes(keyword);
   });
 });
+
+/** 空列表引导面板：未登录（列表恒空且不 loading）或加载后列表为空时显示 */
+const showOnboarding = computed(
+  () => !listLoading.value && interviewList.value.length === 0
+);
+
+/** 列表非空但被搜索/筛选过滤后为空：仅轻提示，不显示引导面板 */
+const showFilteredEmpty = computed(
+  () =>
+    !listLoading.value &&
+    interviewList.value.length > 0 &&
+    filteredInterviewList.value.length === 0
+);
 
 const updateSearchKeyword = useDebounceFn((keyword: string) => {
   debouncedSearchKeyword.value = keyword;
@@ -397,7 +411,13 @@ watch(
       <ReSegmented v-model="tabValue" :options="tabOptions" />
     </div>
 
-    <div class="">
+    <HomeOnboarding v-if="showOnboarding" />
+
+    <div v-else-if="showFilteredEmpty" class="filtered-empty">
+      {{ $t("home.guide.empty_filtered") }}
+    </div>
+
+    <div v-else>
       <el-skeleton
         class="interview-list"
         :loading="listLoading"
@@ -564,8 +584,15 @@ watch(
 <style lang="scss" scoped>
 .home {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+
+  /* 可视高度锚点：视口底 -24px = 侧边栏圆角条底线。
+     用视口单位而非 height:100% —— 滚动容器的 view/wrapper 链是
+     flex-basis:0 的循环依赖，百分比链解析不出确定值 */
+  min-height: calc(100vh - 24px);
   max-width: 100%;
-  padding: 30px 16px 24px 16px;
+  padding: 24px 16px 24px 16px;
 
   /* 以内容区实际宽度作为自适应基准，自动兼容侧边栏展开/折叠 */
   container-type: inline-size;
@@ -577,7 +604,7 @@ watch(
     gap: 28px;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px 20px;
+    padding: 8px 16px 14px;
     background: transparent;
   }
 
@@ -806,7 +833,7 @@ watch(
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 0;
+    padding: 14px 0;
   }
 
   .tab-bar :deep(.pure-segmented) {
@@ -861,6 +888,17 @@ watch(
 
   .tab-bar :deep(.pure-segmented-group) {
     gap: 6px;
+  }
+
+  .filtered-empty {
+    padding: 48px 16px;
+    font-size: 14px;
+    color: #999;
+    text-align: center;
+    background: rgb(255 255 255 / 60%);
+    border: 1px solid rgb(255 255 255 / 65%);
+    border-radius: 16px;
+    box-shadow: 0 0 10px rgb(0 0 0 / 8%);
   }
 
   .interview-list {

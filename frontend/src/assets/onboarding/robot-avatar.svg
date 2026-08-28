@@ -1,0 +1,34 @@
+<?xml version="1.0" standalone="no"?>
+<svg width="280" height="280" viewBox="40 29.72309112548828 200 231.27691650390625" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="i5-head" cx="0.35" cy="0.28" r="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="0.65" stop-color="#eaf0fb"/><stop offset="1" stop-color="#c5d1e8"/>
+    </radialGradient>
+    <linearGradient id="i5-screen" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#3c4566"/><stop offset="1" stop-color="#0a0e21"/>
+    </linearGradient>
+    <linearGradient id="i5-ear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c49ef9"/><stop offset="1" stop-color="#8a55e5"/>
+    </linearGradient>
+    <linearGradient id="i5-eye" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#aef7ff"/><stop offset="1" stop-color="#28cfee"/>
+    </linearGradient>
+    <linearGradient id="i5-heart" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6fb6ff"/><stop offset="1" stop-color="#2c6ee8"/>
+    </linearGradient>
+    <filter id="i5-eyeglow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <ellipse cx="140" cy="240" rx="70" ry="11" fill="#b9d2ff" opacity="0.14"/>
+  <rect x="50" y="126" width="30" height="72" rx="15" fill="url(#i5-ear)"/>
+  <rect x="200" y="126" width="30" height="72" rx="15" fill="url(#i5-ear)"/>
+  <ellipse cx="140" cy="162" rx="79" ry="67" fill="url(#i5-head)"/>
+  <rect x="82" y="122" width="116" height="88" rx="30" fill="url(#i5-screen)"/>
+  <g filter="url(#i5-eyeglow)">
+    <rect x="112" y="140" width="17" height="38" rx="8.5" fill="url(#i5-eye)"/>
+    <rect x="151" y="140" width="17" height="38" rx="8.5" fill="url(#i5-eye)"/>
+  </g>
+  <path transform="rotate(-10 140 58)" fill="url(#i5-heart)" d="M140 90 C128 78 114 68 114 56 C114 46 122 42 129 45 C135 47.5 139 53 140 58 C141 53 145 47.5 151 45 C158 42 166 46 166 56 C166 68 152 78 140 90 Z"/>
+</svg>

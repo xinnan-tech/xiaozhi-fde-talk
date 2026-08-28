@@ -584,8 +584,15 @@ watch(
 <style lang="scss" scoped>
 .home {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+
+  /* 可视高度锚点：视口底 -24px = 侧边栏圆角条底线。
+     用视口单位而非 height:100% —— 滚动容器的 view/wrapper 链是
+     flex-basis:0 的循环依赖，百分比链解析不出确定值 */
+  min-height: calc(100vh - 24px);
   max-width: 100%;
-  padding: 30px 16px 24px 16px;
+  padding: 24px 16px 24px 16px;
 
   /* 以内容区实际宽度作为自适应基准，自动兼容侧边栏展开/折叠 */
   container-type: inline-size;
@@ -597,7 +604,7 @@ watch(
     gap: 28px;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px 20px;
+    padding: 8px 16px 14px;
     background: transparent;
   }
 
@@ -826,7 +833,7 @@ watch(
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 0;
+    padding: 14px 0;
   }
 
   .tab-bar :deep(.pure-segmented) {

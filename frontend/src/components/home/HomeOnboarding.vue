@@ -46,21 +46,26 @@ const steps = computed(() => [
     </header>
 
     <ol class="onboarding-steps">
-      <li v-for="(step, index) in steps" :key="step.titleKey" class="step-card">
-        <span class="step-badge" aria-hidden="true">{{ index + 1 }}</span>
-        <component
-          :is="step.icon"
-          class="step-illustration"
-          aria-hidden="true"
-        />
-        <h3 class="step-title">{{ t(step.titleKey) }}</h3>
-        <p class="step-desc">{{ t(step.descKey) }}</p>
-        <span
+      <template v-for="(step, index) in steps" :key="step.titleKey">
+        <li class="step-card">
+          <span class="step-badge" aria-hidden="true">{{ index + 1 }}</span>
+          <component
+            :is="step.icon"
+            class="step-illustration"
+            aria-hidden="true"
+          />
+          <h3 class="step-title">{{ t(step.titleKey) }}</h3>
+          <p class="step-desc">{{ t(step.descKey) }}</p>
+        </li>
+        <!-- 箭头槽位：flex:1 与其余槽位均分卡片间剩余空间，箭头长度自适应 -->
+        <li
           v-if="index < steps.length - 1"
-          class="step-arrow"
+          class="step-arrow-slot"
           aria-hidden="true"
-        />
-      </li>
+        >
+          <span class="step-arrow" />
+        </li>
+      </template>
     </ol>
 
     <footer class="onboarding-tip">
@@ -80,16 +85,24 @@ const steps = computed(() => [
 </template>
 
 <style lang="scss" scoped>
+/* 自动高度：撑满 .home 剩余空间；负 margin 抵消 .home 的 padding-bottom(24px)，
+   使面板底边与侧边栏圆角条底线（视口底 -24px）齐平 */
+/* 紧凑间距：笔记本可视高（~775px）下整块面板需完整放下，
+   压缩垂直留白约 64px（含 home 页上方区块的同步收紧） */
 .home-onboarding {
-  padding: 40px 32px 36px;
-  background: #fff;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  margin-bottom: -24px;
+  padding: 28px 32px 36px;
+  background: rgba(255, 255, 255, 0.6);
   border: 1px solid rgb(255 255 255 / 65%);
   border-radius: 20px;
   box-shadow: 0 4px 20px rgb(0 0 0 / 8%);
 }
 
 .onboarding-head {
-  margin-bottom: 36px;
+  margin-bottom: 24px;
   text-align: center;
 }
 
@@ -106,10 +119,12 @@ const steps = computed(() => [
   color: #999;
 }
 
+/* 原型图：四张窄卡片，卡片间的剩余空间均分给箭头槽位；
+   steps 区弹性伸展，卡片区在剩余高度里垂直居中 */
 .onboarding-steps {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 20px;
+  display: flex;
+  flex: 1;
+  align-items: center;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -117,10 +132,12 @@ const steps = computed(() => [
 
 .step-card {
   position: relative;
+  flex: 0 1 200px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 24px 16px 20px;
+  padding: 20px 16px 16px;
   background: #fff;
   border-radius: 16px;
   box-shadow: 0 2px 8px rgb(0 0 0 / 6%);
@@ -164,13 +181,23 @@ const steps = computed(() => [
   text-align: center;
 }
 
-/* 步骤间虚线箭头：只在 4 列布局展示，指向插画行（top ≈ 卡片上内边距 + 插画半高） */
+/* 箭头槽位：与其它槽位均分间隙，垂直居中对齐卡片中线 */
+.step-arrow-slot {
+  position: relative;
+  flex: 1 1 0;
+  align-self: center;
+  min-width: 0;
+  height: 0;
+  list-style: none;
+}
+
+/* 步骤间虚线箭头：横跨槽位（两头各留 8px 呼吸），从一张卡片中部指向下一张中部 */
 .step-arrow {
   position: absolute;
-  top: 64px;
-  right: -20px;
-  width: 20px;
-  border-top: 2px dashed #b9c9ee;
+  right: 8px;
+  left: 8px;
+  top: -1px;
+  border-top: 2px dashed #409eff;
 }
 
 .step-arrow::after {
@@ -182,14 +209,14 @@ const steps = computed(() => [
   content: "";
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
-  border-left: 6px solid #b9c9ee;
+  border-left: 6px solid #409eff;
 }
 
 .onboarding-tip {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 32px;
+  margin-top: 24px;
 }
 
 .tip-avatar {
@@ -198,15 +225,31 @@ const steps = computed(() => [
   flex-shrink: 0;
   width: 56px;
   height: 56px;
-  margin-right: -14px;
+  margin-right: 6px;
 }
 
 .tip-bubble {
+  position: relative;
   max-width: 660px;
   padding: 14px 28px;
   background: #eef3ff;
   border: 1px solid #cdd9f6;
   border-radius: 20px;
+}
+
+/* 聊天冒泡尾巴：旋转方形尖角朝左下，指向机器人头像 */
+.tip-bubble::before {
+  position: absolute;
+  bottom: 14px;
+  left: -7px;
+  width: 14px;
+  height: 14px;
+  content: "";
+  background: #eef3ff;
+  border-left: 1px solid #cdd9f6;
+  border-bottom: 1px solid #cdd9f6;
+  border-bottom-left-radius: 3px;
+  transform: rotate(45deg);
 }
 
 .tip-text {
@@ -235,15 +278,21 @@ const steps = computed(() => [
   transform: translateY(6px);
 }
 
-/* 容器断点与 views/home/index.vue 保持一致（container 是 .home） */
-@container (width < 1250px) {
+/* 容器断点与 views/home/index.vue 保持一致（container 是 .home）；
+   间隙由箭头槽位自适应均分，无需按断点调 gap */
+@container (width < 950px) {
   .onboarding-steps {
+    flex-wrap: wrap;
     gap: 16px;
   }
 
-  .step-arrow {
-    right: -16px;
-    width: 16px;
+  .step-card {
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  /* 两列布局：箭头失去指向意义，隐藏 */
+  .step-arrow-slot {
+    display: none;
   }
 }
 
@@ -254,6 +303,10 @@ const steps = computed(() => [
 
   .onboarding-head {
     margin-bottom: 24px;
+  }
+
+  .step-card {
+    flex-basis: 100%;
   }
 
   .tip-avatar {

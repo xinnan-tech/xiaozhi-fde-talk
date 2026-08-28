@@ -187,13 +187,19 @@ def _extract_asr_error(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, I18nError):
         code = exc.code
         if code == Keys.ASR_CONNECT_FAIL.value:
-            # 连接失败：可能是服务未启动（unreachable）也可能是 ws_url/TLS 配错
-            # （config_missing）。凭 code 无法区分，回退到字符串线索——但只针对这一处
-            # 不可避免的小段，且限定在 reason 字段而不是整条 str。
+            # 连接失败：可能是服务未启动（unreachable）、TLS 握手失败
+            # （config_missing，tls_fail）、或 ws_url 格式错（config_missing，bad_url）。
+            # 凭 code 无法区分，回退到字符串线索——但只针对这一处不可避免的小段，
+            # 且限定在 reason 字段而不是整条 str。TLS 必须先判：ssl.SSLError 的 reason
+            # 也含 "wss/ws"，原版用 or 串接会把 TLS 误归为 bad_url（issue 87）。
             reason = str((exc.params or {}).get("reason", ""))
             low = reason.lower()
-            if "TLS" in reason or "ssl" in low or "certificate" in low \
-                    or "ws_url" in reason:
+            if "TLS" in reason or "ssl" in low or "certificate" in low:
+                return _result("config_missing",
+                               key=Keys.DIAG_ASR_TLS_FAIL,
+                               key_params={"type": type(exc).__name__,
+                                           "detail": reason[:200]})
+            if "ws_url" in reason:
                 return _result("config_missing",
                                key=Keys.DIAG_ASR_BAD_URL,
                                key_params={"type": type(exc).__name__,

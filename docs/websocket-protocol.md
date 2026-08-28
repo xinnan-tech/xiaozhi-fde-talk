@@ -344,7 +344,7 @@ asr 推送频率由服务端 ASR 断句策略决定，客户端无法控制。`f
 | `4404` | `not_found` 访谈不存在或不属于当前用户 | 提示用户，回到列表 |
 | `4406` | `session_ended` 访谈已结束 / 存活窗口已过（REST end 场景关闭前先收 `session.ended` 帧） | 提示用户，新建访谈 |
 | `4408` | `handshake_timeout` 5 s 内未发 hello | 检查客户端实现 |
-| `4409` | `concurrent_limit` 活跃访谈达上限（服务端「活跃」指 `in_progress` 状态；`suspended` / `ended` 不计入）| 提示用户先暂停或结束其他进行中的访谈后再来 |
+| `4409` | `concurrent_limit` 活跃访谈达上限（服务端「活跃」指 `setting_up` + `in_progress`；`suspended` / `ended` 不计入）| 提示用户先暂停或结束其他进行中的访谈后再来 |
 | `4410` | `frame_too_large` 单帧 > 64 KiB | 检查音频帧大小 |
 | `4411` | `bad_json` 文本帧不是合法 JSON | 检查客户端实现 |
 
@@ -359,7 +359,7 @@ POST /api/v1/interviews/{interview_id}/end
 Authorization: Bearer <jwt>
 ```
 
-服务端立即把状态写盘为 `ended` 并返回 200；runtime 的收尾（coaching 最终重算，单次 LLM 超时 45 s、end 路径整体上限 `3 * llm_timeout_s = 135 s`）在后台异步执行，不阻塞响应。
+服务端立即把状态写盘为 `ended` 并返回 200；runtime 的收尾（coaching 最终重算）以单层 `asyncio.wait_for(..., timeout=3 * llm_timeout_s = 135 s)` 兜底（默认 45s × 3），整体超时后 best-effort 落盘上一份清单；在后台异步执行，不阻塞响应。
 
 客户端在 200 之后应：
 

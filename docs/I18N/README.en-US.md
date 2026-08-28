@@ -91,4 +91,4 @@ pnpm dev
 4. After logging in, open System Configuration first to fill in your LLM key (otherwise interview creation will be rejected by the LLM), then click "Run Self Check" in the top-right to verify ASR, LLM, and OCR are all healthy.
 5. Create an interview and try speaking.
 
-Further reading: [User Tutorial](用户使用教程.md)（Chinese only：register → system configuration → run an interview → export the report）.
+Further reading: [User Tutorial](../用户使用教程.md)（Chinese only：register → system configuration → run an interview → export the report）.

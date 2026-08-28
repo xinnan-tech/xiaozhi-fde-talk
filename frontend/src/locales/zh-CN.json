@@ -201,6 +201,7 @@
   "create.dialog.template_required": "请选择访谈模板",
   "create.dialog.project_required": "请输入项目或对象",
   "create.dialog.goal_required": "请输入访谈目标",
+  "create.dialog.goal_too_long": "目标内容不能超过100字符",
   "create.dialog.name_placeholder": "请输入访谈名称",
   "create.dialog.project_placeholder": "请输入项目或对象",
   "create.dialog.interviewee_placeholder": "请输入受访者姓名",

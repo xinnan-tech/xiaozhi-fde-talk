@@ -208,6 +208,7 @@
   "create.dialog.template_required": "請選擇訪談範本",
   "create.dialog.project_required": "請輸入專案或對象",
   "create.dialog.goal_required": "請輸入訪談目標",
+  "create.dialog.goal_too_long": "目標內容不能超過100字符",
   "create.dialog.name_placeholder": "請輸入訪談名稱",
   "create.dialog.project_placeholder": "請輸入專案或對象",
   "create.dialog.interviewee_placeholder": "請輸入受訪者姓名",

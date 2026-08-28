@@ -208,6 +208,7 @@
   "create.dialog.template_required": "Vui lòng chọn mẫu phỏng vấn",
   "create.dialog.project_required": "Vui lòng nhập dự án hoặc chủ đề",
   "create.dialog.goal_required": "Vui lòng nhập mục tiêu phỏng vấn",
+  "create.dialog.goal_too_long": "Mục tiêu không được vượt quá 100 ký tự",
   "create.dialog.name_placeholder": "Nhập tên phỏng vấn",
   "create.dialog.project_placeholder": "Nhập dự án hoặc chủ đề",
   "create.dialog.interviewee_placeholder": "Nhập tên người được phỏng vấn",

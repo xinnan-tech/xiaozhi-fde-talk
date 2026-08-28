@@ -201,6 +201,7 @@
   "create.dialog.template_required": "Please select an interview template",
   "create.dialog.project_required": "Please enter a project or subject",
   "create.dialog.goal_required": "Please enter the interview goal",
+  "create.dialog.goal_too_long": "Goal content must not exceed 100 characters",
   "create.dialog.name_placeholder": "Enter the interview name",
   "create.dialog.project_placeholder": "Enter a project or subject",
   "create.dialog.interviewee_placeholder": "Enter the interviewee name",

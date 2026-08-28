@@ -729,6 +729,12 @@ const handleClose = () => {
 const handleSubmit = async () => {
   if (props.submitting) return;
   if (!formRef.value) return;
+
+  if ((form.goal?.length || 0) > 100) {
+    ElMessage.error(t("create.dialog.goal_too_long"));
+    return;
+  }
+
   const valid = await formRef.value.validate().catch(() => false);
   if (!valid) return;
 
@@ -884,11 +890,12 @@ watch(
                 v-model="form.goal"
                 type="textarea"
                 :rows="3"
-                maxlength="100"
-                show-word-limit
                 :placeholder="$t('create.dialog.goal_placeholder')"
                 @input="goalError = ''"
               />
+              <div class="goal-count" :class="{ overlimit: (form.goal?.length || 0) > 100 }">
+                {{ form.goal?.length || 0 }} / 100
+              </div>
               <p class="goal-error" :class="{ visible: !!goalError }">
                 {{ goalError || " " }}
               </p>
@@ -1306,6 +1313,18 @@ watch(
     .goal-error {
       &.visible {
         visibility: visible;
+      }
+    }
+
+    .goal-count {
+      align-self: flex-end;
+      margin-top: 4px;
+      font-size: 12px;
+      line-height: 14px;
+      color: #909399;
+
+      &.overlimit {
+        color: #f56c6c;
       }
     }
 

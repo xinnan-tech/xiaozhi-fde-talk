@@ -52,7 +52,7 @@ docker compose up -d funasr
 docker compose logs -f funasr
 ```
 
-后端默认 ASR 地址为 `wss://localhost:10096`，由系统配置 `asr.funasr_server.ws_url` 提供
+后端默认 ASR 地址为 `wss://localhost:10096`，由系统配置项「WebSocket 地址」提供
 （首次启动时自动种入默认值），不在 `.env` 里配——本地开发开箱即连。
 
 <a id="start-the-backend"></a>

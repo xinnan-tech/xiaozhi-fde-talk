@@ -52,7 +52,7 @@ docker compose up -d funasr
 docker compose logs -f funasr
 ```
 
-The backend defaults its ASR URL to `wss://localhost:10096`, provided by the system config `asr.funasr_server.ws_url` (seeded automatically on first run). It is not configured in `.env`—local development works out of the box.
+The backend defaults its ASR URL to `wss://localhost:10096`, provided by the system field "WebSocket URL" (seeded automatically on first run). It is not configured in `.env`—local development works out of the box.
 
 <a id="start-the-backend"></a>
 

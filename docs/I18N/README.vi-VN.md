@@ -52,7 +52,7 @@ docker compose up -d funasr
 docker compose logs -f funasr
 ```
 
-Backend mặc định lấy địa chỉ ASR là `wss://localhost:10096`, được cung cấp bởi cấu hình hệ thống `asr.funasr_server.ws_url` (tự động seed khi khởi động lần đầu), không cần khai báo trong `.env`—phát triển local dùng được ngay.
+Backend mặc định lấy địa chỉ ASR là `wss://localhost:10096`, được cung cấp bởi trường hệ thống "WebSocket URL" (tự động seed khi khởi động lần đầu), không cần khai báo trong `.env`—phát triển local dùng được ngay.
 
 <a id="start-the-backend"></a>
 

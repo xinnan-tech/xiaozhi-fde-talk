@@ -91,4 +91,4 @@ pnpm dev
 4. Sau khi đăng nhập, vào "Cấu hình hệ thống" trước để nhập khóa LLM, rồi bấm "Chạy tự kiểm tra" ở góc trên bên phải để xem từng thành phần có chạy ổn không
 5. Tạo một buổi phỏng vấn và thử nói thử
 
-Đọc thêm: [Hướng dẫn sử dụng](../用户使用教程.md)（chỉ có tiếng Trung: đăng ký → cấu hình hệ thống → chạy phỏng vấn → xuất báo cáo）.
+Đọc thêm: [Hướng dẫn sử dụng](../user-tutorial.md)（chỉ có tiếng Trung: đăng ký → cấu hình hệ thống → chạy phỏng vấn → xuất báo cáo）.

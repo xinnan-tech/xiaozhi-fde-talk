@@ -1,7 +1,7 @@
 """全局并发上限（session.max_concurrent）+ SUSPENDED 不占名额 的行为校验。
 
 回归点：用户暂停一场访谈后，应能新建并开始另一场（暂停态不再阻塞）；
-同时「至多 N 场活跃」的护栏在 start 与 恢复（on_reconnect）两处都生效。
+同时「至多 N 场活跃」的护栏在 start 与 恢复（resume）两处都生效。
 """
 from __future__ import annotations
 
@@ -89,7 +89,12 @@ async def test_start_respects_global_limit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_resume_blocked_when_at_limit(monkeypatch):
-    """恢复 SUSPENDED 时若全局已达上限，应被挡（避免双活跃）。"""
+    """恢复 SUSPENDED 时若全局已达上限，应被挡（避免双活跃）。
+
+    恢复入口是 manager.resume()（WS 重连不再自动转回 in_progress——避免网络
+    抖动把列表状态刷成「进行中」；状态变更改由前端点「继续」触发 resume API）。
+    并发上限校验随之落在 resume()，本测试守住这一护栏。
+    """
     mgr = SessionManager()
     suspended = _FakeState("paused", "u1", SessionStatus.SUSPENDED)
 
@@ -100,13 +105,16 @@ async def test_resume_blocked_when_at_limit(monkeypatch):
     _wire(mgr, monkeypatch, live=4, limit=4)
 
     with pytest.raises(ConcurrentLimitError):
-        await mgr.on_reconnect("paused")
+        await mgr.resume("paused")
     assert suspended.status == SessionStatus.SUSPENDED  # 未被转成 in_progress
 
 
 @pytest.mark.asyncio
 async def test_resume_ok_when_under_limit(monkeypatch):
-    """恢复 SUSPENDED 时未达上限，应正常转回 in_progress。"""
+    """恢复 SUSPENDED 时未达上限，应正常转回 in_progress。
+
+    详见 test_resume_blocked_when_at_limit 头部说明。
+    """
     mgr = SessionManager()
     suspended = _FakeState("paused", "u1", SessionStatus.SUSPENDED)
 
@@ -116,5 +124,5 @@ async def test_resume_ok_when_under_limit(monkeypatch):
     mgr.get = _get  # type: ignore[assignment]
     _wire(mgr, monkeypatch, live=3, limit=4)
 
-    res = await mgr.on_reconnect("paused")
+    res = await mgr.resume("paused")
     assert res.status == SessionStatus.IN_PROGRESS

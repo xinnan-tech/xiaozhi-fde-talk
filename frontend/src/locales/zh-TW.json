@@ -245,6 +245,8 @@
   "interview.end_confirm": "確定要結束目前訪談嗎？",
   "interview.end_title": "結束訪談",
   "interview.end_failed": "結束訪談失敗，請稍後再試",
+  "interview.pause_failed": "暫停訪談失敗，請稍後再試",
+  "interview.resume_failed": "繼續訪談失敗，請稍後再試",
   "interview.suggestion.pending": "待追問",
   "interview.suggestion.covered": "已覆蓋",
   "interview.suggestion.ignored": "已忽略",

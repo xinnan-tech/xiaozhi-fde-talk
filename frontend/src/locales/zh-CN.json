@@ -245,6 +245,8 @@
   "interview.end_confirm": "确定结束当前访谈吗？",
   "interview.end_title": "结束访谈",
   "interview.end_failed": "结束访谈失败，请稍后重试",
+  "interview.pause_failed": "暂停访谈失败，请稍后重试",
+  "interview.resume_failed": "继续访谈失败，请稍后重试",
   "interview.suggestion.pending": "待追问",
   "interview.suggestion.covered": "已覆盖",
   "interview.suggestion.ignored": "已忽略",

@@ -27,6 +27,8 @@ import {
   ignoreInterviewItemApi,
   type InterviewDetailItem,
   type InterviewDetailType,
+  resumeInterviewApi,
+  suspendInterviewApi,
   unignoreInterviewItemApi
 } from "@/api/interview";
 import { useAudioRecorder } from "@/composables/useAudioRecorder";
@@ -379,6 +381,15 @@ const handleStartInterview = async () => {
   allowReconnect();
   openWebSocket();
 
+  // suspended 状态恢复：立即调 resume API 更新 DB（不依赖 WS 连接状态）。
+  if (wasSuspended) {
+    try {
+      await resumeInterviewApi(getInterviewSessionId());
+    } catch (e: unknown) {
+      ElMessage.error(extractBackendError(e, t("interview.resume_failed")));
+    }
+  }
+
   // WebSocket 已经连接时直接开始监听；尚未连接时由 onConnected 处理。
   if (isWebSocketConnected.value) {
     const listeningStarted = await openMicrophone();
@@ -397,8 +408,13 @@ const handleStartInterview = async () => {
   }
 };
 
-const handlePauseInterview = () => {
+const handlePauseInterview = async () => {
   if (!isInterviewStarted.value) return;
+  try {
+    await suspendInterviewApi(getInterviewSessionId());
+  } catch (e: unknown) {
+    ElMessage.error(extractBackendError(e, t("interview.pause_failed")));
+  }
   sendListenState("stop");
   stopRecording();
   isInterviewStarted.value = false;
@@ -804,8 +820,8 @@ const websocket = useWebSocket({
   },
   onDisconnected: event => {
     console.warn("[InterviewPage] WebSocket 已断开", event.code, event.reason);
+    shouldResumeMicrophone.value = false;
     if (!isMicrophoneEnabled.value) return;
-    shouldResumeMicrophone.value = true;
     stopRecording();
   },
   onError: message => {
@@ -962,7 +978,10 @@ onBeforeUnmount(() => {
   websocket.close();
 });
 
-const handleBack = () => {
+const handleBack = async () => {
+  if (isInterviewStarted.value) {
+    void handlePauseInterview();
+  }
   if (window.history.length > 1) {
     router.back();
     return;

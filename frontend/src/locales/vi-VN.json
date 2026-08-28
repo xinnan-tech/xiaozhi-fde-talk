@@ -245,6 +245,8 @@
   "interview.end_confirm": "Bạn có chắc chắn muốn kết thúc phỏng vấn này không?",
   "interview.end_title": "Kết thúc phỏng vấn",
   "interview.end_failed": "Kết thúc phỏng vấn thất bại. Vui lòng thử lại sau.",
+  "interview.pause_failed": "Tạm dừng phỏng vấn thất bại. Vui lòng thử lại sau.",
+  "interview.resume_failed": "Tiếp tục phỏng vấn thất bại. Vui lòng thử lại sau.",
   "interview.suggestion.pending": "Cần hỏi",
   "interview.suggestion.covered": "Đã đề cập",
   "interview.suggestion.ignored": "Đã bỏ qua",

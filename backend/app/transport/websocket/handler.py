@@ -425,6 +425,9 @@ class WSHandler:
         if self.runtime._send_fn != self._send:
             logger.info("清理跳过（已被更新的连接接管）：session=%s", self.session_id)
             return
+        # 关闭 ASR 管线（与用户点「暂停」同等待遇），再解绑并寄存。
+        # listen_stop 幂等：已 LIVE_PAUSED 时直接 no-op。
+        await self.runtime.listen_stop()
         # 解绑（unbind 内部会复查 flush 窗口里的竞态）。未实际拆绑 = 已被新连接取代 → 不寄存。
         # 会话已结束的场景：REST end 的后台拆除会把 runtime 置 TERMINATED，park 对
         # TERMINATED 的 runtime 不寄存、直接 drop，这里无需特判。

@@ -245,6 +245,22 @@ export const endInterviewApi = (sessionId: string) => {
   );
 };
 
+/** 暂停访谈 */
+export const suspendInterviewApi = (sessionId: string) => {
+  return http.request<unknown>(
+    "post",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/suspend`)
+  );
+};
+
+/** 继续访谈 */
+export const resumeInterviewApi = (sessionId: string) => {
+  return http.request<unknown>(
+    "post",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/resume`)
+  );
+};
+
 /** 获取访谈报告 */
 export const getInterviewReportApi = (sessionId: string) => {
   return http.request<InterviewReportType>(

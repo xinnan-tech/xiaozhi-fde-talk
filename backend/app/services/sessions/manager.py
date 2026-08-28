@@ -209,6 +209,50 @@ class SessionManager:
                   reason="manual", status="ended")
         return state
 
+    async def suspend(self, session_id: str) -> SessionState:
+        """暂停访谈：仅变更状态为 suspended，不拆 runtime（管线由 WS listen:stop 暂停）。
+        与 end 的区别：不做辅导终局重算，不关 WS，不设置 ended_at。
+        """
+        state = self._active.pop(session_id, None) or await self.get(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        self._cancel_grace(session_id)
+        self._last_activity_at.pop(session_id, None)
+        if state.status == SessionStatus.SUSPENDED:
+            # 已经是 suspended，幂等跳过
+            return state
+        await self._transition(state, SessionStatus.SUSPENDED)
+        await interview_repo.save_state_auto(state)
+        log_event("session_suspended", session=session_id, user=state.user_id,
+                  reason="manual", status="suspended")
+        return state
+
+    async def resume(self, session_id: str) -> SessionState:
+        """继续访谈：将 suspended 状态的会话转回 in_progress。"""
+        state = self._active.pop(session_id, None) or await self.get(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        async with self._start_lock:
+            state = await self.get(session_id)
+            if state.status == SessionStatus.IN_PROGRESS:
+                self._active[session_id] = state
+                self.touch(session_id)
+                return state
+            if state.status != SessionStatus.SUSPENDED:
+                raise SessionIllegalTransitionError(
+                    from_state=state.status.value, to_state="in_progress",
+                )
+            active = await interview_repo.count_active_auto()
+            limit = await get_max_concurrent()
+            if active >= limit:
+                raise SessionConcurrentLimitError(limit=limit)
+            await self._transition(state, SessionStatus.IN_PROGRESS)
+        self._active[session_id] = state
+        self.touch(session_id)
+        log_event("session_resumed", session=session_id, user=state.user_id,
+                  reason="manual", status="in_progress")
+        return state
+
     async def update(
         self,
         session_id: str,
@@ -317,17 +361,11 @@ class SessionManager:
         self._cancel_grace(session_id)
         state = await self.get(session_id)
         if state and state.status == SessionStatus.SUSPENDED:
-            # 恢复成 in_progress 前须复核全局上限：suspended 本身不占名额，但一旦
-            # 恢复就重新持有 live 运行时。与 start() 同一把 _start_lock，避免恢复与
-            # 新建并发导致超额。IN_PROGRESS 的普通重连不走这里（它本就是那场活跃）。
-            async with self._start_lock:
-                state = await self.get(session_id)  # 临界区内重取，防状态已变
-                if state and state.status == SessionStatus.SUSPENDED:
-                    active = await interview_repo.count_active_auto()
-                    limit = await get_max_concurrent()
-                    if active >= limit:
-                        raise SessionConcurrentLimitError(limit=limit)
-                    await self._transition(state, SessionStatus.IN_PROGRESS)
+            # WS 重连时：若会话处于 suspended，保持 suspended 不变。
+            # 状态转回 in_progress 由用户点击"继续"按钮触发（listen:start 路径），
+            # 而不是 WS 重连自动触发——避免网络抖动 WS 重连就把列表页状态刷回"进行中"。
+            # SUSPENDED 不占活跃名额，无需校验并发上限。
+            pass
         if state is not None:
             self._active[session_id] = state
             self.touch(session_id)

@@ -245,6 +245,8 @@
   "interview.end_confirm": "Are you sure you want to end this interview?",
   "interview.end_title": "End interview",
   "interview.end_failed": "Failed to end the interview. Please try again later.",
+  "interview.pause_failed": "Failed to pause the interview. Please try again later.",
+  "interview.resume_failed": "Failed to resume the interview. Please try again later.",
   "interview.suggestion.pending": "To ask",
   "interview.suggestion.covered": "Covered",
   "interview.suggestion.ignored": "Ignored",

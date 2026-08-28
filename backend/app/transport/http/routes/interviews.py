@@ -299,6 +299,40 @@ async def end_interview(
     return await _summary_from_session_id(session_id)
 
 
+@router.post("/{session_id}/suspend")
+async def suspend_interview(
+    session_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """暂停访谈（用户点「暂停」按钮时调用）。
+
+    与 end 的区别：不做辅导终局重算，不拆 runtime；只把 status 落盘成 suspended，
+    让列表页立即可见暂停状态。WS listen:stop 和 runtime 管线停麦由前端在调用本 API
+    之后自行处理（与 end 按钮 same pattern）。
+    """
+    state = await manager.get(session_id)
+    if state is None or state.session.user_id != user.user_id:
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    await manager.suspend(session_id)
+    return await _summary_from_session_id(session_id)
+
+
+@router.post("/{session_id}/resume")
+async def resume_interview(
+    session_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """继续访谈（用户点「继续」按钮时调用）。
+
+    将 suspended 状态的访谈转回 in_progress。并发限制由 manager.resume() 校验。
+    """
+    state = await manager.get(session_id)
+    if state is None or state.session.user_id != user.user_id:
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    await manager.resume(session_id)
+    return await _summary_from_session_id(session_id)
+
+
 @router.delete("/{session_id}")
 async def delete_interview(
     session_id: str,

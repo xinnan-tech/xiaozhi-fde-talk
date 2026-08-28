@@ -11,6 +11,7 @@ import {
 import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat";
 import type { FormInstance, FormRules } from "element-plus/es/components/form";
+import { ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { message } from "@/utils/message";
 import { extractBackendError } from "@/utils/error";
@@ -100,6 +101,7 @@ const {
   elapsedSeconds: asrElapsedSeconds,
   stopReason: asrStopReason,
   everRecorded: asrEverRecorded,
+  error: asrError,
   start: startAsrRecording,
   stop: stopAsrRecording,
   cancel: cancelAsrRecording
@@ -236,6 +238,27 @@ const closeActivePanel = () => {
   closeCamera();
 };
 
+const showMicrophonePermissionGuide = () => {
+  // flags 指引只适用于 HTTP + 局域网 IP
+  if (asrError.value?.message !== "mic_unavailable_insecure_origin") {
+    message(t("interview.runtime.mic_permission"), { type: "error" });
+    return;
+  }
+
+  void ElMessageBox.alert(
+    t("interview.runtime.mic_permission_guide", {
+      origin: window.location.origin
+    }),
+    t("interview.runtime.mic_permission_title"),
+    {
+      type: "warning",
+      confirmButtonText: t("interview.runtime.mic_permission_confirm"),
+      customStyle: { maxWidth: "588px" },
+      closeOnClickModal: true
+    }
+  ).catch(() => undefined);
+};
+
 const selectInputMethod = async (methodKey: string) => {
   // 录音进行中不允许切换入口，先停止识别
   if (asrState.value !== "idle") return;
@@ -252,7 +275,7 @@ const selectInputMethod = async (methodKey: string) => {
   if (methodKey === "voice") {
     const started = await startAsrRecording();
     if (!started) {
-      message(t("create.dialog.voice_failed"), { type: "error" });
+      showMicrophonePermissionGuide();
       closeActivePanel();
     }
   } else if (methodKey === "camera") {

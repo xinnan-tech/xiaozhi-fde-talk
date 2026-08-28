@@ -334,6 +334,31 @@ const startInterviewTimer = (reset = true) => {
   }, 1000);
 };
 
+const showMicrophonePermissionGuide = () => {
+  const microphoneError = microphoneErrorState.value;
+  // 只有非安全源需要 flags 指引，普通权限拒绝仍使用通用提示
+  const isInsecureOrigin =
+    microphoneError?.message === "mic_unavailable_insecure_origin";
+
+  if (!isInsecureOrigin) {
+    ElMessage.error(t("interview.runtime.mic_permission"));
+    return;
+  }
+
+  void ElMessageBox.alert(
+    t("interview.runtime.mic_permission_guide", {
+      origin: window.location.origin
+    }),
+    t("interview.runtime.mic_permission_title"),
+    {
+      type: "warning",
+      confirmButtonText: t("interview.runtime.mic_permission_confirm"),
+      customStyle: { maxWidth: "588px" },
+      closeOnClickModal: true
+    }
+  ).catch(() => undefined);
+};
+
 const handleStartInterview = async () => {
   // 会话已结束时不可重启：等待确认期间后端可能再推 session.ended，
   // 此处若不拦就把 ended 改回 in_progress，状态机被弹框异步路径撕坏。
@@ -367,7 +392,7 @@ const handleStartInterview = async () => {
     shouldResumeMicrophone.value = false;
     isInterviewStarted.value = false;
     stopInterviewTimer();
-    ElMessage.error(t("interview.runtime.mic_permission"));
+    showMicrophonePermissionGuide();
     return;
   }
 
@@ -660,7 +685,9 @@ const handleSessionSuspended = async () => {
     // 命中即 toast 告知「会话已结束」，避免 handleStartInterview 入口守卫
     // 静默吞掉、用户毫无反馈。
     if (interviewDetail.value?.status === "ended") {
-      ElMessage.warning(t("interview.runtime.suspend_dialog.ended_while_waiting"));
+      ElMessage.warning(
+        t("interview.runtime.suspend_dialog.ended_while_waiting")
+      );
       return;
     }
     await handleStartInterview();
@@ -671,7 +698,9 @@ const handleSessionSuspended = async () => {
     // 入口守卫把 ended 收窄掉导致的 TS2367。
     const statusAfterResume: string | undefined = interviewDetail.value?.status;
     if (statusAfterResume === "ended") {
-      ElMessage.warning(t("interview.runtime.suspend_dialog.ended_while_waiting"));
+      ElMessage.warning(
+        t("interview.runtime.suspend_dialog.ended_while_waiting")
+      );
     }
   } catch (error) {
     // Element Plus 用户取消 confirm 时 reject 的值是字符串 'cancel' /
@@ -685,7 +714,9 @@ const handleSessionSuspended = async () => {
       // 兜底提示——handleServerMessage 只 close 弹框不直接 toast，避免
       // 与 post-await 守护路径双弹。
       if (interviewDetail.value?.status === "ended") {
-        ElMessage.warning(t("interview.runtime.suspend_dialog.ended_while_waiting"));
+        ElMessage.warning(
+          t("interview.runtime.suspend_dialog.ended_while_waiting")
+        );
       }
       return;
     }
@@ -826,6 +857,7 @@ const isWebSocketConnected = computed(
 
 const {
   isRecording: isMicrophoneEnabled,
+  error: microphoneErrorState,
   acquireStream,
   startRecording,
   stopRecording
@@ -2717,6 +2749,11 @@ onMounted(() => {
   .note-scroll :deep(.el-scrollbar__bar.is-vertical) {
     right: 2px;
   }
+}
+
+:deep(.mic-permission-confirm-box) {
+  max-width: 800px !important;
+  width: 800px !important;
 }
 
 @media (max-width: 1400px) {

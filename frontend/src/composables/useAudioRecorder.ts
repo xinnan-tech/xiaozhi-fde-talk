@@ -18,7 +18,8 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
       typeof navigator === "undefined" ||
       !navigator.mediaDevices?.getUserMedia
     ) {
-      error.value = new Error("当前浏览器不支持 getUserMedia");
+      // HTTP + 局域网 IP 属于非安全源，浏览器不会提供 getUserMedia
+      error.value = new Error("mic_unavailable_insecure_origin");
       console.error(
         "[useAudioRecorder] 浏览器不支持 getUserMedia",
         error.value

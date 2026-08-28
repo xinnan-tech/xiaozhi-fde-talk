@@ -65,7 +65,7 @@
   "diag.llm.ok": "LLM reachable and returning content",
   "diag.asr.timeout": "ASR connection timed out",
   "diag.asr.unreachable": "ASR service not reachable (port down / service not running), confirm FunASR is up",
-  "diag.asr.tls_fail": "ASR TLS handshake failed: check ws_url protocol (ws/wss) and certificate",
+  "diag.asr.tls_fail": "ASR TLS handshake failed: check ws_url protocol (ws/wss) and certificate; for self-signed certs you can uncheck \"Verify SSL\"",
   "diag.asr.bad_url": "ASR ws_url format is invalid",
   "diag.asr.invoke_fail_typed": "ASR call exception: {type}: {detail}",
   "diag.asr.not_configured": "asr.ws_url not configured, please fill it under '⚙️ Backend Config'",

@@ -65,7 +65,7 @@
   "diag.llm.ok": "LLM có thể kết nối và trả về nội dung",
   "diag.asr.timeout": "Kết nối ASR đã hết thời gian chờ",
   "diag.asr.unreachable": "Không thể kết nối dịch vụ ASR (port down / dịch vụ không chạy), xác nhận FunASR đang hoạt động",
-  "diag.asr.tls_fail": "Bắt tay ASR TLS thất bại: kiểm tra giao thức ws_url (ws/wss) và chứng chỉ",
+  "diag.asr.tls_fail": "Bắt tay ASR TLS thất bại: kiểm tra giao thức ws_url (ws/wss) và chứng chỉ; với chứng chỉ tự ký bạn có thể bỏ chọn \"Xác minh SSL\"",
   "diag.asr.bad_url": "Định dạng ASR ws_url không hợp lệ",
   "diag.asr.invoke_fail_typed": "Ngoại lệ lệnh gọi ASR: {type}: {detail}",
   "diag.asr.not_configured": "asr.ws_url chưa được cấu hình, vui lòng điền trong '⚙️ Cấu hình Backend'",

@@ -225,7 +225,7 @@ def test_collect_keys_references_handles_dynamic_access(tmp_path: Path):
         [tmp_path], known_keys={"FOO_USED", "FOO_UNUSED", "BAR_USED", "BAZ_USED"}
     )
     assert static == set()
-    # P1 修复：file_static 为空 → 不触发兜底，dynamic_only 仍是空集
+    # file_static 为空 → 不触发兜底，dynamic_only 仍是空集
     assert dynamic_only == set()
 
     problems, total, static_count, dynamic_count = _check_unused_enum_entries(

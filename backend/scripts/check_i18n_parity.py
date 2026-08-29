@@ -105,7 +105,7 @@ def _parse_keys_enum(messages_path: Path) -> dict[str, str]:
 
     接受 `NAME = "literal.string"` 和 `NAME: str = "literal.string"` 两种形
     式；alias（`A = B` 形式）展开进 name_to_value，value 取自它指向的原
-    条目——否则代码里只写 `Keys.A`、从写 `Keys.B` 时原名 B 会被误报死
+    条目——否则代码里只写 `Keys.A`、不写 `Keys.B` 时原名 B 会被误报死
     键。文件不存在 / 编码错误 / 语法错误抛异常，由 caller 推一条 problem
     让 CI 红，避免整个 dead-key 检测永久 no-op。
     """
@@ -138,7 +138,7 @@ def _parse_keys_enum(messages_path: Path) -> dict[str, str]:
                 and isinstance(stmt.value, ast.Name)
                 and stmt.value.id in name_to_value
             ):
-                # alias：A = B，把 A 合并进 name_to_value，value 用 B 的
+                # alias：A = B，把 A 合并进 name_to_value，value 用 B 的值
                 name_to_value[stmt.targets[0].id] = name_to_value[stmt.value.id]
     return name_to_value
 
@@ -211,7 +211,7 @@ def _collect_keys_references(
                 ):
                     has_dynamic_access = True
             statically_used |= file_static
-            # P1 修复：file_static ≥ 1 才允许该文件触发 dynamic 兜底——
+            # file_static ≥ 1 才允许该文件触发 dynamic 兜底——
             # 纯动态访问的文件不应把 known_keys 全部吞掉。
             if has_dynamic_access and known_keys and file_static:
                 dynamic_only_keys |= known_keys - file_static
@@ -233,7 +233,7 @@ def _check_unused_enum_entries(
     """
     try:
         name_to_value = _parse_keys_enum(messages_path)
-    except (FileNotFoundError, UnicodeDecodeError, SyntaxError) as e:
+    except (OSError, UnicodeDecodeError, SyntaxError) as e:
         return (
             [f"  [unused] messages.py 缺失/解析失败（{e}），dead-key 检测未执行"],
             0, 0, 0,

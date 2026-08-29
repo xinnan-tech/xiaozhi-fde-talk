@@ -71,6 +71,17 @@ pnpm run test:e2e:report
 | `report.spec.ts` | /reports route is reachable (parent redirect target) | /reports 可达 | body |
 | `slow-network.spec.ts` | 1Mbps/200ms RTT 弱网下首屏 domcontentloaded < 8s | 弱网首屏时延 | CDP `Network.emulateNetworkConditions` |
 
+## 手动跑的 spec（默认 CI 不收）
+
+下面两条 spec 依赖手工起好的 backend 8181 + preview 4174，避免和同事开发端口（8000/4173）撞车，默认 `playwright.config.ts` 的 `testIgnore` 把它们挡掉。各用专属 config：
+
+| Spec 文件 | 专属 config | 跑法 |
+|---|---|---|
+| `suspend-confirm.spec.ts` | `playwright.suspend.config.ts` | `pnpm exec playwright test --config=playwright.suspend.config.ts` |
+| `pause-status.spec.ts` | `playwright.pause-status.config.ts` | `pnpm exec playwright test --config=playwright.pause-status.config.ts` |
+
+前置：见各 config 顶部注释。
+
 ## 已知限制（环境问题）
 
 - FunASR 文本断言不验具体文字（模型首段推理时延不稳，30s 也不一定出字）。

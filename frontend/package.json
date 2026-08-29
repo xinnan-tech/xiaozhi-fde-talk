@@ -26,7 +26,9 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest"
   },
   "keywords": [
     "xiaozhi-fde-talk"
@@ -92,6 +94,7 @@
     "@types/sortablejs": "^1.15.9",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vitejs/plugin-vue-jsx": "^5.1.1",
+    "@vue/test-utils": "^2.5.0",
     "boxen": "^8.0.1",
     "cross-env": "^10.1.0",
     "cssnano": "^7.1.1",
@@ -100,6 +103,7 @@
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-vue": "^10.5.1",
     "gradient-string": "^3.0.0",
+    "happy-dom": "^20.11.15",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.6",
     "postcss": "^8.5.6",
@@ -125,6 +129,7 @@
     "vite-plugin-compression": "^0.5.1",
     "vite-plugin-fake-server": "^2.2.0",
     "vite-svg-loader": "^5.1.0",
+    "vitest": "^4.1.11",
     "vue-eslint-parser": "^10.2.0",
     "vue-tsc": "^3.1.2"
   },

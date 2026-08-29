@@ -8,6 +8,14 @@ import { defineConfig } from "@playwright/test"
 
 export default defineConfig({
   testDir: "tests/e2e",
+  // 手动跑的挂起/恢复 spec 用各自独立 config（playwright.suspend.config.ts /
+  // playwright.pause-status.config.ts）打到 4174 + 8181 自管服务，避免默认自启的
+  // 4173 / 8001 webServer 端口与同事开发端口撞车。所以默认 CI 不收集这俩 spec。
+  // 各自 config 的 testMatch 已经把它们圈进对应配置。
+  testIgnore: [
+    "**/suspend-confirm.spec.ts",
+    "**/pause-status.spec.ts"
+  ],
   globalSetup: "./tests/e2e/global-setup.ts",
   timeout: 30_000,
   expect: { timeout: 15_000 },

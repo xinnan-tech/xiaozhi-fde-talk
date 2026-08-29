@@ -75,14 +75,17 @@ const fileInputRef = ref<HTMLInputElement>();
 const frozenImageSrc = ref("");
 const createDefaultForm = (): CreateInterviewForm => ({
   base_info: {
-    title: "欣南科技公司售前业务洽谈助手",
-    project: "欣南科技售前",
-    interviewee: "彭经理",
-    start_time: "",
+    // 不再预填演示值（旧版预填「欣南科技/彭经理」等假数据，用户不删就会
+    // 创建出带假人名假项目的访谈）；placeholder 负责引导，必填规则负责兜底
+    title: "",
+    project: "",
+    interviewee: "",
+    // 默认「此刻」：访谈多为马上开始，留空只会制造最常见的必填报错
+    start_time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
     duration: "45",
     end_time: ""
   },
-  goal: "了解欣南售前工作流程，业务洽谈工具的需求，使用场景，部署方式之类",
+  goal: "",
   template_id: ""
 });
 const form = reactive<CreateInterviewForm>(createDefaultForm());
@@ -515,10 +518,9 @@ const recognizePhoto = async () => {
   try {
     imageBase64 = await snapCamera(video);
   } catch (error) {
-    message(
-      extractBackendError(error, t("create.dialog.camera_unavailable")),
-      { type: "error" }
-    );
+    message(extractBackendError(error, t("create.dialog.camera_unavailable")), {
+      type: "error"
+    });
     return;
   }
 
@@ -716,7 +718,12 @@ const handleSubmit = async () => {
   if (props.submitting) return;
   if (!formRef.value) return;
   const valid = await formRef.value.validate().catch(() => false);
-  if (!valid) return;
+  if (!valid) {
+    // 表单比一屏长（名称/时间/模板/目标），出错的字段常在滚动区外：
+    // scroll-to-error 负责滚过去标红，这里再 toast 一条兜底，避免「点了没反应」
+    message(t("create.dialog.form_invalid"), { type: "warning" });
+    return;
+  }
 
   form.base_info.end_time = calculateEndTime();
 
@@ -759,6 +766,7 @@ watch(
       :rules="rules"
       label-position="top"
       require-asterisk-position="right"
+      scroll-to-error
       class="create-interview-form"
     >
       <section class="form-section">

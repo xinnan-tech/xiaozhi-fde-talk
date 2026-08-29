@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test"
+import { fillCreateInterviewForm } from "./fixtures/create-interview"
 
 // 首页引导面板（views/home/index.vue + components/home/HomeOnboarding.vue）：
 // 显示条件 = !listLoading && interviewList 为空。未登录时列表恒为空 → 面板可见；
@@ -55,13 +56,8 @@ test.describe("home onboarding panel", () => {
     const dialog = page.locator(".create-interview-dialog")
     await dialog.waitFor({ state: "visible", timeout: 10_000 })
 
-    const titleField = page.getByLabel(/访谈名称|interview.*name/i).first()
-    await titleField.waitFor({ state: "visible", timeout: 10_000 })
-    await titleField.fill(`e2e-onboarding-${Date.now()}`)
-    await page
-      .getByLabel(/访谈时间|Interview time/i)
-      .first()
-      .fill("2026-08-28 16:00:00")
+    // fixture 首字段自带 waitFor visible（即对话框就绪信号）
+    await fillCreateInterviewForm(page, `e2e-onboarding-${Date.now()}`, "2026-08-28 16:00:00")
     await page
       .getByRole("button", { name: /创建访谈|create.*interview/i })
       .last()

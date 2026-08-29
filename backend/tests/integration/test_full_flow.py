@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
 import pytest
 import websockets
@@ -78,14 +77,12 @@ async def test_full_flow(client, login, create_session, end_session, zh_webm):
         r = await c.get(f"/api/v1/interviews/{sid}/report", headers=h)
         assert r.status_code == 200 and r.json()["status"] == "ready", r.text
         md = r.json()["content_md"]
-        # 报告骨架应至少保留一个模板里的 heading——直接从 templates/pm.json 抽
-        # headings，不硬编码中文字串。i18n directive / LLM 输出模板都可能微调标题
+        # 报告骨架应至少保留一个模板里的 heading——从模板 API 抽 headings，
+        # 不硬编码中文字串。i18n directive / LLM 输出模板都可能微调标题
         # 字面，但骨架结构（h1 + 多个 h2）必须保留。
-        tpl_doc = json.loads(
-            (Path(__file__).resolve().parents[2] / "templates" / "pm.json").read_text(
-                encoding="utf-8"
-            )
-        )["doc"]
+        r = await c.get("/api/v1/templates/pm-research", headers=h)
+        assert r.status_code == 200, r.text
+        tpl_doc = r.json()["report"]["doc"]
         headings = [
             line.lstrip("# ").strip()
             for line in tpl_doc.splitlines()

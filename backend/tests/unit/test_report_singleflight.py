@@ -66,7 +66,7 @@ def _patch_deps(monkeypatch, repo, llm_calls: list[str]):
     llm = MagicMock()
     llm.chat_text = _slow_chat
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
-    monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
 
 

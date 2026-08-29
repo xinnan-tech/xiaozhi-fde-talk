@@ -22,6 +22,7 @@ def _record_to_session(rec: InterviewRecord) -> Session:
         id=rec.id,
         template_id=rec.template_id,
         template_version=rec.template_version,
+        template_snapshot=rec.template_snapshot,
         status=SessionStatus(rec.status),
         user_id=rec.user_id,
         base_info=rec.base_info or {},
@@ -117,6 +118,7 @@ class InterviewRepository:
                 )
                 rec.template_id = s.template_id
                 rec.template_version = s.template_version
+                rec.template_snapshot = s.template_snapshot
                 if not is_regression:
                     rec.status = s.status.value
                 rec.user_id = s.user_id

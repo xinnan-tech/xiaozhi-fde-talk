@@ -61,7 +61,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
     from app.persistence.db import SessionLocal
     from app.services.auth._pwd_ver_clock import seed_from_db_max
     from app.services.sessions.manager import manager
-    from app.services.template.loader import load_templates
+    from app.services.template.loader import warm as warm_templates
     from sqlalchemy import func, select
 
     from app.persistence.models import User
@@ -105,7 +105,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
     get_config_store().subscribe(ocr_invalidate)
 
     swept = await sweep_stale_sessions()
-    load_templates()
+    await warm_templates()
 
     # idle watchdog：会话无活动超过阈值自动转 SUSPENDED
     manager.start_idle_watchdog()

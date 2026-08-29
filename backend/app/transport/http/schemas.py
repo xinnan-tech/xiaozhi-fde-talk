@@ -116,6 +116,17 @@ class TemplateListResponse(BaseModel):
     items: list[TemplateSummary]
 
 
+class AdminTemplateSummary(BaseModel):
+    """admin 模板列表项。referenced=被访谈引用（前端删除保护提示）。"""
+    id: str
+    name: str
+    icon_url: str
+    icon_alt: str
+    version: str
+    updated_at: str | None = None
+    referenced: bool
+
+
 class InvokeSkillRequest(BaseModel):
     # extra="forbid" 防止 inputs 里塞任意 key 被静默忽略——skill 执行器读 inputs
     # 字段做 LLM 提示，恶意 key 可能引诱 LLM 偏离原提示词意图。

@@ -39,7 +39,7 @@ from app.persistence.repositories.interview import interview_repo
 from app.services.sessions.log_events import log_event
 from app.services.sessions.runtime import registry
 from app.services.sessions.state import SessionState
-from app.services.template.loader import get_template
+from app.services.template.loader import get_template, resolve_template
 
 logger = logging.getLogger(__name__)
 
@@ -93,13 +93,11 @@ class SessionManager:
         self, user_id: str, statuses: Optional[list[SessionStatus]] = None
     ) -> list[tuple[InterviewRecord, Template]]:
         """返回 (InterviewRecord, Template) 列表给 summary 路由使用。"""
-        from app.services.template.loader import get_template
-
         raw = [s.value for s in statuses] if statuses else None
         recs = await interview_repo.list_records_by_user_auto(user_id, statuses=raw)
         out: list[tuple[InterviewRecord, Template]] = []
         for rec in recs:
-            tpl = get_template(rec.template_id)
+            tpl = resolve_template(rec.template_id, rec.template_snapshot)
             out.append((rec, tpl))
         return out
 
@@ -144,6 +142,8 @@ class SessionManager:
             id=str(uuid4()),
             template_id=template_id,
             template_version=tpl.version,
+            # 创建时固化整份模板快照：此后模板编辑/演进不影响本访谈
+            template_snapshot=tpl.model_dump(mode="json"),
             user_id=user_id,
             status=SessionStatus.CREATED,
             base_info=base_info or {},

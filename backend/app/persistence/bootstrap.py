@@ -31,6 +31,7 @@ _SELF_HEAL_COLUMNS: list[tuple[str, str, str]] = [
     ("reports", "output_language", "VARCHAR(16) DEFAULT ''"),
     ("interviews", "first_batch_generated", "BOOLEAN DEFAULT 0"),
     ("users", "password_changed_at", "DATETIME"),
+    ("interviews", "template_snapshot", "JSON"),
 ]
 
 

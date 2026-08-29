@@ -13,6 +13,15 @@ from app.services.sessions.state import SessionState
 from app.services.template.loader import get_template
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _warm_templates():
+    """模板 DB 化后，无 lifespan 的纯单测也需要缓存里有模板（原文件加载是惰性的）。"""
+    import asyncio
+
+    from app.services.template import loader
+    asyncio.run(loader.warm())
+
+
 @pytest.fixture
 def make_state():
     """构造一个 pm-research 模板的初始 SessionState。"""

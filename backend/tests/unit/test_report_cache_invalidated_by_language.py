@@ -78,7 +78,7 @@ async def test_cache_hit_when_language_changed(monkeypatch):
     llm = MagicMock()
     llm.chat_text = AsyncMock(return_value="new english report")
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
-    monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
 
     status, md = await generator.get_or_generate("s1")
@@ -109,7 +109,7 @@ async def test_cache_hit_when_language_matches(monkeypatch):
     llm = MagicMock()
     llm.chat_text = AsyncMock()
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
-    monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
 
     status, md = await generator.get_or_generate("s1")
@@ -141,7 +141,7 @@ async def test_legacy_empty_output_language_forced_regen(monkeypatch):
     # mock 返回含 zh_cn 字符——避免 pivot 误触发；production zh_cn 报告含中文。
     llm.chat_text = AsyncMock(return_value="## 背景与目的\n新报告内容")
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
-    monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
 
     status, md = await generator.get_or_generate("s1")
@@ -171,7 +171,7 @@ async def test_get_or_generate_reads_language_once(monkeypatch):
     llm = MagicMock()
     llm.chat_text = AsyncMock(return_value="new report")
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
-    monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
 
     await generator.get_or_generate("s1")
@@ -207,7 +207,7 @@ async def test_force_true_regenerates_with_new_language(monkeypatch):
     llm = MagicMock()
     llm.chat_text = AsyncMock(return_value="## Background\nnew english report")
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
-    monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
 
     status, md = await generator.get_or_generate("s1", force=True)
@@ -247,7 +247,7 @@ async def test_force_false_path_still_respects_cache(monkeypatch):
     llm = MagicMock()
     llm.chat_text = AsyncMock(return_value="new english report")
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
-    monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
 
     status, md = await generator.get_or_generate("s1", force=False)
@@ -282,7 +282,7 @@ async def test_force_true_still_reads_language_once(monkeypatch):
     llm = MagicMock()
     llm.chat_text = AsyncMock(return_value="new")
     monkeypatch.setattr(generator, "get_llm", lambda: llm)
-    monkeypatch.setattr(generator, "get_template", lambda _id: MagicMock(report=MagicMock(doc="")))
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: MagicMock(report=MagicMock(doc="")))
     monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
 
     await generator.get_or_generate("s1", force=True)

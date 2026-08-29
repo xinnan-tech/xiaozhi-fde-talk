@@ -118,7 +118,13 @@ class InterviewRepository:
                 )
                 rec.template_id = s.template_id
                 rec.template_version = s.template_version
-                rec.template_snapshot = s.template_snapshot
+                # 快照只写不清：创建时固化的模板快照是「访谈按当时模板执行」的
+                # 依据，一旦被覆成 NULL 就再也回不来（resolve_template 会静默回退
+                # 当前缓存模板，模板被改过的老访谈就串味了）。会话生命周期内
+                # save_state 会被反复调用（状态转换、消息处理、去抖落盘），其中
+                # 部分调用方持有的 SessionState 可能没带快照——故仅在有值时写入。
+                if s.template_snapshot is not None:
+                    rec.template_snapshot = s.template_snapshot
                 if not is_regression:
                     rec.status = s.status.value
                 rec.user_id = s.user_id

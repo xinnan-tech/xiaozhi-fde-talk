@@ -8,9 +8,12 @@ Create Date: 2026-08-29
 由 loader.warm() 空表时幂等种入——dev/test 走 create_all 不经过本迁移，
 种子放这里会漏掉 dev 库。
 
-合并到 main 时若 main 保留 0002~0008 + 2026_08_23_* 链，需把 down_revision
-更新为当时 main 的 head revision；本分支（0001 已 collapse 进完整 schema）
-默认从 0001 起链。
+down_revision 必须挂在合并时 main 的 head 上，否则会分叉出第二个 head，
+`alembic upgrade head`（bootstrap 启动路径）因 multiple heads 拒绝执行。
+main 在 #112「collapse migrations」后已把 0002~0008 与
+2026_08_23_drop_seed_admin_and_demo_config 全部折进 0001_initial.py 并删除，
+所以当前 main 的唯一 head 就是 0001——本文件挂 0001 即单链，
+`alembic heads` 只输出 0009 (head)。
 """
 from typing import Sequence, Union
 

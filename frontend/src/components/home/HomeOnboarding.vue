@@ -5,8 +5,6 @@ import StepCreateIcon from "@/assets/onboarding/create-interview.svg?component";
 import StepStartIcon from "@/assets/onboarding/start-interview.svg?component";
 import StepInsightIcon from "@/assets/onboarding/ai-insight.svg?component";
 import StepReportIcon from "@/assets/onboarding/generate-report.svg?component";
-import RobotAvatar from "@/assets/onboarding/robot-avatar.svg?component";
-import BuildingIcon from "@/assets/onboarding/building.svg?component";
 
 defineOptions({
   name: "HomeOnboarding"
@@ -67,20 +65,6 @@ const steps = computed(() => [
         </li>
       </template>
     </ol>
-
-    <footer class="onboarding-tip">
-      <RobotAvatar class="tip-avatar" aria-hidden="true" />
-      <div class="tip-bubble">
-        <p class="tip-text">
-          <strong class="tip-label">{{ t("home.guide.tip_title") }}</strong
-          >{{ t("home.guide.tip_pre")
-          }}<span class="tip-button"
-            >+&nbsp;{{ t("home.create_interview") }}</span
-          >{{ t("home.guide.tip_post") }}
-        </p>
-      </div>
-      <BuildingIcon class="tip-building" aria-hidden="true" />
-    </footer>
   </section>
 </template>
 
@@ -90,9 +74,6 @@ const steps = computed(() => [
 /* 紧凑间距：笔记本可视高（~775px）下整块面板需完整放下，
    压缩垂直留白约 64px（含 home 页上方区块的同步收紧） */
 .home-onboarding {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
   margin-bottom: -24px;
   padding: 28px 32px 36px;
   background: rgba(255, 255, 255, 0.6);
@@ -212,72 +193,6 @@ const steps = computed(() => [
   border-left: 6px solid #409eff;
 }
 
-.onboarding-tip {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 24px;
-}
-
-.tip-avatar {
-  position: relative;
-  z-index: 1;
-  flex-shrink: 0;
-  width: 56px;
-  height: 56px;
-  margin-right: 6px;
-}
-
-.tip-bubble {
-  position: relative;
-  max-width: 660px;
-  padding: 14px 28px;
-  background: #eef3ff;
-  border: 1px solid #cdd9f6;
-  border-radius: 20px;
-}
-
-/* 聊天冒泡尾巴：旋转方形尖角朝左下，指向机器人头像 */
-.tip-bubble::before {
-  position: absolute;
-  bottom: 14px;
-  left: -7px;
-  width: 14px;
-  height: 14px;
-  content: "";
-  background: #eef3ff;
-  border-left: 1px solid #cdd9f6;
-  border-bottom: 1px solid #cdd9f6;
-  border-bottom-left-radius: 3px;
-  transform: rotate(45deg);
-}
-
-.tip-text {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.7;
-  color: #4b5b76;
-  text-align: center;
-}
-
-.tip-label {
-  font-weight: 600;
-}
-
-.tip-button {
-  font-weight: 600;
-  color: #409eff;
-  white-space: nowrap;
-}
-
-.tip-building {
-  flex-shrink: 0;
-  width: 64px;
-  height: 64px;
-  margin-left: 12px;
-  transform: translateY(6px);
-}
-
 /* 容器断点与 views/home/index.vue 保持一致（container 是 .home）；
    间隙由箭头槽位自适应均分，无需按断点调 gap */
 @container (width < 950px) {
@@ -307,19 +222,6 @@ const steps = computed(() => [
 
   .step-card {
     flex-basis: 100%;
-  }
-
-  .tip-avatar {
-    width: 44px;
-    height: 44px;
-  }
-
-  .tip-bubble {
-    padding: 12px 18px;
-  }
-
-  .tip-building {
-    display: none;
   }
 }
 </style>

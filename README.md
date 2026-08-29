@@ -64,7 +64,12 @@ cd backend
 conda create -n xiaozhi-fde-talk python=3.12 -y
 conda activate xiaozhi-fde-talk
 pip install -r requirements.txt
-cp .env.example .env
+# 运行时数据（.env、SQLite DB）落在 backend/data/ 下，路径相对 backend/ 解析，
+# 不依赖 CWD——便于 Docker 挂 data/ 卷。.gitignore 已忽略 data/ 下除 .gitkeep 之外的所有文件。
+# .gitkeep 已占位，正常 clone 后 data/ 已存在；mkdir -p 是防御性兜底——若有人
+# `git clean -fdx` 把 data/ 一并删了，下一行 cp 才能跑通。
+mkdir -p data
+cp .env.example data/.env
 python main.py
 ```
 

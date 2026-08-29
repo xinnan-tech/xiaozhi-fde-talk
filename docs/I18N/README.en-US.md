@@ -63,7 +63,14 @@ cd backend
 conda create -n xiaozhi-fde-talk python=3.12 -y
 conda activate xiaozhi-fde-talk
 pip install -r requirements.txt
-cp .env.example .env
+# Runtime data (.env, SQLite DB) lives under backend/data/; the path is resolved
+# relative to backend/, not CWD — convenient for Docker volume mounts.
+# .gitignore already excludes everything under data/ except the .gitkeep placeholder.
+# .gitkeep seeds the dir on a normal clone, but `mkdir -p` is a safety net for
+# the case where someone ran `git clean -fdx` and removed data/ along with it —
+# without it the next line's `cp` would fail.
+mkdir -p data
+cp .env.example data/.env
 python main.py
 ```
 

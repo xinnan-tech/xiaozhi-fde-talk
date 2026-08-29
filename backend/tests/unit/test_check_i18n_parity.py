@@ -48,13 +48,26 @@ def _fake_messages(tmp_path: Path) -> Path:
 def test_parse_keys_enum_skips_alias_and_non_str(tmp_path: Path):
     mp = _fake_messages(tmp_path)
     parsed = _parse_keys_enum(mp)
-    # alias 跳过；NOT_A_STR 跳过；剩 5 个
+    # alias 跳过；NOT_A_STR 跳过；剩 4 个
     assert parsed == {
         "FOO_USED": "foo.used",
         "FOO_UNUSED": "foo.unused",
         "BAR_USED": "bar.used",
         "BAZ_USED": "baz.used",
     }
+
+
+def test_parse_keys_enum_supports_annotated_assignment(tmp_path: Path):
+    """`NAME: str = "literal"` 这种带注解的写法也要能识别。"""
+    p = tmp_path / "messages_ann.py"
+    _write(
+        p,
+        "from enum import StrEnum\n"
+        "class Keys(StrEnum):\n"
+        "    FOO: str = 'foo.ann'\n"
+        "    BAR = 'bar.plain'\n",
+    )
+    assert _parse_keys_enum(p) == {"FOO": "foo.ann", "BAR": "bar.plain"}
 
 
 def test_collect_keys_references_ignores_comments_and_strings(tmp_path: Path):
@@ -142,3 +155,31 @@ def test_unused_detection_missing_source_root_is_noop(tmp_path: Path):
     )
     assert total == 4
     assert len(problems) == 4
+
+
+def test_collect_keys_references_handles_dynamic_access(tmp_path: Path):
+    """动态访问 `getattr(Keys, name)` / `Keys[name]` 拿不到具体 key，应
+    被视为「所有 key 都被引用过」，防止只走动态路径的 key 被误判为死键。
+    """
+    mp = _fake_messages(tmp_path)
+    src = tmp_path / "dynamic.py"
+    _write(
+        src,
+        "from messages import Keys\n"
+        "def f(name):\n"
+        "    return getattr(Keys, name)\n"
+        "def g(name):\n"
+        "    return Keys[name]\n",
+    )
+    # 不传 known_keys 时，动态访问被静默忽略（保持旧行为）
+    refs = _collect_keys_references([tmp_path])
+    assert refs == set()
+    # 传 known_keys 时，动态访问把所有 key 并入 used
+    refs_with_keys = _collect_keys_references(
+        [tmp_path], known_keys={"FOO_USED", "FOO_UNUSED", "BAR_USED", "BAZ_USED"}
+    )
+    assert refs_with_keys == {"FOO_USED", "FOO_UNUSED", "BAR_USED", "BAZ_USED"}
+    # 在 _check_unused_enum_entries 路径下：动态访问让所有 key 都视为已用 → 0 problems
+    problems, total = _check_unused_enum_entries(mp, [tmp_path])
+    assert total == 4
+    assert problems == []

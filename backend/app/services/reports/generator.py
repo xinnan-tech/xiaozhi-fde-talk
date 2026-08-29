@@ -299,30 +299,31 @@ _gen_locks: dict[str, asyncio.Lock] = {}
 
 
 def _cache_hit(rec, sig: str, language: str) -> bool:
-    """报告缓存有效：ready + 有内容 + 指纹匹配 + 语种匹配。
+    """报告缓存有效：ready + 有内容 + 指纹匹配 + 语种已标。
 
-    旧行 transcript_signature 为空 → 视为失效；output_language 为空（迁移前老行）
-    同样视为未标 → 失效。管理员改 llm.output_language 后，存量的旧语种报告不会再
-    一直命中——避免「中文报告永远返回」的隐性 bug。
+    旧行 transcript_signature 或 output_language 为空 → 视为失效（一次性补齐）。
+    不再比较语种相等：管理员切 llm.output_language 后，存量报告继续复用旧版本，
+    由用户在前端手动点「重新生成报告」才按新语种重跑——避免无意义 token 浪费
+    （issue #82）。`language` 参数保留只为签名稳定，本函数体不再消费。
     """
-    return bool(
-        rec
-        and rec.status == "ready"
-        and rec.content_md
-        and rec.transcript_signature
-        and rec.transcript_signature == sig
-        and (rec.output_language or "") == language
-    )
+    if not rec or not rec.transcript_signature or not rec.output_language:
+        return False
+    return rec.transcript_signature == sig
 
 
 async def get_or_generate(
     session_id: str,
     on_ready: Optional[Callable[[str], Awaitable[None]]] = None,
+    force: bool = False,
 ) -> tuple[str, str]:
     """返回 (status, content_md)。
 
-    缓存命中：report ready 且 transcript 指纹未变 → 直接返回旧内容。
-    缓存失效：未生成 / 上次失败 / transcript 变了 → 调 LLM 重生 + 落库。
+    缓存命中：report ready + transcript 指纹未变 + output_language 已标 → 返回旧内容。
+    缓存失效：未生成 / 上次失败 / transcript 变了 / 老行空 output_language → 重生 + 落库。
+
+    force=True：跳过缓存命中检查（**两处**都跳，包括锁前 short-circuit），按当前
+    llm.output_language 强制重生成。用于前端「重新生成报告」按钮——管理员切语种后
+    默认沿用旧报告，需要用户显式确认才花 token 重跑（issue #82）。
 
     on_ready：每次报告状态落定（成功 ready / 失败 failed）后调用一次；缓存命中
     也算「状态落定」。回调异常被吞掉、不传播——推送失败不应影响 GET 返回。
@@ -340,7 +341,7 @@ async def get_or_generate(
     ).strip().lower() or "zh_cn"
 
     rec = await report_repo.get_by_interview_auto(session_id)
-    if _cache_hit(rec, current_sig, language):
+    if not force and _cache_hit(rec, current_sig, language):
         await _fire_on_ready(on_ready, session_id, "ready")
         return ("ready", rec.content_md)
 
@@ -348,7 +349,7 @@ async def get_or_generate(
     lock = _gen_locks.setdefault(session_id, asyncio.Lock())
     async with lock:
         rec = await report_repo.get_by_interview_auto(session_id)
-        if _cache_hit(rec, current_sig, language):
+        if not force and _cache_hit(rec, current_sig, language):
             await _fire_on_ready(on_ready, session_id, "ready")
             return ("ready", rec.content_md)
 

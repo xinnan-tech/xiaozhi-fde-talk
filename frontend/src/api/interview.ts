@@ -262,10 +262,16 @@ export const resumeInterviewApi = (sessionId: string) => {
 };
 
 /** 获取访谈报告 */
-export const getInterviewReportApi = (sessionId: string) => {
+export const getInterviewReportApi = (
+  sessionId: string,
+  options?: { force?: boolean }
+) => {
+  // force=true 时拼 ?force=true 给后端跳过缓存强制重生（issue #82「重新生成报告」按钮）。
+  // options 缺省 / force=undefined 时不发 query，与历史行为一致。
   return http.request<InterviewReportType>(
     "get",
-    baseUrlApi(`/api/v1/interviews/${sessionId}/report`)
+    baseUrlApi(`/api/v1/interviews/${sessionId}/report`),
+    { params: { force: options?.force } }
   );
 };
 

@@ -20,7 +20,7 @@ from app.transport.http.schemas import AdminUserInfo
 
 
 # ─────────────────────────────────────────────────────────────────────
-# lifespan 驱动：与 test_admin_password_change 对齐
+# lifespan 驱动
 # ─────────────────────────────────────────────────────────────────────
 
 

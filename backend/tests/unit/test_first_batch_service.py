@@ -16,12 +16,24 @@ from app.services.sessions.manager import manager
 
 
 @pytest.fixture
-def mem_db(monkeypatch):
+async def mem_db(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr("app.persistence.db.SessionLocal", factory)
     monkeypatch.setattr("app.core.config_store.SessionLocal", factory)
-    return engine, factory
+    # 清掉本模块与 manager 的进程级缓存，避免上一轮测试留下的 session state /
+    # in-flight lock 干扰下一轮跑（test_generate_does_not_resurrect_deleted_session
+    # 单跑能过、跟其它 first_batch 测试一起跑偶发挂，就是这个原因）。
+    fb._inflight.clear()
+    manager._active.clear()
+    manager._last_activity_at.clear()
+    manager._grace.clear()
+    try:
+        yield engine, factory
+    finally:
+        # 显式 dispose：aiosqlite 在跨事件循环时偶发"Event loop is closed"告警，
+        # dispose 顺手关掉残留连接，避免下个测试拿到坏连接。
+        await engine.dispose()
 
 
 def _llm_mock(monkeypatch):

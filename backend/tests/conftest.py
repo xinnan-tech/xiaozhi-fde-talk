@@ -16,6 +16,12 @@ import pytest  # F401 (re-exported for tests)
 BASE_URL = "http://localhost:8000"
 WS_BASE = "ws://localhost:8000"
 
+# E2E 子套件 admin fixture 共享的默认密码。跟 tests/integration/conftest.py
+# 的 ADMIN_PASSWORD（"admin"）保持一致；该常量先前在 e2e/conftest.py
+# `from tests.conftest import _TEST_ADMIN_PASSWORD` 引用，但顶层没定义过，
+# 是历史遗漏——加回去让 e2e admin fixture 不再破导入。
+_TEST_ADMIN_PASSWORD = "admin"
+
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "integration: 依赖运行中的后端服务（起 `python main.py` 后再跑）")
@@ -40,9 +46,10 @@ def service_online() -> bool:
 def _restore_real_db():
     """测试防污染网：整轮 pytest 前后对真实库做表级快照/恢复。
 
-    部分测试连真实库（集成测试打运行中的 :8000；test_admin_password_change 等直连），
-    会覆盖 system_config、新建/改临时用户。不恢复就污染线上——曾经就有集成测试把
-    LLM 配置盖成测试值（base_url=https://dashscope.aliyuncs.com/compatible-mode/v1、api_key=new-secret）导致所有 LLM 调用失败。
+    部分测试连真实库（集成测试打运行中的 :8000），会覆盖 system_config、新建/改
+    临时用户。不恢复就污染线上——曾经就有集成测试把 LLM 配置盖成测试值
+    （base_url=https://dashscope.aliyuncs.com/compatible-mode/v1、api_key=new-secret）
+    导致所有 LLM 调用失败。
     这里整轮前后快照 system_config + users，跑后精确还原：只动被测试改动的行（未改零
     写入）；真实库不可用（未初始化 / CI 无库 / 非 sqlite 文件库）时静默跳过。
 

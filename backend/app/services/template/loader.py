@@ -1,12 +1,7 @@
 """模板存储：DB 支撑的进程内缓存。
 
-- 对外保留同步读接口 get_template / list_templates（签名与文件时代一致），
-  coaching/engine、reports/generator、sessions/manager、routes 等消费点零改动。
-- 启动 warm()：建表（幂等，覆盖 dev create_all / CI 无库 / prod alembic 三条
-  路径）→ 空表种子 seed.SEED_TEMPLATES → 全量灌缓存。
-- admin 写操作（create/update/delete）：校验 → 写 DB → 同步刷新缓存。
-  单进程语义（与 ConfigStore 的进程内广播一致）；多 worker 部署时其他进程
-  缓存不自动失效，需重启——当前部署模型为单进程，不为此引入跨进程机制。
+读路径同步签名（get_template / list_templates）；写路径校验后落 DB + 刷缓存。
+多 worker 部署下其他进程缓存不自动失效——当前单进程部署，不为此引入广播机制。
 """
 from __future__ import annotations
 
@@ -130,20 +125,33 @@ def resolve_template(
 
 async def create_template(tpl: Template) -> Template:
     _validate(tpl)
+    from sqlalchemy.exc import IntegrityError
     from app.persistence.db import SessionLocal
     async with SessionLocal() as db:
+        # 抢先判重给清晰错误；并发场景靠 IntegrityError 兜底（TOCTOU 竞争）
         if await template_repo.get(db, tpl.id) is not None:
             raise I18nError(Keys.TEMPLATE_ID_TAKEN, http_status=409, id=tpl.id)
-        await template_repo.insert(db, tpl)
-        await db.commit()
+        try:
+            await template_repo.insert(db, tpl)
+            await db.commit()
+        except IntegrityError as e:
+            await db.rollback()
+            raise I18nError(
+                Keys.TEMPLATE_ID_TAKEN, http_status=409, id=tpl.id,
+            ) from e
     _cache[tpl.id] = tpl
     return tpl
 
 
 async def update_template(tpl: Template) -> Template:
-    """全量替换；version 由后端 +1（忽略请求里的 version，防并发错乱）。"""
-    _validate(tpl)
+    """全量替换；version 由后端 +1（忽略请求里的 version，防并发错乱）。
+
+    乐观锁：UPDATE WHERE version = expected_version——影响 0 行说明另一写者
+    已先于本请求提交，返回 409 让客户端重新加载再决定。
+    """
     from app.persistence.db import SessionLocal
+    from app.persistence.repositories.template import _OptimisticLockError
+    _validate(tpl)
     async with SessionLocal() as db:
         rec = await template_repo.get(db, tpl.id)
         if rec is None:
@@ -152,8 +160,17 @@ async def update_template(tpl: Template) -> Template:
         # 先构造后传递：content 与 version 冗余列必须同源自增值，
         # 否则重启 warm() 用 Template(**content) 重建缓存会带回旧 version
         updated = tpl.model_copy(update={"version": new_version})
-        await template_repo.replace(db, updated, version=new_version)
-        await db.commit()
+        try:
+            await template_repo.replace(
+                db, updated, version=new_version,
+                expected_version=rec.version,
+            )
+            await db.commit()
+        except _OptimisticLockError as e:
+            await db.rollback()
+            raise I18nError(
+                Keys.TEMPLATE_VERSION_CONFLICT, http_status=409, id=tpl.id,
+            ) from e
     _cache[tpl.id] = updated
     return updated
 

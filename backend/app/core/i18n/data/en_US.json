@@ -18,6 +18,7 @@
   "template.id_taken": "Template ID already exists: {id}",
   "template.referenced": "Template is referenced by {count} interview(s), cannot delete",
   "template.invalid": "{field}: {reason}",
+  "template.version_conflict": "Template was modified by someone else, please refresh and retry (id: {id})",
   "ws.internal": "Internal server error, please retry or contact administrator",
   "ws.handshake.timeout": "No hello received within 5s",
   "ws.bad_handshake": "Bad handshake",

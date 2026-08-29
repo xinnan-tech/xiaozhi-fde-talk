@@ -32,6 +32,7 @@ class Keys(StrEnum):
     TEMPLATE_ID_TAKEN = "template.id_taken"
     TEMPLATE_REFERENCED = "template.referenced"
     TEMPLATE_INVALID = "template.invalid"
+    TEMPLATE_VERSION_CONFLICT = "template.version_conflict"
 
     # ---- WebSocket frames ----
     WS_INTERNAL = "ws.internal"

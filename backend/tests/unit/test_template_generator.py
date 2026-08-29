@@ -100,6 +100,34 @@ async def test_extract_json_bad_json_raises():
     assert e.value.code == "llm.invalid_json"
 
 
+@pytest.mark.asyncio
+async def test_extract_json_handles_extra_braces_in_text():
+    """LLM 输出夹杂解释文本（含 {...}）也能提取首个平衡 JSON 块，避免贪婪匹配。
+
+    贪婪正则 `{.*}` 会从首 { 一路匹配到末 }，触发 json.loads 的 Extra data。
+    """
+    mixed = (
+        '好的，我参考了 "{另一模板示例 id=t1}" 这条。\n'
+        '正式输出：\n'
+        '{"id": "x", "name": "n"}'
+        '\n完。'
+    )
+    parsed = _extract_json(mixed)
+    assert parsed == {"id": "x", "name": "n"}
+
+
+@pytest.mark.asyncio
+async def test_extract_json_unfenced_uses_balanced_scan():
+    """无围栏时也走平衡花括号扫描，区别于贪婪正则。
+
+    文本里嵌了多个 {...}，应选首个平衡且能 json.loads 成功的块；
+    跳过前面非 JSON 形态的占位（如 `{a: 1}` 没引号 → 非 JSON）。
+    """
+    text = '前缀 {a: 1} 中间 {"k": "v"} 结尾'
+    parsed = _extract_json(text)
+    assert parsed == {"k": "v"}
+
+
 # ---- _normalize：各清洗分支 ----
 
 @pytest.mark.asyncio
@@ -139,6 +167,29 @@ async def test_normalize_minimal_output():
     assert tpl.icon_alt == "📋"
     assert tpl.coaching.must_ask[0].id == "q1"
     assert tpl.coaching.must_ask[0].priority == 1
+
+
+async def test_normalize_preserves_end_time_in_setup_refs():
+    """end_time 是运行时字段（loader._validate 允许），_normalize 不能误剥。
+
+    回归：之前 _normalize 的 known set 不含 end_time，会把 LLM 引用了 end_time
+    的 setup 项剔除，与 loader 校验口径不一致。
+    """
+    tpl = _normalize({
+        "id": "with-end", "name": "带 end_time",
+        "session": {
+            "base_fields": [{"key": "start_time", "label": "开始时间"}],
+            "setup": {"extract_to": ["start_time", "end_time"], "required": ["end_time"]},
+        },
+    })
+    assert tpl.session.setup.extract_to == ["start_time", "end_time"]
+    assert tpl.session.setup.required == ["end_time"]
+
+
+async def test_normalize_safety_none_handled():
+    """LLM 给 safety=null 时 normalize 兜成 []，不让 pydantic v2 拒成 502。"""
+    tpl = _normalize({"id": "safety-null", "name": "null safety", "safety": None})
+    assert tpl.safety == []
 
 
 @pytest.mark.asyncio

@@ -1,16 +1,19 @@
-"""访谈模板 Repository。
+"""访谈模板 Repository：TemplateRecord 的 CRUD 与引用计数；事务由调用方管理。
 
-封装 TemplateRecord 的 CRUD 与引用计数；事务由调用方管理。
+并发约束：
+- insert 抛 IntegrityError 由调用方捕获转 409（两请求同 id 抢占）；
+- replace 带 expected_version 实现乐观锁——0 行受影响时调用方转 409。
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.template import Template
 from app.persistence.models import InterviewRecord, TemplateRecord
+from datetime import datetime, timezone
 
 
 def _to_record(tpl: Template, *, version: str | None = None) -> TemplateRecord:
@@ -43,8 +46,38 @@ class TemplateRepository:
         return rec
 
     async def replace(
-        self, db: AsyncSession, tpl: Template, *, version: str
+        self,
+        db: AsyncSession,
+        tpl: Template,
+        *,
+        version: str,
+        expected_version: Optional[str] = None,
     ) -> TemplateRecord:
+        """乐观锁替换：expected_version 提供时，UPDATE WHERE version = expected，
+        影响 0 行 → IntegrityError 让调用方转 409。
+        """
+        if expected_version is not None:
+            stmt = (
+                update(TemplateRecord)
+                .where(TemplateRecord.id == tpl.id,
+                       TemplateRecord.version == expected_version)
+                .values(
+                    name=tpl.name,
+                    icon_url=tpl.icon_url,
+                    icon_alt=tpl.icon_alt,
+                    version=version,
+                    content=tpl.model_dump(mode="json"),
+                    updated_at=datetime.now(timezone.utc),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            result = await db.execute(stmt)
+            if result.rowcount == 0:
+                raise _OptimisticLockError(tpl.id)
+            # 重新读一遍拿到 ORM 实例（updated_at 已被刷新）
+            rec = await db.get(TemplateRecord, tpl.id)
+            assert rec is not None
+            return rec
         rec = await db.get(TemplateRecord, tpl.id)
         if rec is None:
             rec = _to_record(tpl, version=version)
@@ -83,6 +116,14 @@ class TemplateRepository:
             .group_by(InterviewRecord.template_id)
         )
         return {tid: int(n) for tid, n in res.all()}
+
+
+class _OptimisticLockError(Exception):
+    """replace 期望版本不匹配：另一写者已先于本请求提交。"""
+
+    def __init__(self, template_id: str) -> None:
+        super().__init__(template_id)
+        self.template_id = template_id
 
 
 # 单例（无状态，安全共享）

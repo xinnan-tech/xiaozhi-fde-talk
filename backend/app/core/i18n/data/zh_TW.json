@@ -18,6 +18,7 @@
   "template.id_taken": "範本 ID 已存在：{id}",
   "template.referenced": "範本已被 {count} 場訪談引用，無法刪除",
   "template.invalid": "{field}：{reason}",
+  "template.version_conflict": "範本已被他人修改，請重新整理後再試（id：{id}）",
   "ws.internal": "服務內部錯誤，請重試或聯絡管理員",
   "ws.handshake.timeout": "5s 內未收到 hello",
   "ws.bad_handshake": "握手失敗",

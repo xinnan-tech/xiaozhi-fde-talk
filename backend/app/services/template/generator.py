@@ -1,10 +1,8 @@
-"""AI 一句话生成访谈模板（admin 模板管理「AI 生成」模式）。
+"""AI 一句话生成访谈模板：brief → LLM → 规整后的 Template（不落库）。
 
-brief（一句话需求）→ LLM → 结构合规的模板 dict。只生成不落库：
-- 落库仍走 POST /admin/templates（loader 的校验是最终闸门）
-- 这里做的是把 LLM 的自由输出规整成能直接进编辑器的形态：
-  priority 按顺序编号、漏 id 补齐、引用了未定义字段的 setup 项剔除、
-  去重 base_fields key / must_ask id
+落库仍走 POST /admin/templates（loader 校验是最终闸门）；这里负责把
+LLM 自由输出规整成能进编辑器的形态：priority 编号、漏 id 补齐、引用了
+未定义字段的 setup 项剔除、base_fields key / must_ask id 去重。
 """
 from __future__ import annotations
 
@@ -18,8 +16,7 @@ from app.core.i18n.errors import I18nError
 from app.domain.template import Template
 from app.services.template.seed import SEED_TEMPLATES
 
-# 整份模板 JSON（中文文案 + 报告骨架）实测约 1.5~2.5k token，
-# 取 2 倍余量；辅导清单用的 1500 截断值不够
+# 整份模板 JSON（中文文案 + 报告骨架）实测约 1.5~2.5k token
 _GEN_MAX_TOKENS = 4000
 
 # brief 长度上限：太长没有额外收益，还拖慢生成
@@ -67,25 +64,79 @@ _SYSTEM_PROMPT = """你是访谈模板设计师，为语音访谈助手设计模
 
 
 def _extract_json(text: str) -> dict[str, Any]:
-    """从 LLM 输出提取首个 JSON 对象（容忍 ```json 围栏 / 前后缀说明）。"""
-    fence = re.search(r"\{.*\}", text, re.DOTALL)
-    if fence is None:
+    """从 LLM 输出提取首个 JSON 对象（容忍 ```json 围栏 / 前后缀说明）。
+
+    实现要点：
+    1. 优先剥 ```json ... ``` 围栏（如果有），直接 json.loads——避免正则贪婪。
+    2. 围栏不存在时，用平衡花括号扫描定位每个平衡 {...} 块，依次尝试解析
+       直到首个成功为止；LLM 输出若夹多个 {...}（如"参考 {其它模板}"占位 +
+       真 JSON）也能正确提取首个合法 JSON 块。
+    """
+    stripped = _strip_fence(text)
+    candidates: list[str]
+    if stripped is not None:
+        candidates = [stripped]
+    else:
+        candidates = list(_balanced_objects(text)) or []
+    if not candidates:
         raise I18nError(
             Keys.LLM_NO_JSON_BLOCK, http_status=502, snippet=text[:200]
         )
-    try:
-        parsed = json.loads(fence.group(0))
-    except json.JSONDecodeError as e:
-        raise I18nError(
-            Keys.LLM_INVALID_JSON, http_status=502,
-            err=str(e), json_str=fence.group(0)[:200],
-        ) from e
-    if not isinstance(parsed, dict):
-        raise I18nError(
-            Keys.LLM_INVALID_JSON, http_status=502,
-            err="根节点不是对象", json_str=fence.group(0)[:200],
-        )
-    return parsed
+    last_err: json.JSONDecodeError | None = None
+    for cand in candidates:
+        try:
+            parsed = json.loads(cand)
+        except json.JSONDecodeError as e:
+            last_err = e
+            continue
+        if not isinstance(parsed, dict):
+            raise I18nError(
+                Keys.LLM_INVALID_JSON, http_status=502,
+                err="根节点不是对象", json_str=cand[:200],
+            )
+        return parsed
+    # 走到这说明所有候选都解析失败
+    raise I18nError(
+        Keys.LLM_INVALID_JSON, http_status=502,
+        err=str(last_err) if last_err else "无可解析 JSON 块",
+        json_str=candidates[0][:200],
+    )
+
+
+def _strip_fence(text: str) -> str | None:
+    """剥 ```json ... ``` 围栏（含首尾空白）；不存在返回 None。"""
+    m = re.search(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL | re.IGNORECASE)
+    return m.group(1) if m else None
+
+
+def _balanced_objects(text: str):
+    """生成器：依次产出每个平衡 {...} 块（不嵌字符串内），按出现顺序。"""
+    depth = 0
+    start = -1
+    in_str = False
+    esc = False
+    for i, c in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif c == "}":
+            if depth == 0:
+                continue
+            depth -= 1
+            if depth == 0 and start != -1:
+                yield text[start:i + 1]
+                start = -1
 
 
 def _normalize(raw: dict[str, Any]) -> Template:
@@ -122,9 +173,9 @@ def _normalize(raw: dict[str, Any]) -> Template:
         })
     session["base_fields"] = clean_fields
 
-    # setup：只能引用已定义字段（goal 是保留字段）
+    # setup：只能引用已定义字段（goal / end_time 是保留字段——end_time 是运行时算的）
     setup = session.get("setup") if isinstance(session.get("setup"), dict) else {}
-    known = seen_keys | {"goal"}
+    known = seen_keys | {"goal", "end_time"}
     for attr in ("extract_to", "required"):
         refs = [k for k in (setup.get(attr) or []) if isinstance(k, str)]
         setup[attr] = [k for k in refs if k in known]
@@ -162,7 +213,8 @@ def _normalize(raw: dict[str, Any]) -> Template:
     report = data.get("report") if isinstance(data.get("report"), dict) else {}
     report.setdefault("doc", "")
     data["report"] = report
-    data.setdefault("safety", [])
+    # safety 必须 list：setdefault 不会把 None 替换成 []，pydantic v2 对 None 拒 → 502
+    data["safety"] = data.get("safety") or []
 
     try:
         return Template.model_validate(data)

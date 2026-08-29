@@ -18,6 +18,7 @@
   "template.id_taken": "ID mẫu đã tồn tại: {id}",
   "template.referenced": "Mẫu đang được {count} cuộc phỏng vấn dùng, không thể xóa",
   "template.invalid": "{field}: {reason}",
+  "template.version_conflict": "Mẫu đã bị người khác chỉnh sửa, vui lòng tải lại rồi thử lại (id: {id})",
   "ws.internal": "Lỗi máy chủ nội bộ, vui lòng thử lại hoặc liên hệ quản trị viên",
   "ws.handshake.timeout": "Không nhận được hello trong vòng 5 giây",
   "ws.bad_handshake": "Bắt tay không hợp lệ",

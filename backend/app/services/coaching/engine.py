@@ -62,7 +62,13 @@ class CoachingEngine:
         # 生产环境 SessionRuntime.ainit() 会覆盖这些值为 DB 当前值。
         self.state = state
         self._ws_send = send
-        self.template = resolve_template(state.session.template_id, state.session.template_snapshot)
+        # template 可能为 None（缓存 miss + snapshot 损坏/缺失）；调用方（runtime
+        # / bind 路径）应保证 template_id 在缓存或 snapshot 至少其一存在，否则
+        # 后续 LLM 调用 build_first_batch(None)/build_system(None) 会 AttributeError
+        # ——属于配置错误，让其显式失败比静默降级更易定位。
+        self.template = resolve_template(
+            state.session.template_id, state.session.template_snapshot,
+        )
         self._llm: Optional[LLMProvider] = None  # ainit() 后注入；None 表示未初始化
         self._pause_s: float = 5.0                 # DEFAULTS: coach.pause_s
         self._max_pending_segments: int = 8        # DEFAULTS: coach.max_pending_segments

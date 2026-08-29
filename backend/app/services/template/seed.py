@@ -1,8 +1,4 @@
-"""模板种子：DB 空表时由 loader.warm() 幂等种入。
-
-内容 = 原 backend/templates/pm.json（文件删除后此处是唯一种源，勿手改格式；
-修改模板请走 admin 模板管理界面）。
-"""
+"""模板种子：DB 空表时由 loader.warm() 幂等种入。修改模板请走 admin 模板管理界面。"""
 from __future__ import annotations
 
 SEED_TEMPLATES: list[dict] = [

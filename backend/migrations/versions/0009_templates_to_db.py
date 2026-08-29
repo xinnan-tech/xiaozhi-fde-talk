@@ -1,12 +1,16 @@
 """templates 表 + interviews.template_snapshot 快照列
 
-Revision ID: 0002
+Revision ID: 0009
 Revises: 0001
 Create Date: 2026-08-29
 
 纯 DDL。种子（pm-research 模板内容）在代码 app/services/template/seed.py，
 由 loader.warm() 空表时幂等种入——dev/test 走 create_all 不经过本迁移，
 种子放这里会漏掉 dev 库。
+
+合并到 main 时若 main 保留 0002~0008 + 2026_08_23_* 链，需把 down_revision
+更新为当时 main 的 head revision；本分支（0001 已 collapse 进完整 schema）
+默认从 0001 起链。
 """
 from typing import Sequence, Union
 
@@ -14,7 +18,7 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = "0002"
+revision: str = "0009"
 down_revision: Union[str, None] = "0001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

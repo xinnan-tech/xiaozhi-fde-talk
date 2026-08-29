@@ -15,8 +15,8 @@ CI 调用：python -m backend.scripts.check_i18n_parity
 死代码检查：AST 解析 app.core.i18n.messages.Keys 枚举，再用 AST 走
 backend/app 下所有 .py 抓真实的 `Keys.XXX` 读取（Load 上下文，不算注释
 里的字面量），输出「enum 里声明了但代码里一次都没出现过的」条目——典型
-的「重命名留尾巴」或「重构后忘删的旧 key」。tests/ 故意不扫：单测里
-的「还在断言」会替死键续命，恰好是本检测想拦的尾巴。
+的「重命名留尾巴」或「重构后忘删的旧 key」。tests/ 不扫：仅被测试引用
+的 key 视为死键。
 """
 from __future__ import annotations
 
@@ -104,14 +104,13 @@ def _parse_keys_enum(messages_path: Path) -> dict[str, str]:
     """AST 解析 messages.py 的 Keys 枚举，拿到「enum 名 → value」映射。
 
     接受 `NAME = "literal.string"` 和 `NAME: str = "literal.string"` 两种形
-    式——enum 内的 alias（A = B 形式）会被故意跳过，因为它指向的 value 已
-    经被原 enum 名声明。
+    式；alias（`A = B` 形式）展开进 name_to_value，value 取自它指向的原
+    条目——否则代码里只写 `Keys.A`、从写 `Keys.B` 时原名 B 会被误报死
+    键。文件不存在 / 编码错误 / 语法错误抛异常，由 caller 推一条 problem
+    让 CI 红，避免整个 dead-key 检测永久 no-op。
     """
-    try:
-        src = messages_path.read_text(encoding="utf-8")
-        tree = ast.parse(src)
-    except (FileNotFoundError, UnicodeDecodeError, SyntaxError):
-        return {}
+    src = messages_path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
     name_to_value: dict[str, str] = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef) or node.name != "Keys":
@@ -132,6 +131,15 @@ def _parse_keys_enum(messages_path: Path) -> dict[str, str]:
                 and isinstance(stmt.value.value, str)
             ):
                 name_to_value[stmt.target.id] = stmt.value.value
+            elif (
+                isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+                and isinstance(stmt.value, ast.Name)
+                and stmt.value.id in name_to_value
+            ):
+                # alias：A = B，把 A 合并进 name_to_value，value 用 B 的
+                name_to_value[stmt.targets[0].id] = name_to_value[stmt.value.id]
     return name_to_value
 
 
@@ -141,14 +149,15 @@ def _collect_keys_references(
     """AST 走 source_roots 下所有 .py，抓真实的 `Keys.XXX` 属性读取。
 
     只认 Load 上下文——注释里的 `Keys.OCR_*` 字样、字符串里的 `Keys.FOO`、
-    f-string 里的 `Keys.FSTRING_*`，都不会被算成「使用」。这是 AST 比纯
-    正则强的地方：grep 会撞到注释里的伪引用，AST 不会。
+    f-string 里的 `Keys.FSTRING_*`，都不会被算成「使用」。
 
     动态访问（`getattr(Keys, name)`、`Keys[name]`）拿不到具体 key 名，
     按文件粒度处理：每文件若有动态访问，把 `known_keys` 中未在该文件静
     态引用的部分并入动态候选，最后再减去全局的静态引用，杜绝「key 只
-    走动态路径被误判为死键」。`known_keys=None` 时动态访问被静默忽略
-    （不传 known_keys 时忽略 dynamic 信号）。
+    走动态路径被误判为死键」。要求 file_static ≥ 1 才允许该文件触发
+    dynamic 兜底——纯动态访问的文件不应把 known_keys 全部吞掉，否则全
+    局相减后 unused_names 永远为空，整套死键检测在该场景静默失效。
+    `known_keys=None` 时动态访问被静默忽略。
 
     返回 (statically_used, dynamic_only)：
     - statically_used：被 Keys.XXX 静态引用过的 key
@@ -161,23 +170,34 @@ def _collect_keys_references(
             continue
         for path in root.rglob("*.py"):
             try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
+                src = path.read_text(encoding="utf-8")
+                tree = ast.parse(src)
             except (SyntaxError, UnicodeDecodeError, OSError):
                 continue
+
+            # 收集本文件的 Keys 别名（含裸名 Keys）：从 messages 模块导入
+            # 的 Keys 在本文件可能叫 K / i18n_keys 等，都算同主体。
+            keys_aliases: set[str] = {"Keys"}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        if alias.name == "Keys":
+                            keys_aliases.add(alias.asname or "Keys")
+
             file_static: set[str] = set()
             has_dynamic_access = False
             for node in ast.walk(tree):
                 if (
                     isinstance(node, ast.Attribute)
                     and isinstance(node.value, ast.Name)
-                    and node.value.id == "Keys"
+                    and node.value.id in keys_aliases
                     and isinstance(node.ctx, ast.Load)
                 ):
                     file_static.add(node.attr)
                 elif (
                     isinstance(node, ast.Subscript)
                     and isinstance(node.value, ast.Name)
-                    and node.value.id == "Keys"
+                    and node.value.id in keys_aliases
                     and isinstance(node.ctx, ast.Load)
                 ):
                     has_dynamic_access = True
@@ -187,12 +207,13 @@ def _collect_keys_references(
                     and node.func.id == "getattr"
                     and len(node.args) >= 1
                     and isinstance(node.args[0], ast.Name)
-                    and node.args[0].id == "Keys"
+                    and node.args[0].id in keys_aliases
                 ):
                     has_dynamic_access = True
             statically_used |= file_static
-            if has_dynamic_access and known_keys:
-                # per-file 粒度：本文件静态引用过的不进 dynamic 候选
+            # P1 修复：file_static ≥ 1 才允许该文件触发 dynamic 兜底——
+            # 纯动态访问的文件不应把 known_keys 全部吞掉。
+            if has_dynamic_access and known_keys and file_static:
                 dynamic_only_keys |= known_keys - file_static
     # 静态引用全局胜出——任何文件静态引用的 key 都不算「仅动态可达」
     dynamic_only_keys -= statically_used
@@ -206,20 +227,29 @@ def _check_unused_enum_entries(
 
     返回 (problems, total_enum_entries, static_used_count, dynamic_only_count)：
     - problems 是形如 `  [unused] FOO_BAR = 'foo.bar' (代码里没出现 Keys.FOO_BAR)`
-      的报告行
+      的报告行；messages.py 缺失 / 解析失败时推一条占位 problem 让 CI 红
     - total / static_used_count / dynamic_only_count 给 main() 打
       「N 个枚举 / M 个静态引用 / K 个仅动态可达」统计用
     """
-    name_to_value = _parse_keys_enum(messages_path)
+    try:
+        name_to_value = _parse_keys_enum(messages_path)
+    except (FileNotFoundError, UnicodeDecodeError, SyntaxError) as e:
+        return (
+            [f"  [unused] messages.py 缺失/解析失败（{e}），dead-key 检测未执行"],
+            0, 0, 0,
+        )
     statically_used, dynamic_only = _collect_keys_references(
         source_roots, known_keys=set(name_to_value.keys())
     )
-    unused_names = sorted(set(name_to_value.keys()) - statically_used - dynamic_only)
+    enum_names = set(name_to_value.keys())
+    unused_names = sorted(enum_names - statically_used - dynamic_only)
     problems = [
         f"  [unused] {name} = {name_to_value[name]!r} (代码里没出现 Keys.{name})"
         for name in unused_names
     ]
-    return problems, len(name_to_value), len(statically_used), len(dynamic_only)
+    # static_count 与 name_to_value 取交集——Keys.__members__ / Keys.mro 这
+    # 类属性访问不应虚高统计。
+    return problems, len(name_to_value), len(statically_used & enum_names), len(dynamic_only)
 
 
 def main() -> int:

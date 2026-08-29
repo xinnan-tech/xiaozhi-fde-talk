@@ -83,3 +83,12 @@ export const deleteAdminTemplateApi = (id: string) =>
     "delete",
     baseUrlApi(`/api/v1/admin/templates/${id}`)
   );
+
+/** AI 一句话生成模板：只生成不落库，结果直接进编辑器（长文生成，耗时可达分钟级） */
+export const generateAdminTemplateApi = (brief: string) =>
+  http.request<TemplateDoc>(
+    "post",
+    baseUrlApi("/api/v1/admin/templates/generate"),
+    // 4000 token 输出的生成远超普通请求，单独放宽（默认 60s）
+    { data: { brief }, timeout: 180000 }
+  );

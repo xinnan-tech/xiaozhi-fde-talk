@@ -8,8 +8,10 @@ import { getInterviewTemplateDetailApi } from "@/api/interview";
 import {
   createAdminTemplateApi,
   updateAdminTemplateApi,
+  generateAdminTemplateApi,
   type TemplateDoc
 } from "@/api/admin";
+import AiGenerateSection from "@/components/template-editor/AiGenerateSection.vue";
 import BaseInfoSection from "@/components/template-editor/BaseInfoSection.vue";
 import SessionSection from "@/components/template-editor/SessionSection.vue";
 import CoachingSection from "@/components/template-editor/CoachingSection.vue";
@@ -49,11 +51,47 @@ const blank = (): TemplateDoc => ({
 });
 
 const tpl = reactive<TemplateDoc>(blank());
-const mode = ref<"form" | "json">("form");
+
+/** 三模式：AI 生成 / 表单 / JSON。AI 模式只对「空白新建」开放——
+ *  复制与编辑场景已有内容可调，直接落表单 */
+type Mode = "ai" | "form" | "json";
+const showAiMode = computed(() => isNew.value && !copyFrom.value);
+const mode = ref<Mode>(showAiMode.value ? "ai" : "form");
 const saving = ref(false);
 const jsonCode = ref(""); // JSON 模式的文本（Task 11 使用）
 
-const fieldKeys = computed(() => tpl.session.base_fields.map(f => f.key));
+// ---- AI 生成模式 ----
+
+const aiBrief = ref("");
+const generating = ref(false);
+
+const generate = async () => {
+  if (generating.value) return;
+  const brief = aiBrief.value.trim();
+  if (!brief) return;
+  generating.value = true;
+  try {
+    const doc = await generateAdminTemplateApi(brief);
+    // 生成结果覆盖当前表单（ai_hint 已提示），成功即切表单模式微调
+    applyDoc(doc);
+    mode.value = "form";
+    ElMessage.success(t("system.template.ai_success"));
+  } catch (e) {
+    // HTTP 错误（LLM 未配置 / 超时 / 输出不合规）由拦截器统一 toast，
+    // 这里只兜底无响应异常，避免重复弹窗
+    if (!(e as { response?: unknown })?.response) {
+      ElMessage.error(extractBackendError(e, t("system.template.ai_failed")));
+    }
+  } finally {
+    generating.value = false;
+  }
+};
+
+const fieldOptions = computed(() =>
+  tpl.session.base_fields
+    .filter(f => f.key)
+    .map(f => ({ key: f.key, label: f.label || f.key }))
+);
 
 const applyDoc = (doc: TemplateDoc) => {
   Object.assign(tpl, blank(), JSON.parse(JSON.stringify(doc)));
@@ -102,20 +140,21 @@ const applyJsonToForm = (): boolean => {
   return true;
 };
 
-const onModeChange = (next: "form" | "json") => {
+const onModeChange = (next: Mode) => {
   if (next === mode.value) return;
   if (next === "json") {
+    // → JSON：表单数据无损序列化
     enterJsonMode();
     mode.value = "json";
     return;
   }
-  // json → form：闸门，通过才切换
-  if (applyJsonToForm()) {
-    mode.value = "form";
-  } else {
+  // json → form/ai：闸门，解析+结构校验通过才放行
+  if (mode.value === "json" && !applyJsonToForm()) {
     ElMessage.warning(t("system.template.json_apply_blocked"));
-    // mode 保持 json：阻止切换
+    return; // mode 保持 json：阻止切换
   }
+  // ai ↔ form：自由切换（brief 在父级持有，回来不丢）
+  mode.value = next;
 };
 
 /** JSON 内容变化时即时校验，粘贴即反馈（单一入口，不走 v-model） */
@@ -167,7 +206,23 @@ const save = async () => {
   }
   saving.value = true;
   try {
-    const payload = JSON.parse(JSON.stringify(tpl));
+    const payload = JSON.parse(JSON.stringify(tpl)) as TemplateDoc;
+    // 必问清单的「优先级」= 列表顺序（与引擎首评后的 i+1 重排一致），
+    // 编辑器里不再暴露数字输入，保存时按行序回写；
+    // 历史数据里漏填的问题标识在此自动补齐（q1、q2…避让已有）
+    const usedIds = new Set<string>();
+    payload.coaching?.must_ask?.forEach(m => {
+      if (m.id) usedIds.add(m.id);
+    });
+    payload.coaching?.must_ask?.forEach((m, i) => {
+      m.priority = i + 1;
+      if (!m.id) {
+        let n = i + 1;
+        while (usedIds.has(`q${n}`)) n += 1;
+        m.id = `q${n}`;
+        usedIds.add(m.id);
+      }
+    });
     const saved = isNew.value
       ? await createAdminTemplateApi(payload)
       : await updateAdminTemplateApi(payload.id, payload);
@@ -178,7 +233,11 @@ const save = async () => {
     applyDoc(saved);
     ElMessage.success(t("system.template.save_success"));
   } catch (e) {
-    ElMessage.error(extractBackendError(e, t("system.template.save_failed")));
+    // HTTP 错误（含 4xx/5xx）已由 axios 拦截器统一 toast，
+    // 这里只兜底无响应的异常（断网等），避免同一错误弹两次
+    if (!(e as { response?: unknown })?.response) {
+      ElMessage.error(extractBackendError(e, t("system.template.save_failed")));
+    }
   } finally {
     saving.value = false;
   }
@@ -198,12 +257,15 @@ const cancel = () => router.push("/system/config");
         }}
       </h1>
       <div class="mode-switch">
-        <!-- 受控模式：mode 只经 onModeChange 变更（json → form 有闸门） -->
+        <!-- 受控模式：mode 只经 onModeChange 变更（json 离开有闸门） -->
         <el-radio-group
           :model-value="mode"
           size="small"
-          @update:model-value="onModeChange($event as 'form' | 'json')"
+          @update:model-value="onModeChange($event as Mode)"
         >
+          <el-radio-button v-if="showAiMode" value="ai" data-testid="mode-ai">
+            {{ t("system.template.mode_ai") }}
+          </el-radio-button>
           <el-radio-button value="form" data-testid="mode-form">
             {{ t("system.template.mode_form") }}
           </el-radio-button>
@@ -217,6 +279,7 @@ const cancel = () => router.push("/system/config");
         <el-button
           type="primary"
           :loading="saving"
+          :disabled="mode === 'ai'"
           data-testid="tpl-save"
           @click="save"
         >
@@ -225,8 +288,20 @@ const cancel = () => router.push("/system/config");
       </div>
     </header>
 
+    <!-- AI 生成模式：一句话 → LLM 生成整份模板 → 自动切表单微调 -->
+    <div v-if="mode === 'ai'" class="tpl-editor-body">
+      <section class="tpl-section">
+        <h2>{{ t("system.template.mode_ai") }}</h2>
+        <AiGenerateSection
+          v-model="aiBrief"
+          :loading="generating"
+          @generate="generate"
+        />
+      </section>
+    </div>
+
     <!-- 表单模式：四分区；JSON 模式走下方 v-else 分支 -->
-    <div v-if="mode === 'form'" class="tpl-editor-body">
+    <div v-else-if="mode === 'form'" class="tpl-editor-body">
       <section class="tpl-section">
         <h2>{{ t("system.template.section_base") }}</h2>
         <BaseInfoSection v-model="tpl" :id-locked="!isNew" />
@@ -241,7 +316,7 @@ const cancel = () => router.push("/system/config");
       </section>
       <section class="tpl-section">
         <h2>{{ t("system.template.section_report") }}</h2>
-        <ReportSection v-model="tpl.report" :field-keys="fieldKeys" />
+        <ReportSection v-model="tpl.report" :field-options="fieldOptions" />
       </section>
     </div>
 
@@ -301,8 +376,6 @@ const cancel = () => router.push("/system/config");
   &-body {
     display: grid;
     gap: 16px;
-    max-width: 980px;
-    margin: 0 auto;
   }
 }
 
@@ -371,6 +444,11 @@ const cancel = () => router.push("/system/config");
   font-size: 12px;
 }
 
+.required-star {
+  margin-left: 2px;
+  color: #f56c6c;
+}
+
 .field-table {
   margin-top: 12px;
 
@@ -428,51 +506,8 @@ const cancel = () => router.push("/system/config");
   }
 }
 
-.var-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 8px;
-
-  .var-chip {
-    cursor: pointer;
-  }
-}
-
-.report {
-  &-split {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
-
-  &-preview {
-    min-height: 320px;
-    padding: 12px 16px;
-    overflow: auto;
-    background: #fff;
-    border: 1px solid #e9eef5;
-    border-radius: 8px;
-
-    :deep(h1) {
-      font-size: 18px;
-    }
-
-    :deep(h2) {
-      font-size: 16px;
-    }
-  }
-}
-
 .id-hint {
   color: #98a2b3;
   font-size: 12px;
-}
-
-@media (max-width: 760px) {
-  .report-split {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import MarkdownIt from "markdown-it";
 
 defineOptions({ name: "TemplateEditorReport" });
 const { t } = useI18n();
 
 const report = defineModel<{ doc: string }>({ required: true });
-const props = defineProps<{ fieldKeys: string[] }>();
+const props = defineProps<{ fieldOptions: { key: string; label: string }[] }>();
 
-const md = new MarkdownIt({ html: false, breaks: true });
-const preview = computed(() => md.render(report.value.doc || ""));
 const variables = computed(() =>
-  props.fieldKeys.filter(Boolean).map(k => `{{session.${k}}}`)
+  props.fieldOptions.map(f => ({
+    var: `{{session.${f.key}}}`,
+    label: f.label
+  }))
 );
 
 // el-input 组件 ref 拿到的是 expose 代理（名单外 key 返回 undefined，
@@ -36,28 +36,25 @@ const insertVar = (v: string) => {
 
 <template>
   <div class="var-chips">
-    <span class="field-label">{{ t("system.template.insert_var") }}：</span>
+    <span class="var-chips-label">{{ t("system.template.insert_var") }}</span>
     <el-tag
       v-for="v in variables"
-      :key="v"
+      :key="v.var"
       size="small"
       class="var-chip"
-      @click="insertVar(v)"
-      >{{ v }}</el-tag
+      @click="insertVar(v.var)"
+      >{{ v.label }}&nbsp;<code>{{ v.var }}</code></el-tag
     >
   </div>
-  <div class="report-split">
-    <el-input
-      ref="editorRef"
-      v-model="report.doc"
-      type="textarea"
-      :rows="16"
-      :placeholder="t('system.template.report_doc')"
-      class="report-editor"
-    />
-    <!-- eslint-disable-next-line vue/no-v-html -->
-    <div class="report-preview" v-html="preview" />
-  </div>
+  <p class="doc-hint">{{ t("system.template.doc_hint") }}</p>
+  <el-input
+    ref="editorRef"
+    v-model="report.doc"
+    type="textarea"
+    :autosize="{ minRows: 14 }"
+    :placeholder="t('system.template.report_doc')"
+    class="report-editor"
+  />
 </template>
 
 <style lang="scss" scoped>
@@ -68,42 +65,37 @@ const insertVar = (v: string) => {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+
+  &-label {
+    color: #667085;
+    font-size: 12px;
+  }
 
   .var-chip {
     cursor: pointer;
-  }
-}
 
-.report {
-  &-split {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
-
-  &-preview {
-    min-height: 320px;
-    padding: 12px 16px;
-    overflow: auto;
-    background: #fff;
-    border: 1px solid #e9eef5;
-    border-radius: 8px;
-
-    // v-html 渲染 markdown-it 产物（html:false 关闭 HTML 直通，见脚本内 md 配置）
-    :deep(h1) {
-      font-size: 18px;
+    code {
+      color: #5b8ac7;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
-    :deep(h2) {
-      font-size: 16px;
+    &:hover {
+      opacity: 0.8;
     }
   }
 }
 
-@media (max-width: 760px) {
-  .report-split {
-    grid-template-columns: 1fr;
-  }
+.doc-hint {
+  margin: 0 0 8px;
+  color: #8a94a6;
+  font-size: 12px;
+}
+
+// Markdown 骨架：等宽字体 + 稍松行高，标题行(#/##)一眼可辨
+.report-editor :deep(textarea) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.7;
 }
 </style>

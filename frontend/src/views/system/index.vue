@@ -404,6 +404,18 @@ const openTemplateEditor = (id?: string, copyFrom?: string) => {
   else router.push("/system/templates/new");
 };
 
+/** 列表里的更新时间：补零 + 去秒，别让 2026/8/29 16:11:23 这种裸 toLocaleString 吓到人 */
+const formatTemplateTime = (iso?: string | null) =>
+  iso
+    ? new Date(iso).toLocaleString(undefined, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      })
+    : "-";
+
 const deleteTemplate = async (tpl: AdminTemplateSummary) => {
   try {
     await ElMessageBox.confirm(
@@ -414,11 +426,18 @@ const deleteTemplate = async (tpl: AdminTemplateSummary) => {
     return; // 取消
   }
   const res = await deleteAdminTemplateApi(tpl.id).catch(e => e);
-  if (res instanceof Error || (res as { ok?: boolean })?.ok !== true) {
-    // 409（被引用）等后端错误走 extractBackendError 展示本地化文案
-    ElMessage.error(
-      extractBackendError(res, t("system.template.delete_failed"))
-    );
+  if (res instanceof Error) {
+    // HTTP 错误（409 被引用等）已由 axios 拦截器统一 toast，
+    // 这里只兜底无响应的异常（断网），避免同一错误弹两次
+    if (!(res as { response?: unknown }).response) {
+      ElMessage.error(
+        extractBackendError(res, t("system.template.delete_failed"))
+      );
+    }
+    return;
+  }
+  if ((res as { ok?: boolean })?.ok !== true) {
+    ElMessage.error(t("system.template.delete_failed"));
     return;
   }
   ElMessage.success(t("system.template.delete_success"));
@@ -784,21 +803,16 @@ watch(locale, () => {
                 class="template-row"
                 :data-id="tpl.id"
               >
-                <span class="tpl-icon">
-                  {{ tpl.icon_url ? "" : tpl.icon_alt || "📋" }}
-                </span>
-                <span class="tpl-name">{{ tpl.name }}</span>
-                <el-tag class="tpl-version" size="small" type="info">
-                  v{{ tpl.version }}
-                </el-tag>
-                <span class="tpl-updated">
-                  {{ t("system.template.updated_at") }}：
-                  {{
-                    tpl.updated_at
-                      ? new Date(tpl.updated_at).toLocaleString()
-                      : "-"
-                  }}
-                </span>
+                <div class="tpl-info">
+                  <div class="tpl-title-line">
+                    <span class="tpl-name">{{ tpl.name }}</span>
+                    <span class="tpl-version">v{{ tpl.version }}</span>
+                  </div>
+                  <span class="tpl-updated">
+                    {{ t("system.template.updated_at") }}
+                    {{ formatTemplateTime(tpl.updated_at) }}
+                  </span>
+                </div>
                 <span class="tpl-actions">
                   <el-button
                     text
@@ -908,30 +922,33 @@ watch(locale, () => {
                 </label>
               </template>
             </div>
-            <div v-if="group.key !== 'templates'" class="card-actions">
-              <el-button class="reset-button" @click="resetConfig(group.key)">
-                {{ t("system.reload") }}
-              </el-button>
+            <div class="card-actions">
+              <!-- 模板卡片的主动作：新建模板（与其他卡片的保存按钮同位同款，底部居右） -->
               <el-button
+                v-if="group.key === 'templates'"
                 type="primary"
                 class="save-button"
-                @click="saveConfig(group)"
-              >
-                {{
-                  t("system.save_group", {
-                    group: group.title
-                  })
-                }}
-              </el-button>
-            </div>
-            <div v-if="group.key === 'templates'" class="card-actions">
-              <el-button
-                type="primary"
                 data-action="new"
                 @click="openTemplateEditor()"
               >
                 {{ t("system.template.new") }}
               </el-button>
+              <template v-else>
+                <el-button class="reset-button" @click="resetConfig(group.key)">
+                  {{ t("system.reload") }}
+                </el-button>
+                <el-button
+                  type="primary"
+                  class="save-button"
+                  @click="saveConfig(group)"
+                >
+                  {{
+                    t("system.save_group", {
+                      group: group.title
+                    })
+                  }}
+                </el-button>
+              </template>
             </div>
           </section>
         </main>
@@ -1482,49 +1499,79 @@ watch(locale, () => {
   .template {
     &-list {
       display: grid;
-      gap: 8px;
+      gap: 10px;
       margin-top: 16px;
     }
 
     &-hint {
       margin: 0;
-      color: #718096;
+      color: #667085;
       font-size: 12px;
       line-height: 1.5;
     }
 
+    /* 名称+版本 / 更新时间 | 操作 两栏：主体信息与操作分居两侧 */
     &-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
       align-items: center;
-      padding: 8px 10px;
-      background: rgb(255 255 255 / 48%);
+      padding: 10px 14px;
+      background: rgb(255 255 255 / 65%);
       border: 1px solid #e9eef5;
-      border-radius: 8px;
+      border-radius: 12px;
+      transition:
+        border-color 0.2s,
+        box-shadow 0.2s;
+
+      &:hover {
+        border-color: #b6d4f5;
+        box-shadow: 0 2px 8px rgb(57 136 238 / 10%);
+      }
     }
   }
 
   .tpl {
-    &-icon {
-      font-size: 16px;
+    &-info {
+      min-width: 0;
+    }
+
+    &-title-line {
+      display: flex;
+      gap: 8px;
+      align-items: center;
     }
 
     &-name {
-      color: #344054;
-      font-size: 13px;
-      font-weight: 500;
+      overflow: hidden;
+      color: #1a2233;
+      font-size: 14px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &-version {
+      flex-shrink: 0;
+      padding: 0 7px;
+      color: #5b8ac7;
+      font-size: 11px;
+      line-height: 18px;
+      background: #eef5fd;
+      border-radius: 999px;
     }
 
     &-updated {
+      display: block;
+      margin-top: 2px;
       color: #98a2b3;
       font-size: 12px;
     }
 
     &-actions {
       display: inline-flex;
-      gap: 4px;
-      margin-left: auto;
+      gap: 2px;
+      align-items: center;
     }
   }
 

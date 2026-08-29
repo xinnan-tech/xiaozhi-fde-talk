@@ -45,13 +45,11 @@ export function validateTemplateStructure(data: unknown): StructError[] {
   }
   const obj = data as Record<string, unknown>;
 
+  // id/name 允许暂时为空（模式切换是视图操作，不该被未填完卡死）；
+  // 格式错了才拦——这类数据进了表单也改不对。留空由保存时的后端校验兜底。
   const id = typeof obj.id === "string" ? obj.id : "";
-  if (!id) errors.push({ path: "id", message: "必填" });
-  else if (!/^[a-z0-9-]+$/.test(id))
+  if (id && !/^[a-z0-9-]+$/.test(id))
     errors.push({ path: "id", message: "仅允许小写字母、数字、连字符" });
-
-  if (typeof obj.name !== "string" || !obj.name.trim())
-    errors.push({ path: "name", message: "必填" });
 
   const session = obj.session;
   if (typeof session !== "object" || session === null)
@@ -82,7 +80,9 @@ export function validateTemplateStructure(data: unknown): StructError[] {
     typeof s.setup === "object" && s.setup !== null
       ? (s.setup as Record<string, unknown>)
       : {};
-  const known = new Set([...keys, "goal"]);
+  // goal / end_time 是保留字段：goal 不在 base_fields 里，end_time 是
+  // 创建访谈时由时长算出的运行时字段（历史模板的 extract_to 会引用）
+  const known = new Set([...keys, "goal", "end_time"]);
   for (const attr of ["extract_to", "required"] as const) {
     const list = Array.isArray(setup[attr]) ? (setup[attr] as unknown[]) : [];
     const missing = list.filter(

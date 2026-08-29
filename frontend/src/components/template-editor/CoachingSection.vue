@@ -11,6 +11,9 @@ const coaching = defineModel<{ playbook: string; must_ask: Item[] }>({
   required: true
 });
 
+/** 高级项（问题标识）默认收起：小白只需要关心问什么 */
+const showAdvanced = ref(false);
+
 const listEl = ref<HTMLElement>();
 let sortable: Sortable | null = null;
 
@@ -43,16 +46,19 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => sortable?.destroy());
 
+/** 新增问题：标识自动生成（q1、q2…避让已有），顺序由列表位置决定 */
 const addItem = () => {
-  coaching.value.must_ask.push({ id: "", text: "", priority: null, desc: "" });
+  const used = new Set(coaching.value.must_ask.map(m => m.id).filter(Boolean));
+  let n = coaching.value.must_ask.length + 1;
+  while (used.has(`q${n}`)) n += 1;
+  coaching.value.must_ask.push({
+    id: `q${n}`,
+    text: "",
+    priority: null,
+    desc: ""
+  });
 };
 const removeItem = (i: number) => coaching.value.must_ask.splice(i, 1);
-const move = (i: number, delta: -1 | 1) => {
-  const j = i + delta;
-  const list = coaching.value.must_ask;
-  if (j < 0 || j >= list.length) return;
-  [list[i], list[j]] = [list[j], list[i]];
-};
 </script>
 
 <template>
@@ -62,58 +68,99 @@ const move = (i: number, delta: -1 | 1) => {
   </label>
 
   <div class="field-table-head">
-    <span>{{ t("system.template.must_ask") }}</span>
-    <el-button size="small" data-action="add-item" @click="addItem">
-      {{ t("system.template.add_item") }}
-    </el-button>
+    <span>
+      {{ t("system.template.must_ask") }}
+      <span class="required-star">*</span>
+    </span>
+    <span class="head-side">
+      <label class="advanced-toggle">
+        <el-switch v-model="showAdvanced" size="small" />
+        <span>{{ t("system.template.advanced") }}</span>
+      </label>
+      <el-button size="small" data-action="add-item" @click="addItem">
+        {{ t("system.template.add_item") }}
+      </el-button>
+    </span>
   </div>
+  <p class="list-hint">{{ t("system.template.must_ask_hint") }}</p>
+
   <div ref="listEl" class="must-ask-list">
     <div v-for="(m, i) in coaching.must_ask" :key="i" class="must-ask-item">
-      <span class="drag-handle">⠿</span>
-      <el-input
-        v-model="m.id"
-        :placeholder="t('system.template.item_id')"
-        size="small"
-        style="width: 130px"
-      />
-      <el-input
-        v-model="m.text"
-        :placeholder="t('system.template.item_text')"
-        size="small"
-      />
-      <el-input-number
-        v-model="m.priority"
-        :min="1"
-        size="small"
-        style="width: 100px"
-      />
-      <el-input
-        v-model="m.desc"
-        :placeholder="t('system.template.item_desc')"
-        size="small"
-      />
-      <span class="row-ops">
-        <el-button text size="small" :disabled="i === 0" @click="move(i, -1)">
-          ↑
-        </el-button>
+      <div class="item-main">
+        <span class="drag-handle" :title="t('system.template.drag_hint')">
+          ⠿
+        </span>
+        <span class="item-index">{{ i + 1 }}</span>
+        <el-input
+          v-model="m.text"
+          :placeholder="t('system.template.item_text')"
+          size="small"
+          class="item-text"
+        />
         <el-button
           text
+          type="danger"
           size="small"
-          :disabled="i === coaching.must_ask.length - 1"
-          @click="move(i, 1)"
+          class="item-remove"
+          @click="removeItem(i)"
         >
-          ↓
+          ✕
         </el-button>
-        <el-button text type="danger" size="small" @click="removeItem(i)"
-          >✕</el-button
-        >
-      </span>
+      </div>
+      <div class="item-sub">
+        <el-input
+          v-model="m.desc"
+          :placeholder="t('system.template.item_desc')"
+          size="small"
+        />
+      </div>
+      <div v-if="showAdvanced" class="item-advanced">
+        <span class="advanced-label">
+          {{ t("system.template.item_id") }}
+        </span>
+        <el-input v-model="m.id" size="small" class="advanced-input" />
+        <span class="advanced-hint">
+          {{ t("system.template.item_id_hint") }}
+        </span>
+      </div>
     </div>
   </div>
+  <p v-if="coaching.must_ask.length === 0" class="list-empty">
+    {{ t("system.template.must_ask_empty") }}
+  </p>
 </template>
 
 <style lang="scss" scoped>
 @use "./sections.scss" as *;
+
+.head-side {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.advanced-toggle {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.list-hint {
+  margin: -2px 0 10px;
+  color: #8a94a6;
+  font-size: 12px;
+}
+
+.list-empty {
+  margin: 4px 0 0;
+  color: #98a2b3;
+  font-size: 13px;
+  text-align: center;
+}
 
 .must-ask {
   &-list {
@@ -122,19 +169,80 @@ const move = (i: number, delta: -1 | 1) => {
   }
 
   &-item {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
-    padding: 8px;
-    background: rgb(255 255 255 / 48%);
+    padding: 8px 10px;
+    background: rgb(255 255 255 / 60%);
     border: 1px solid #e9eef5;
-    border-radius: 8px;
+    border-radius: 10px;
+    transition:
+      border-color 0.2s,
+      box-shadow 0.2s;
+
+    &:hover {
+      border-color: #b6d4f5;
+      box-shadow: 0 1px 4px rgb(57 136 238 / 10%);
+    }
 
     .drag-handle {
+      flex: 0 0 auto;
       color: #98a2b3;
       cursor: grab;
+      user-select: none;
     }
+
+    .item-index {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      color: #667085;
+      font-size: 12px;
+      background: #f2f6fc;
+      border-radius: 50%;
+    }
+
+    .item-text {
+      flex: 1;
+    }
+
+    .item-remove {
+      flex: 0 0 auto;
+    }
+  }
+}
+
+.item-main {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.item-sub {
+  padding-left: 36px;
+  margin-top: 6px;
+}
+
+.item-advanced {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-left: 36px;
+  margin-top: 6px;
+
+  .advanced-label {
+    flex: 0 0 auto;
+    color: #667085;
+    font-size: 12px;
+  }
+
+  .advanced-input {
+    flex: 0 0 180px;
+  }
+
+  .advanced-hint {
+    color: #98a2b3;
+    font-size: 12px;
   }
 }
 </style>

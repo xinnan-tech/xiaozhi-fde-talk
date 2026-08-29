@@ -17,7 +17,11 @@ defineProps<{ idLocked: boolean }>();
 <template>
   <div class="section-grid">
     <label class="field-row">
-      <span class="field-label">{{ t("system.template.field_id") }}</span>
+      <!-- id 编辑时锁定（不可改），只有新建时是待填必填项 -->
+      <span class="field-label">
+        {{ t("system.template.field_id") }}
+        <span v-if="!idLocked" class="required-star">*</span>
+      </span>
       <el-input v-model="tpl.id" :disabled="idLocked" class="field-input" />
     </label>
     <label v-if="idLocked" class="field-row">
@@ -25,21 +29,13 @@ defineProps<{ idLocked: boolean }>();
       <span class="id-hint">{{ t("system.template.id_immutable") }}</span>
     </label>
     <label class="field-row">
-      <span class="field-label">{{ t("system.template.field_name") }}</span>
+      <span class="field-label">
+        {{ t("system.template.field_name") }}
+        <span class="required-star">*</span>
+      </span>
       <el-input v-model="tpl.name" class="field-input" />
     </label>
-    <label class="field-row">
-      <span class="field-label">{{ t("system.template.field_icon_url") }}</span>
-      <el-input
-        v-model="tpl.icon_url"
-        class="field-input"
-        placeholder="https://..."
-      />
-    </label>
-    <label class="field-row">
-      <span class="field-label">{{ t("system.template.field_icon_alt") }}</span>
-      <el-input v-model="tpl.icon_alt" class="field-input" placeholder="📋" />
-    </label>
+    <!-- icon_url / icon_alt 不再开放编辑：字段保留在数据里随模板原样保存 -->
   </div>
 </template>
 

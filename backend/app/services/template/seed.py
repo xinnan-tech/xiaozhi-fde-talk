@@ -23,7 +23,7 @@ SEED_TEMPLATES: list[dict] = [
             ],
             "setup": {
                 "intro": "请用一两句话说说这次访谈：项目/对象、大致需求、达成目标、大概几点到几点。",
-                "extract_to": ["project", "interviewee", "goal", "start_time", "end_time"],
+                "extract_to": ["project", "interviewee", "goal", "start_time"],
                 "required": ["project", "goal"],
             },
         },

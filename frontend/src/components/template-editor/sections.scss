@@ -27,6 +27,12 @@
   font-size: 12px;
 }
 
+/* 必填标记：紧跟在 label 文本后的红星（颜色对齐 Element Plus 表单必填星） */
+.required-star {
+  margin-left: 2px;
+  color: #f56c6c;
+}
+
 .field-table {
   margin-top: 12px;
 

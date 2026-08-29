@@ -58,8 +58,9 @@ def _validate(tpl: Template) -> None:
             field="coaching.must_ask[].id",
             reason=f"重复 id：{'、'.join(dup_ids)}",
         )
-    # goal 是保留字段（不在 base_fields 里也能被 setup 引用）
-    known = set(keys) | {"goal"}
+    # goal / end_time 是保留字段：goal 不在 base_fields 里也能被 setup 引用；
+    # end_time 是创建访谈时由时长算出的运行时字段（历史模板会引用）
+    known = set(keys) | {"goal", "end_time"}
     for attr in ("extract_to", "required"):
         missing = sorted(
             k for k in getattr(tpl.session.setup, attr) if k not in known

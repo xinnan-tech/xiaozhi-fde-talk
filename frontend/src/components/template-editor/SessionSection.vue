@@ -63,12 +63,6 @@ const removeField = (i: number) => {
     );
   }
 };
-const move = (i: number, delta: -1 | 1) => {
-  const j = i + delta;
-  const list = session.value.base_fields;
-  if (j < 0 || j >= list.length) return;
-  [list[i], list[j]] = [list[j], list[i]];
-};
 
 const FIELD_TYPES = ["text", "datetime", "duration"];
 </script>
@@ -92,14 +86,30 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
         {{ t("system.template.add_field") }}
       </el-button>
     </div>
+    <p class="list-hint">{{ t("system.template.fields_hint") }}</p>
     <table class="fields">
+      <thead>
+        <tr>
+          <th class="col-drag" />
+          <th class="col-key">
+            {{ t("system.template.field_key") }}
+            <span class="required-star">*</span>
+          </th>
+          <th>{{ t("system.template.field_label") }}</th>
+          <th class="col-type">{{ t("system.template.field_type") }}</th>
+          <th class="col-required">
+            {{ t("system.template.field_required") }}
+          </th>
+          <th class="col-ops" />
+        </tr>
+      </thead>
       <tbody ref="tbody">
         <tr v-for="(f, i) in session.base_fields" :key="i">
-          <td class="drag-handle">⠿</td>
-          <td>
+          <td class="drag-handle" :title="t('system.template.drag_hint')">⠿</td>
+          <td class="col-key">
             <el-input
               v-model="f.key"
-              :placeholder="t('system.template.field_key')"
+              :placeholder="t('system.template.field_key_placeholder')"
               size="small"
             />
           </td>
@@ -110,8 +120,8 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
               size="small"
             />
           </td>
-          <td>
-            <el-select v-model="f.type" size="small" style="width: 110px">
+          <td class="col-type">
+            <el-select v-model="f.type" size="small">
               <el-option
                 v-for="ty in FIELD_TYPES"
                 :key="ty"
@@ -120,29 +130,13 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
               />
             </el-select>
           </td>
-          <td>
+          <td class="col-required">
             <el-checkbox
               v-model="f.required"
               :aria-label="t('system.template.field_required')"
             />
           </td>
           <td class="row-ops">
-            <el-button
-              text
-              size="small"
-              :disabled="i === 0"
-              @click="move(i, -1)"
-            >
-              ↑
-            </el-button>
-            <el-button
-              text
-              size="small"
-              :disabled="i === session.base_fields.length - 1"
-              @click="move(i, 1)"
-            >
-              ↓
-            </el-button>
             <el-button text type="danger" size="small" @click="removeField(i)">
               ✕
             </el-button>
@@ -158,28 +152,41 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
       <el-input v-model="session.setup.intro" type="textarea" :rows="2" />
     </label>
     <div class="field-row field-row-wide">
-      <span class="field-label">{{ t("system.template.extract_to") }}</span>
+      <span class="field-label">
+        {{ t("system.template.extract_to") }}
+        <span class="field-label-hint">
+          {{ t("system.template.extract_to_hint") }}
+        </span>
+      </span>
       <el-checkbox-group v-model="session.setup.extract_to">
         <el-checkbox
           v-for="f in session.base_fields.filter(x => x.key)"
           :key="f.key"
           :value="f.key"
-          >{{ f.key }}</el-checkbox
+          >{{ f.label || f.key }}</el-checkbox
         >
+        <el-checkbox value="goal">{{
+          t("system.template.goal_option")
+        }}</el-checkbox>
       </el-checkbox-group>
     </div>
     <div class="field-row field-row-wide">
-      <span class="field-label">{{
-        t("system.template.required_fields")
-      }}</span>
+      <span class="field-label">
+        {{ t("system.template.required_fields") }}
+        <span class="field-label-hint">
+          {{ t("system.template.required_hint") }}
+        </span>
+      </span>
       <el-checkbox-group v-model="session.setup.required">
         <el-checkbox
           v-for="f in session.base_fields.filter(x => x.key)"
           :key="f.key"
           :value="f.key"
-          >{{ f.key }}</el-checkbox
+          >{{ f.label || f.key }}</el-checkbox
         >
-        <el-checkbox value="goal">goal</el-checkbox>
+        <el-checkbox value="goal">{{
+          t("system.template.goal_option")
+        }}</el-checkbox>
       </el-checkbox-group>
     </div>
   </div>
@@ -188,11 +195,50 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
 <style lang="scss" scoped>
 @use "./sections.scss" as *;
 
+.list-hint {
+  margin: -2px 0 10px;
+  color: #8a94a6;
+  font-size: 12px;
+}
+
+.field-label-hint {
+  display: block;
+  color: #b6bfcc;
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .fields {
   width: 100%;
 
+  th {
+    padding: 0 6px 6px 0;
+    color: #98a2b3;
+    font-size: 12px;
+    font-weight: 500;
+    text-align: left;
+    border-bottom: 1px solid #e9eef5;
+  }
+
   td {
     padding: 4px 6px 4px 0;
+  }
+
+  .col-drag {
+    width: 20px;
+  }
+
+  .col-key {
+    width: 32%;
+  }
+
+  .col-type {
+    width: 120px;
+  }
+
+  .col-required {
+    width: 52px;
+    text-align: center;
   }
 
   .drag-handle {
@@ -200,9 +246,11 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
     color: #98a2b3;
     cursor: grab;
     text-align: center;
+    user-select: none;
   }
 
   .row-ops {
+    width: 44px;
     white-space: nowrap;
     text-align: right;
   }

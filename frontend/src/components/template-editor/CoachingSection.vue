@@ -87,7 +87,13 @@ const removeItem = (i: number) => coaching.value.must_ask.splice(i, 1);
   <div ref="listEl" class="must-ask-list">
     <div v-for="(m, i) in coaching.must_ask" :key="i" class="must-ask-item">
       <div class="item-main">
-        <span class="drag-handle" :title="t('system.template.drag_hint')">
+        <span
+          class="drag-handle"
+          :title="t('system.template.drag_hint')"
+          :aria-label="t('system.template.drag_hint')"
+          role="button"
+          tabindex="0"
+        >
           ⠿
         </span>
         <span class="item-index">{{ i + 1 }}</span>

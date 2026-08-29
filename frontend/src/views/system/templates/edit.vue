@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { extractBackendError } from "@/utils/error";
 import { getInterviewTemplateDetailApi } from "@/api/interview";
 import {
@@ -51,6 +51,14 @@ const blank = (): TemplateDoc => ({
 });
 
 const tpl = reactive<TemplateDoc>(blank());
+/** 最后一次服务端（或本地初始化）落定的模板快照——JSON 字符串做浅比较。
+ * 任意字段改动后 stringify 不同 → dirty=true，cancel 弹确认 */
+const lastSavedJson = ref(JSON.stringify(blank()));
+const dirty = computed(() => JSON.stringify(tpl) !== lastSavedJson.value);
+
+const markSaved = (doc: TemplateDoc) => {
+  lastSavedJson.value = JSON.stringify(doc);
+};
 
 /** 三模式：AI 生成 / 表单 / JSON。AI 模式只对「空白新建」开放——
  *  复制与编辑场景已有内容可调，直接落表单 */
@@ -95,6 +103,7 @@ const fieldOptions = computed(() =>
 
 const applyDoc = (doc: TemplateDoc) => {
   Object.assign(tpl, blank(), JSON.parse(JSON.stringify(doc)));
+  markSaved(tpl);
 };
 
 // ---- JSON 模式（CodeMirror + 校验 + 模式切换闸门） ----
@@ -243,7 +252,26 @@ const save = async () => {
   }
 };
 
-const cancel = () => router.push("/system/config");
+const cancel = async () => {
+  if (!dirty.value) {
+    router.push("/system/config");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      t("system.template.cancel_confirm"),
+      t("system.template.cancel_confirm_title"),
+      {
+        confirmButtonText: t("system.template.cancel_confirm_ok"),
+        cancelButtonText: t("system.template.cancel"),
+        type: "warning"
+      }
+    );
+    router.push("/system/config");
+  } catch {
+    // 用户点取消——留在编辑器
+  }
+};
 </script>
 
 <template>
@@ -417,97 +445,5 @@ const cancel = () => router.push("/system/config");
     border: 0;
     cursor: pointer;
   }
-}
-
-// 以下公共类（.section-grid/.field-row/.field-label/.field-table* 等）同时
-// 存在于各 Section 组件的 scoped 样式（template-editor/sections.scss）——
-// scoped 样式不穿透子组件，两处各持一份，类名与取值保持一致。
-.section-grid {
-  display: grid;
-  gap: 8px;
-}
-
-.field-row {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-
-  &-wide {
-    grid-template-columns: 120px minmax(0, 1fr);
-    align-items: flex-start;
-  }
-}
-
-.field-label {
-  color: #667085;
-  font-size: 12px;
-}
-
-.required-star {
-  margin-left: 2px;
-  color: #f56c6c;
-}
-
-.field-table {
-  margin-top: 12px;
-
-  &-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin: 12px 0 8px;
-    color: #344054;
-    font-size: 13px;
-    font-weight: 600;
-  }
-}
-
-.fields {
-  width: 100%;
-
-  td {
-    padding: 4px 6px 4px 0;
-  }
-
-  .drag-handle {
-    width: 20px;
-    color: #98a2b3;
-    cursor: grab;
-    text-align: center;
-  }
-
-  .row-ops {
-    white-space: nowrap;
-    text-align: right;
-  }
-}
-
-.must-ask {
-  &-list {
-    display: grid;
-    gap: 8px;
-  }
-
-  &-item {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
-    padding: 8px;
-    background: rgb(255 255 255 / 48%);
-    border: 1px solid #e9eef5;
-    border-radius: 8px;
-
-    .drag-handle {
-      color: #98a2b3;
-      cursor: grab;
-    }
-  }
-}
-
-.id-hint {
-  color: #98a2b3;
-  font-size: 12px;
 }
 </style>

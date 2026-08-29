@@ -2,7 +2,7 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { extractBackendError } from "@/utils/error";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { usePermissionStoreHook } from "@/store/modules/permission";
@@ -19,6 +19,12 @@ import {
   systemOcrDiagnosticsApi,
   systemConfigSaveApi
 } from "@/api/system";
+import { useRouter } from "vue-router";
+import {
+  listAdminTemplatesApi,
+  deleteAdminTemplateApi,
+  type AdminTemplateSummary
+} from "@/api/admin";
 
 defineOptions({
   name: "SystemConfig"
@@ -291,9 +297,7 @@ const buildConfigGroups = (data: SystemConfig) => {
                 : hasSelectOptions
                   ? ("select" as const)
                   : ("text" as const),
-            ...(hasSelectOptions
-              ? { selectVariant: "dropdown" as const }
-              : {})
+            ...(hasSelectOptions ? { selectVariant: "dropdown" as const } : {})
           });
         }
       }
@@ -368,6 +372,57 @@ const buildConfigGroups = (data: SystemConfig) => {
   Object.assign(config, loadedConfig);
   /** 默认定位到接口返回的第一个分组 */
   activeGroup.value = configGroups.value[0]?.key ?? "";
+};
+
+const router = useRouter();
+const templateList = ref<AdminTemplateSummary[]>([]);
+const templatesIcon = useRenderIcon("tabler:layout-list");
+
+/** 静态「模板管理」分组：与动态 configGroups 同构，computed 保证 locale 切换重算 */
+const templateGroup = computed<ConfigGroup>(() => ({
+  key: "templates",
+  title: translateGroupTitle("templates"),
+  icon: templatesIcon,
+  fields: []
+}));
+
+/** 侧边栏与卡片渲染用合并列表：动态分组在前，模板管理殿后 */
+const allGroups = computed(() => [...configGroups.value, templateGroup.value]);
+
+const loadTemplates = async () => {
+  try {
+    templateList.value = await listAdminTemplatesApi();
+  } catch {
+    templateList.value = [];
+  }
+};
+
+const openTemplateEditor = (id?: string, copyFrom?: string) => {
+  if (copyFrom)
+    router.push({ path: "/system/templates/new", query: { copyFrom } });
+  else if (id) router.push(`/system/templates/edit/${id}`);
+  else router.push("/system/templates/new");
+};
+
+const deleteTemplate = async (tpl: AdminTemplateSummary) => {
+  try {
+    await ElMessageBox.confirm(
+      t("system.template.delete_confirm", { name: tpl.name }),
+      { type: "warning" }
+    );
+  } catch {
+    return; // 取消
+  }
+  const res = await deleteAdminTemplateApi(tpl.id).catch(e => e);
+  if (res instanceof Error || (res as { ok?: boolean })?.ok !== true) {
+    // 409（被引用）等后端错误走 extractBackendError 展示本地化文案
+    ElMessage.error(
+      extractBackendError(res, t("system.template.delete_failed"))
+    );
+    return;
+  }
+  ElMessage.success(t("system.template.delete_success"));
+  await loadTemplates();
 };
 
 const resetConfig = (key: string) => {
@@ -627,6 +682,7 @@ const initCofig = async () => {
   // 请求系统配置，再根据响应生成分组、字段和表单初始值
   const res = await systemConfigApi();
   buildConfigGroups(res);
+  await loadTemplates();
 };
 
 watch(
@@ -681,7 +737,7 @@ watch(locale, () => {
           </div>
           <div class="groups-list">
             <div
-              v-for="group in configGroups"
+              v-for="group in allGroups"
               :key="group.key"
               class="group-item"
               :class="{ active: activeGroup === group.key }"
@@ -698,18 +754,81 @@ watch(locale, () => {
       <el-scrollbar ref="configScroll" class="config-scroll">
         <main class="config-grid">
           <section
-            v-for="group in configGroups"
+            v-for="group in allGroups"
             :id="`config-${group.key}`"
             :ref="element => setConfigCardRef(group.key, element)"
             :key="group.key"
             class="config-card"
+            :data-group="group.key"
             :class="{ highlighted: activeGroup === group.key }"
           >
             <div class="card-title-row">
               <component :is="group.icon" class="card-icon" />
               <h2>{{ group.title }}</h2>
             </div>
-            <div class="field-list">
+            <!-- 模板管理卡片：列表 + 行内操作（非 KV 字段表单） -->
+            <div
+              v-if="group.key === 'templates'"
+              class="template-list"
+              data-testid="template-list"
+            >
+              <p class="template-hint">{{ t("system.template.hint") }}</p>
+              <el-empty
+                v-if="templateList.length === 0"
+                :description="t('system.template.empty')"
+                :image-size="72"
+              />
+              <div
+                v-for="tpl in templateList"
+                :key="tpl.id"
+                class="template-row"
+                :data-id="tpl.id"
+              >
+                <span class="tpl-icon">
+                  {{ tpl.icon_url ? "" : tpl.icon_alt || "📋" }}
+                </span>
+                <span class="tpl-name">{{ tpl.name }}</span>
+                <el-tag class="tpl-version" size="small" type="info">
+                  v{{ tpl.version }}
+                </el-tag>
+                <span class="tpl-updated">
+                  {{ t("system.template.updated_at") }}：
+                  {{
+                    tpl.updated_at
+                      ? new Date(tpl.updated_at).toLocaleString()
+                      : "-"
+                  }}
+                </span>
+                <span class="tpl-actions">
+                  <el-button
+                    text
+                    size="small"
+                    data-action="edit"
+                    @click="openTemplateEditor(tpl.id)"
+                  >
+                    {{ t("system.template.edit") }}
+                  </el-button>
+                  <el-button
+                    text
+                    size="small"
+                    data-action="copy"
+                    @click="openTemplateEditor(undefined, tpl.id)"
+                  >
+                    {{ t("system.template.copy") }}
+                  </el-button>
+                  <el-button
+                    text
+                    size="small"
+                    type="danger"
+                    data-action="delete"
+                    @click="deleteTemplate(tpl)"
+                  >
+                    {{ t("system.template.delete") }}
+                  </el-button>
+                </span>
+              </div>
+            </div>
+            <div v-else class="field-list">
               <template v-for="field in group.fields" :key="field.key">
                 <label
                   v-if="
@@ -722,7 +841,10 @@ watch(locale, () => {
                   <span class="field-label">{{ field.label }}</span>
                   <!-- select 类型：radio-button（紧凑 2~4 项）或 dropdown（5+ 项） -->
                   <template v-if="field.type === 'select'">
-                    <div v-if="field.selectVariant === 'radio'" class="asr-type-radios">
+                    <div
+                      v-if="field.selectVariant === 'radio'"
+                      class="asr-type-radios"
+                    >
                       <el-radio-group
                         v-model="config[group.key][field.key] as string"
                         size="small"
@@ -738,15 +860,23 @@ watch(locale, () => {
                     </div>
                     <el-select
                       v-else
-                      :model-value="getFieldValue(group.key, field.key) as string"
+                      :model-value="
+                        getFieldValue(group.key, field.key) as string
+                      "
                       class="field-input field-select"
                       :aria-label="field.label"
                       @update:model-value="
-                        setFieldValue(group.key, field.key, $event as ConfigValue)
+                        setFieldValue(
+                          group.key,
+                          field.key,
+                          $event as ConfigValue
+                        )
                       "
                     >
                       <el-option
-                        v-for="opt in field.options ?? selectOptionsFor(group.key, field.key) ?? []"
+                        v-for="opt in field.options ??
+                        selectOptionsFor(group.key, field.key) ??
+                        []"
                         :key="opt.value"
                         :value="opt.value"
                         :label="opt.labelKey ? t(opt.labelKey) : opt.label"
@@ -778,7 +908,7 @@ watch(locale, () => {
                 </label>
               </template>
             </div>
-            <div class="card-actions">
+            <div v-if="group.key !== 'templates'" class="card-actions">
               <el-button class="reset-button" @click="resetConfig(group.key)">
                 {{ t("system.reload") }}
               </el-button>
@@ -792,6 +922,15 @@ watch(locale, () => {
                     group: group.title
                   })
                 }}
+              </el-button>
+            </div>
+            <div v-if="group.key === 'templates'" class="card-actions">
+              <el-button
+                type="primary"
+                data-action="new"
+                @click="openTemplateEditor()"
+              >
+                {{ t("system.template.new") }}
               </el-button>
             </div>
           </section>
@@ -1337,6 +1476,55 @@ watch(locale, () => {
       align-items: center;
       margin-top: auto;
       padding-top: 8px;
+    }
+  }
+
+  .template {
+    &-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    &-hint {
+      margin: 0;
+      color: #718096;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    &-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      background: rgb(255 255 255 / 48%);
+      border: 1px solid #e9eef5;
+      border-radius: 8px;
+    }
+  }
+
+  .tpl {
+    &-icon {
+      font-size: 16px;
+    }
+
+    &-name {
+      color: #344054;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    &-updated {
+      color: #98a2b3;
+      font-size: 12px;
+    }
+
+    &-actions {
+      display: inline-flex;
+      gap: 4px;
+      margin-left: auto;
     }
   }
 

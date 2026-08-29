@@ -12,12 +12,15 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    BaseInfoSection: typeof import('./src/components/template-editor/BaseInfoSection.vue')['default']
     ChangePasswordDialog: typeof import('./src/components/auth/ChangePasswordDialog.vue')['default']
+    CoachingSection: typeof import('./src/components/template-editor/CoachingSection.vue')['default']
     CreateInterviewDialog: typeof import('./src/components/interview/CreateInterviewDialog.vue')['default']
     ElBacktop: typeof import('element-plus/es')['ElBacktop']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCard: typeof import('element-plus/es')['ElCard']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
+    ElCheckboxGroup: typeof import('element-plus/es')['ElCheckboxGroup']
     ElColorPicker: typeof import('element-plus/es')['ElColorPicker']
     ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
@@ -28,6 +31,7 @@ declare module 'vue' {
     ElFormItem: typeof import('element-plus/es')['ElFormItem']
     ElIcon: typeof import('element-plus/es')['ElIcon']
     ElInput: typeof import('element-plus/es')['ElInput']
+    ElInputNumber: typeof import('element-plus/es')['ElInputNumber']
     ElLink: typeof import('element-plus/es')['ElLink']
     ElMenu: typeof import('element-plus/es')['ElMenu']
     ElMenuItem: typeof import('element-plus/es')['ElMenuItem']
@@ -46,11 +50,14 @@ declare module 'vue' {
     ElText: typeof import('element-plus/es')['ElText']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     HomeOnboarding: typeof import('./src/components/home/HomeOnboarding.vue')['default']
+    JsonMode: typeof import('./src/components/template-editor/JsonMode.vue')['default']
     LoginDialog: typeof import('./src/components/auth/LoginDialog.vue')['default']
     ReDialog: typeof import('./src/components/ReDialog/index.vue')['default']
+    ReportSection: typeof import('./src/components/template-editor/ReportSection.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     Select: typeof import('./src/components/base/Select.vue')['default']
+    SessionSection: typeof import('./src/components/template-editor/SessionSection.vue')['default']
     Src: typeof import('./src/components/ReText/src/index.vue')['default']
   }
   export interface GlobalDirectives {
@@ -60,12 +67,15 @@ declare module 'vue' {
 
 // For TSX support
 declare global {
+  const BaseInfoSection: typeof import('./src/components/template-editor/BaseInfoSection.vue')['default']
   const ChangePasswordDialog: typeof import('./src/components/auth/ChangePasswordDialog.vue')['default']
+  const CoachingSection: typeof import('./src/components/template-editor/CoachingSection.vue')['default']
   const CreateInterviewDialog: typeof import('./src/components/interview/CreateInterviewDialog.vue')['default']
   const ElBacktop: typeof import('element-plus/es')['ElBacktop']
   const ElButton: typeof import('element-plus/es')['ElButton']
   const ElCard: typeof import('element-plus/es')['ElCard']
   const ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
+  const ElCheckboxGroup: typeof import('element-plus/es')['ElCheckboxGroup']
   const ElColorPicker: typeof import('element-plus/es')['ElColorPicker']
   const ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
   const ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
@@ -76,6 +86,7 @@ declare global {
   const ElFormItem: typeof import('element-plus/es')['ElFormItem']
   const ElIcon: typeof import('element-plus/es')['ElIcon']
   const ElInput: typeof import('element-plus/es')['ElInput']
+  const ElInputNumber: typeof import('element-plus/es')['ElInputNumber']
   const ElLink: typeof import('element-plus/es')['ElLink']
   const ElMenu: typeof import('element-plus/es')['ElMenu']
   const ElMenuItem: typeof import('element-plus/es')['ElMenuItem']
@@ -94,10 +105,13 @@ declare global {
   const ElText: typeof import('element-plus/es')['ElText']
   const ElTooltip: typeof import('element-plus/es')['ElTooltip']
   const HomeOnboarding: typeof import('./src/components/home/HomeOnboarding.vue')['default']
+  const JsonMode: typeof import('./src/components/template-editor/JsonMode.vue')['default']
   const LoginDialog: typeof import('./src/components/auth/LoginDialog.vue')['default']
   const ReDialog: typeof import('./src/components/ReDialog/index.vue')['default']
+  const ReportSection: typeof import('./src/components/template-editor/ReportSection.vue')['default']
   const RouterLink: typeof import('vue-router')['RouterLink']
   const RouterView: typeof import('vue-router')['RouterView']
   const Select: typeof import('./src/components/base/Select.vue')['default']
+  const SessionSection: typeof import('./src/components/template-editor/SessionSection.vue')['default']
   const Src: typeof import('./src/components/ReText/src/index.vue')['default']
 }

@@ -104,6 +104,7 @@ class StubLLMProvider(LLMProvider):
         user: str,
         retries: int = 2,
         json_mode: bool = False,
+        max_tokens: Optional[int] = None,
     ) -> str:
         if json_mode:
             return json.dumps(

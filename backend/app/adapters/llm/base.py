@@ -5,7 +5,7 @@ provider 实现 chat_json（辅导重算，强制 JSON）/ chat_text（报告生
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 from app.core.i18n.errors import I18nError
 
@@ -28,7 +28,12 @@ class LLMProvider(ABC):
 
     @abstractmethod
     async def chat_text(
-        self, system: str, user: str, retries: int = 2, json_mode: bool = False,
+        self,
+        system: str,
+        user: str,
+        retries: int = 2,
+        json_mode: bool = False,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """报告生成用：纯文本返回（Markdown / JSON 字符串）。
 

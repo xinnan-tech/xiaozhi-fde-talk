@@ -127,6 +127,18 @@ class AdminTemplateSummary(BaseModel):
     referenced: bool
 
 
+class TemplateGenerateRequest(BaseModel):
+    """POST /admin/templates/generate 请求体（AI 一句话生成模板）。
+
+    只生成不落库：返回的 Template 直接进编辑器，落库仍走 POST /admin/templates。
+    """
+    # extra="forbid"：brief 之外的字段（如 id）一律 422，防止借生成端点注入
+    model_config = ConfigDict(extra="forbid")
+
+    # 2000 与 generator._BRIEF_MAX_CHARS 对齐（那里是服务层二次兜底）
+    brief: str = Field(min_length=1, max_length=2000)
+
+
 class InvokeSkillRequest(BaseModel):
     # extra="forbid" 防止 inputs 里塞任意 key 被静默忽略——skill 执行器读 inputs
     # 字段做 LLM 提示，恶意 key 可能引诱 LLM 偏离原提示词意图。

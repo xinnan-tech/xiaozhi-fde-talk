@@ -12,6 +12,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AiGenerateSection: typeof import('./src/components/template-editor/AiGenerateSection.vue')['default']
     BaseInfoSection: typeof import('./src/components/template-editor/BaseInfoSection.vue')['default']
     ChangePasswordDialog: typeof import('./src/components/auth/ChangePasswordDialog.vue')['default']
     CoachingSection: typeof import('./src/components/template-editor/CoachingSection.vue')['default']
@@ -31,7 +32,6 @@ declare module 'vue' {
     ElFormItem: typeof import('element-plus/es')['ElFormItem']
     ElIcon: typeof import('element-plus/es')['ElIcon']
     ElInput: typeof import('element-plus/es')['ElInput']
-    ElInputNumber: typeof import('element-plus/es')['ElInputNumber']
     ElLink: typeof import('element-plus/es')['ElLink']
     ElMenu: typeof import('element-plus/es')['ElMenu']
     ElMenuItem: typeof import('element-plus/es')['ElMenuItem']
@@ -44,6 +44,7 @@ declare module 'vue' {
     ElSkeleton: typeof import('element-plus/es')['ElSkeleton']
     ElSkeletonItem: typeof import('element-plus/es')['ElSkeletonItem']
     ElSubMenu: typeof import('element-plus/es')['ElSubMenu']
+    ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
     ElTag: typeof import('element-plus/es')['ElTag']
@@ -67,6 +68,7 @@ declare module 'vue' {
 
 // For TSX support
 declare global {
+  const AiGenerateSection: typeof import('./src/components/template-editor/AiGenerateSection.vue')['default']
   const BaseInfoSection: typeof import('./src/components/template-editor/BaseInfoSection.vue')['default']
   const ChangePasswordDialog: typeof import('./src/components/auth/ChangePasswordDialog.vue')['default']
   const CoachingSection: typeof import('./src/components/template-editor/CoachingSection.vue')['default']
@@ -86,7 +88,6 @@ declare global {
   const ElFormItem: typeof import('element-plus/es')['ElFormItem']
   const ElIcon: typeof import('element-plus/es')['ElIcon']
   const ElInput: typeof import('element-plus/es')['ElInput']
-  const ElInputNumber: typeof import('element-plus/es')['ElInputNumber']
   const ElLink: typeof import('element-plus/es')['ElLink']
   const ElMenu: typeof import('element-plus/es')['ElMenu']
   const ElMenuItem: typeof import('element-plus/es')['ElMenuItem']
@@ -99,6 +100,7 @@ declare global {
   const ElSkeleton: typeof import('element-plus/es')['ElSkeleton']
   const ElSkeletonItem: typeof import('element-plus/es')['ElSkeletonItem']
   const ElSubMenu: typeof import('element-plus/es')['ElSubMenu']
+  const ElSwitch: typeof import('element-plus/es')['ElSwitch']
   const ElTable: typeof import('element-plus/es')['ElTable']
   const ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
   const ElTag: typeof import('element-plus/es')['ElTag']

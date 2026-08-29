@@ -15,7 +15,7 @@ const version = packageInfo.version;
 const backendVersion = ref<string | null>(null);
 // 仅当后端版本号非空且与前端不同 → 显示两行；否则（null / 空 / 与前端一致）→ 单行
 const hasBothVersions = computed(
-  () => !!backendVersion.value && backendVersion.value !== version,
+  () => !!backendVersion.value && backendVersion.value !== version
 );
 const year = new Date().getFullYear();
 const productName = t("about.product_name");

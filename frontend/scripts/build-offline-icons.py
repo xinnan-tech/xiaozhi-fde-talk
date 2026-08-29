@@ -27,6 +27,7 @@ NEEDED = {
         "robot", "link", "adjustments", "school", "lock", "settings",
         "settings-filled", "users", "info-circle-filled", "file-text",
         "user", "calendar", "microphone", "camera", "clipboard-text",
+        "layout-list",
     ],
     "majesticons": ["bell", "note-text"],
     "flowbite": ["language-outline"],

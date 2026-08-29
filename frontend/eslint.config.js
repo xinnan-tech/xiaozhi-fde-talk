@@ -13,7 +13,10 @@ export default defineConfig([
     "*.d.ts",
     "public/*",
     "src/assets/**",
-    "src/**/iconfont/**"
+    "src/**/iconfont/**",
+    // 脚本产物（scripts/build-offline-icons.py）：保持脚本输出格式，
+    // 否则每次 lint --fix/prettier 都会整文件重排成几百行 diff
+    "**/*.generated.ts"
   ]),
   {
     ...js.configs.recommended,

@@ -107,8 +107,11 @@ def _parse_keys_enum(messages_path: Path) -> dict[str, str]:
     式——enum 内的 alias（A = B 形式）会被故意跳过，因为它指向的 value 已
     经被原 enum 名声明。
     """
-    src = messages_path.read_text(encoding="utf-8")
-    tree = ast.parse(src)
+    try:
+        src = messages_path.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+    except (FileNotFoundError, UnicodeDecodeError, SyntaxError):
+        return {}
     name_to_value: dict[str, str] = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef) or node.name != "Keys":
@@ -134,19 +137,25 @@ def _parse_keys_enum(messages_path: Path) -> dict[str, str]:
 
 def _collect_keys_references(
     source_roots: list[Path], known_keys: set[str] | None = None
-) -> set[str]:
+) -> tuple[set[str], set[str]]:
     """AST 走 source_roots 下所有 .py，抓真实的 `Keys.XXX` 属性读取。
 
     只认 Load 上下文——注释里的 `Keys.OCR_*` 字样、字符串里的 `Keys.FOO`、
     f-string 里的 `Keys.FSTRING_*`，都不会被算成「使用」。这是 AST 比纯
     正则强的地方：grep 会撞到注释里的伪引用，AST 不会。
 
-    动态访问（`getattr(Keys, name)`、`Keys[name]`）拿不到具体 key 名，本
-    函数保守地视为「所有 key 都被用过」——`known_keys` 传进来时把整个集
-    合并入 used，杜绝「key 只走动态路径被误判为死键」。`known_keys=None`
-    时动态访问被静默忽略（保留旧行为，兼容单测）。
+    动态访问（`getattr(Keys, name)`、`Keys[name]`）拿不到具体 key 名，
+    按文件粒度处理：每文件若有动态访问，把 `known_keys` 中未在该文件静
+    态引用的部分并入动态候选，最后再减去全局的静态引用，杜绝「key 只
+    走动态路径被误判为死键」。`known_keys=None` 时动态访问被静默忽略
+    （不传 known_keys 时忽略 dynamic 信号）。
+
+    返回 (statically_used, dynamic_only)：
+    - statically_used：被 Keys.XXX 静态引用过的 key
+    - dynamic_only：只通过动态访问可达、且未被任何文件静态引用的 key
     """
-    used: set[str] = set()
+    statically_used: set[str] = set()
+    dynamic_only_keys: set[str] = set()
     for root in source_roots:
         if not root.exists():
             continue
@@ -154,9 +163,8 @@ def _collect_keys_references(
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8"))
             except (SyntaxError, UnicodeDecodeError, OSError):
-                # 解析失败 / 文件不是 UTF-8 / 读不到——CI 里会有别的工具管
-                # 语法和编码，不是本脚本职责
                 continue
+            file_static: set[str] = set()
             has_dynamic_access = False
             for node in ast.walk(tree):
                 if (
@@ -165,11 +173,12 @@ def _collect_keys_references(
                     and node.value.id == "Keys"
                     and isinstance(node.ctx, ast.Load)
                 ):
-                    used.add(node.attr)
+                    file_static.add(node.attr)
                 elif (
                     isinstance(node, ast.Subscript)
                     and isinstance(node.value, ast.Name)
                     and node.value.id == "Keys"
+                    and isinstance(node.ctx, ast.Load)
                 ):
                     has_dynamic_access = True
                 elif (
@@ -181,38 +190,48 @@ def _collect_keys_references(
                     and node.args[0].id == "Keys"
                 ):
                     has_dynamic_access = True
+            statically_used |= file_static
             if has_dynamic_access and known_keys:
-                used |= known_keys
-    return used
+                # per-file 粒度：本文件静态引用过的不进 dynamic 候选
+                dynamic_only_keys |= known_keys - file_static
+    # 静态引用全局胜出——任何文件静态引用的 key 都不算「仅动态可达」
+    dynamic_only_keys -= statically_used
+    return statically_used, dynamic_only_keys
 
 
 def _check_unused_enum_entries(
     messages_path: Path, source_roots: list[Path]
-) -> tuple[list[str], int]:
+) -> tuple[list[str], int, int, int]:
     """检测 Keys enum 里声明了但代码里一次都没引用的条目。
 
-    返回 (problems, total_enum_entries)：
-    - problems 是形如 `  [unused] FOO_BAR = 'foo.bar' (no Keys.FOO_BAR in code)`
+    返回 (problems, total_enum_entries, static_used_count, dynamic_only_count)：
+    - problems 是形如 `  [unused] FOO_BAR = 'foo.bar' (代码里没出现 Keys.FOO_BAR)`
       的报告行
-    - total 是 Keys enum 实际条目数，给 main() 打「N 个 enum 条目」统计用
+    - total / static_used_count / dynamic_only_count 给 main() 打
+      「N 个枚举 / M 个静态引用 / K 个仅动态可达」统计用
     """
     name_to_value = _parse_keys_enum(messages_path)
-    used = _collect_keys_references(
+    statically_used, dynamic_only = _collect_keys_references(
         source_roots, known_keys=set(name_to_value.keys())
     )
-    unused_names = sorted(set(name_to_value.keys()) - used)
+    unused_names = sorted(set(name_to_value.keys()) - statically_used - dynamic_only)
     problems = [
         f"  [unused] {name} = {name_to_value[name]!r} (代码里没出现 Keys.{name})"
         for name in unused_names
     ]
-    return problems, len(name_to_value)
+    return problems, len(name_to_value), len(statically_used), len(dynamic_only)
 
 
 def main() -> int:
     backend = _load_locale_files(BACKEND_DATA, ("json",))
     frontend = _load_locale_files(FRONTEND_DATA, ("json",))
 
-    unused_problems, enum_total = _check_unused_enum_entries(MESSAGES_PY, [BACKEND_APP])
+    (
+        unused_problems,
+        enum_total,
+        static_count,
+        dynamic_only_count,
+    ) = _check_unused_enum_entries(MESSAGES_PY, [BACKEND_APP])
 
     problems: list[str] = []
     problems.extend(_check_parity(backend, "backend"))
@@ -223,8 +242,10 @@ def main() -> int:
 
     print(f"后端语种：{sorted(backend)}（{sum(len(v) for v in backend.values())} key 总和）")
     print(f"前端语种：{sorted(frontend)}（{sum(len(v) for v in frontend.values())} key 总和）")
-    used_count = enum_total - len(unused_problems)
-    print(f"Keys enum 条目：{enum_total}（{used_count} 个被代码引用）")
+    print(
+        f"Keys enum 条目：{enum_total}"
+        f"（{static_count} 静态引用 / {dynamic_only_count} 仅动态可达）"
+    )
     if problems:
         print("\nFAIL — i18n 不齐平：")
         for p in problems:

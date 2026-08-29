@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 # dev 自愈：现有表缺列时 ADD COLUMN。prod 走 Alembic，不需要这条。
+#
+# 注：列表里的列现已在 0001_initial.py 全量声明（pre-launch 折叠所有补丁迁移
+# 的结果）。全新 dev DB 走 Base.metadata.create_all 会从 ORM 模型创建这些列，
+# 自愈分支永远是 no-op。本列表仍保留——为「折叠前」遗留下来的旧 dev DB 提供
+# 升级路径（项目尚在本地阶段，存量极少）。未来若确认所有 dev DB 都是新格式，
+# 可删本列表 + tests/unit/test_bootstrap_self_heal.py。
 _SELF_HEAL_COLUMNS: list[tuple[str, str, str]] = [
     # (table, column, ddl_type_with_default)
     # 注：用 DATETIME 而非 TIMESTAMP —— SQLite 不识别 TIMESTAMP，dev 模式（未跑 alembic）直接报 unrecognized type。

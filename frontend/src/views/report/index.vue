@@ -279,6 +279,42 @@ const handleDeleteInterview = async () => {
   }
 };
 
+/** 重新生成报告：按当前 llm.output_language 强制重跑（issue #82）。
+ *
+ * 默认行为（不点按钮）：切语种后报告页直接复用旧版本，不再因语种变化白白消耗 token。
+ * 点按钮：用户显式确认后走 ?force=true，让后端跳过缓存重生成。
+ */
+const handleRegenerateReport = async () => {
+  if (reportLoading.value) return; // 防双击：loading 中直接吞掉点击
+  try {
+    await ElMessageBox.confirm(
+      t("report.regenerate_message"),
+      t("report.regenerate_title"),
+      {
+        confirmButtonText: t("report.regenerate_confirm"),
+        cancelButtonText: t("home.cancel"),
+        type: "warning"
+      }
+    );
+  } catch {
+    return; // 用户取消
+  }
+  const id = getInterviewId();
+  if (!id) return;
+  reportLoading.value = true;
+  try {
+    const res = await getInterviewReportApi(id, { force: true });
+    reportMarkdown.value = res?.content_md ?? reportMarkdown.value;
+    reportError.value = !reportMarkdown.value;
+    ElMessage.success(t("report.regenerate_success"));
+  } catch {
+    // 4xx/5xx 已由全局拦截器 toast；这里只在网络层异常时兜底。
+    ElMessage.error(t("report.regenerate_failed"));
+  } finally {
+    reportLoading.value = false;
+  }
+};
+
 onMounted(async () => {
   await getInterviewDetail();
   await getInterviewReport();
@@ -299,6 +335,16 @@ onMounted(async () => {
       <div class="header-actions">
         <div class="round-box share-action">
           <component :is="shareIcon" />
+        </div>
+        <div
+          class="round-box regen-action"
+          :class="{ 'is-loading': reportLoading }"
+          :title="t('report.regenerate')"
+          role="button"
+          tabindex="0"
+          @click="handleRegenerateReport"
+        >
+          <component :is="refreshIcon" />
         </div>
         <Select :options="moreOptions" @change="handleMoreChange">
           <div class="round-box more-action">
@@ -479,6 +525,11 @@ onMounted(async () => {
 
     &.share-action {
       cursor: not-allowed;
+    }
+
+    &.regen-action.is-loading {
+      cursor: not-allowed;
+      opacity: 0.6;
     }
   }
 

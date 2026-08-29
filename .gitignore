@@ -109,7 +109,11 @@ exports/
 *.db-journal
 *.db-wal
 *.db-shm
-backend/data/
+# Backend runtime data dir：.env、SQLite DB、运行时产物。Docker 用宿主卷
+# 映射该目录（详见 backend/data/.gitkeep）。目录保留 .gitkeep 占位，
+# 后续本地启动产生的 .env / *.db 等不纳入版本控制。
+backend/data/*
+!backend/data/.gitkeep
 
 # Logs
 logs/

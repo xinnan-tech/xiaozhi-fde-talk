@@ -16,10 +16,13 @@ python -m pytest -m e2e tests/e2e/test_takeover.py  # 单文件
 
 ## 前置条件
 
-1. 后端已启动且能登录（在 `backend/` 目录下启动，否则 `.env` 不生效）：
+1. 后端已启动且能登录：
    ```bash
    cd backend && python -m app.main
    ```
+   （`settings` 的 `.env` / SQLite 路径相对 `backend/app/core/settings.py` 解析，
+   不依赖 CWD；但 `python -m app.main` 仍需从 `backend/` 下执行——Python 模块
+   解析依赖 sys.path，CWD 不在 `backend/` 时 `app` 包不可见。）
 2. 后端配置了可用的真实 ASR（FunASR）和 LLM。ASR 不可达时推流用例会因
    "未收到 asr 段" 失败——那是环境问题，不是代码问题。
 3. 内存/泄漏用例（`test_leak.py`）额外需要后端进程号：

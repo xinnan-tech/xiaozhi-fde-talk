@@ -63,7 +63,13 @@ cd backend
 conda create -n xiaozhi-fde-talk python=3.12 -y
 conda activate xiaozhi-fde-talk
 pip install -r requirements.txt
-cp .env.example .env
+# Dữ liệu runtime (.env, SQLite DB) nằm trong backend/data/; đường dẫn được
+# tính tương đối với backend/, không phụ thuộc CWD — thuận tiện cho Docker mount.
+# .gitignore đã loại trừ mọi thứ trong data/ trừ file placeholder .gitkeep.
+# .gitkeep đã có sẵn sau clone, nhưng `mkdir -p` là lưới an toàn phòng khi ai đó
+# chạy `git clean -fdx` xóa luôn data/ — nếu thiếu nó, dòng `cp` phía dưới sẽ lỗi.
+mkdir -p data
+cp .env.example data/.env
 python main.py
 ```
 

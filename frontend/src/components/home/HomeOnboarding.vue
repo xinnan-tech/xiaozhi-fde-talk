@@ -69,8 +69,7 @@ const steps = computed(() => [
 </template>
 
 <style lang="scss" scoped>
-/* 自动高度：撑满 .home 剩余空间；负 margin 抵消 .home 的 padding-bottom(24px)，
-   使面板底边与侧边栏圆角条底线（视口底 -24px）齐平 */
+/* 负 margin 抵消 .home 的 padding-bottom(24px)，使面板底边与侧边栏圆角条底线（视口底 -24px）齐平 */
 /* 紧凑间距：笔记本可视高（~775px）下整块面板需完整放下，
    压缩垂直留白约 64px（含 home 页上方区块的同步收紧） */
 .home-onboarding {
@@ -101,10 +100,9 @@ const steps = computed(() => [
 }
 
 /* 原型图：四张窄卡片，卡片间的剩余空间均分给箭头槽位；
-   steps 区弹性伸展，卡片区在剩余高度里垂直居中 */
+   步骤区按内容自适应高度，卡片垂直居中 */
 .onboarding-steps {
   display: flex;
-  flex: 1;
   align-items: center;
   margin: 0;
   padding: 0;

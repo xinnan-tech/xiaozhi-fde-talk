@@ -45,7 +45,7 @@ async def test_session_summary_derives_counts_and_display_fields(mem_db):
             template_id="pm-research",
             user_id="u",
             status=SessionStatus.IN_PROGRESS,
-            base_info={"project": "项目A", "interviewee": "张三"},
+            base_info={"title": "项目A", "project": "项目A", "interviewee": "张三"},
             goal="g",
             created_at=now,
             started_at=now,

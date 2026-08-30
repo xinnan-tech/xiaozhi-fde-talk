@@ -776,7 +776,10 @@ watchEffect(
 const loadInterviewTemplates = async () => {
   // 先清模板字段缓存再拉列表：template_id 观察者可能在列表返回前就触发
   // applyTemplateDefaults，清晚了它读到旧缓存、随后又被这里清空——
-  // 动态表单的字段会凭空消失。清在设 template_id 之前，观察者必然重拉
+  // 动态表单的字段会凭空消失。清在设 template_id 之前，观察者必然重拉。
+  // 同一模板二次开 dialog 时 form.template_id 不会变化（resetForm 已经
+  // 把值设成 cached id，watcher 看到新值==旧值不触发），这里在模版未
+  // 变分支里手动跑一遍 applyTemplateDefaults，让 base_fields 行不变成空白
   templateFields.value = [];
   templateSession.value = {};
   templateFieldsTemplateId.value = "";
@@ -784,7 +787,16 @@ const loadInterviewTemplates = async () => {
   try {
     const response = await getInterviewsTemplatesApi();
     interviewTemplates.value = response.items;
-    form.template_id = response.items[0]?.id ?? "";
+    const nextTemplateId = response.items[0]?.id ?? "";
+    if (form.template_id !== nextTemplateId) {
+      // 模板变了：观察者触发 applyTemplateDefaults
+      form.template_id = nextTemplateId;
+    } else if (props.modelValue) {
+      // 同一模板二次开：观察者不触发，手动兜底（base_fields 行依赖
+      // templateFields.value，上面已经清空过——否则 e2e 第二次建访谈
+      // 会找不到「项目/对象」等字段）
+      applyTemplateDefaults(nextTemplateId).catch(() => undefined);
+    }
   } catch {
     interviewTemplates.value = [];
     form.template_id = "";

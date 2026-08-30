@@ -53,11 +53,15 @@ def test_build_system_survives_braces_in_playbook():
     """模板 playbook 含 `{placeholder}` 也不爆。"""
     from app.domain.template import CoachingBlock, Template
 
-    tpl = Template(id="t1", version="1", name="t", icon_alt="",
-                   coaching=CoachingBlock(
-                       playbook="规则：填 {项目背景}，避免 {敏感词}",
-                       must_ask=[],
-                   ))
+    tpl = Template(
+        id="t1", version="1", name="t", icon_alt="",
+        session={"goal": "", "base_fields": [], "setup": {}},
+        coaching=CoachingBlock(
+            playbook="规则：填 {项目背景}，避免 {敏感词}",
+            must_ask=[],
+        ),
+        report={"doc": ""},
+    )
     system = build_system(tpl, "目标", "zh_cn")
     assert "{项目背景}" in system
 
@@ -68,11 +72,15 @@ def test_build_system_survives_braces_in_playbook():
 def test_build_first_batch_includes_template_playbook():
     from app.domain.template import CoachingBlock, Template
 
-    tpl = Template(id="t1", version="1", name="t", icon_alt="",
-                   coaching=CoachingBlock(
-                       playbook="独特提问风格：用'能不能'开场，不要'会不会'",
-                       must_ask=[],
-                   ))
+    tpl = Template(
+        id="t1", version="1", name="t", icon_alt="",
+        session={"goal": "", "base_fields": [], "setup": {}},
+        coaching=CoachingBlock(
+            playbook="独特提问风格：用'能不能'开场，不要'会不会'",
+            must_ask=[],
+        ),
+        report={"doc": ""},
+    )
     session = Session(id="s1", template_id="t1", base_info={}, goal="目标")
     system, _ = build_first_batch(tpl, session, "zh_cn")
     assert "独特提问风格" in system
@@ -83,11 +91,15 @@ def test_build_system_includes_template_playbook():
     """回归保护：build_system 一直含 playbook。"""
     from app.domain.template import CoachingBlock, Template
 
-    tpl = Template(id="t1", version="1", name="t", icon_alt="",
-                   coaching=CoachingBlock(
-                       playbook="PLAYBOOK_MARKER_XYZ",
-                       must_ask=[],
-                   ))
+    tpl = Template(
+        id="t1", version="1", name="t", icon_alt="",
+        session={"goal": "", "base_fields": [], "setup": {}},
+        coaching=CoachingBlock(
+            playbook="PLAYBOOK_MARKER_XYZ",
+            must_ask=[],
+        ),
+        report={"doc": ""},
+    )
     system = build_system(tpl, "目标", "zh_cn")
     assert "PLAYBOOK_MARKER_XYZ" in system
 

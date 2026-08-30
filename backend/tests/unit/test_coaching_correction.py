@@ -32,7 +32,12 @@ def test_coaching_engine_apply_writes_corrections_to_transcript():
 
     # 构造最小 SessionState + Template
     seg = TranscriptSegment(seg_id="s3", start_ms=0, end_ms=1000, speaker="I", text="原文")
-    tpl = Template(id="t1", version="1", name="t", icon_alt="", coaching=CoachingBlock(playbook="", must_ask=[]))
+    tpl = Template(
+        id="t1", version="1", name="t", icon_alt="",
+        session={"goal": "", "base_fields": [], "setup": {}},
+        coaching=CoachingBlock(playbook="", must_ask=[]),
+        report={"doc": ""},
+    )
     # 模板经 template_snapshot 注入：CoachingEngine.__init__ 里 resolve_template
     # 返 None 会抛 RuntimeError，而 "t1" 不在 loader 缓存里。
     sess = Session(id="sid", template_id="t1", template_version="1", user_id="u",

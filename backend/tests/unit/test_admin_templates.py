@@ -70,6 +70,8 @@ async def test_crud_flow(_lifespan_app):
     transport = ASGITransport(app=_lifespan_app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         h = await _admin_headers()
+        # 用 uuid 隔离——同一 sqlite 文件跨测试可能残留同 id
+        tid = f"route-{uuid.uuid4().hex[:8]}"
 
         # 列表含种子 pm-research
         r = await c.get("/api/v1/admin/templates", headers=h)
@@ -79,51 +81,51 @@ async def test_crud_flow(_lifespan_app):
                 "updated_at", "referenced"} == set(r.json()[0].keys())
 
         # 新建
-        r = await c.post("/api/v1/admin/templates", json=_body("route-t1"), headers=h)
+        r = await c.post("/api/v1/admin/templates", json=_body(tid), headers=h)
         assert r.status_code == 200, r.text
-        assert r.json()["id"] == "route-t1"
+        assert r.json()["id"] == tid
 
         # 重复 id → 409 + code
-        r = await c.post("/api/v1/admin/templates", json=_body("route-t1"), headers=h)
+        r = await c.post("/api/v1/admin/templates", json=_body(tid), headers=h)
         assert r.status_code == 409
         assert r.json()["code"] == "template.id_taken"
 
         # 更新：客户端必须带着上次响应的 version（乐观锁），
         # 服务端 +1 后写回。先从列表拿到当前 version（=1），再 PUT 时带上
         listed = (await c.get("/api/v1/admin/templates", headers=h)).json()
-        current = next(i for i in listed if i["id"] == "route-t1")
-        body = _body("route-t1")
+        current = next(i for i in listed if i["id"] == tid)
+        body = _body(tid)
         body["name"] = "改名"
         body["version"] = current["version"]  # 客户端手里是「上次响应」里的 version
-        r = await c.put("/api/v1/admin/templates/route-t1", json=body, headers=h)
+        r = await c.put(f"/api/v1/admin/templates/{tid}", json=body, headers=h)
         assert r.status_code == 200, r.text
         assert r.json()["version"] == "2"
         assert r.json()["name"] == "改名"
 
         # 旧 version 再 PUT → 409 冲突（#1：之前是恒真更新静默吞对方改动）
-        stale = _body("route-t1")
+        stale = _body(tid)
         stale["version"] = "1"  # 已经过期的版本
         stale["name"] = "过期改名"
-        r = await c.put("/api/v1/admin/templates/route-t1", json=stale, headers=h)
+        r = await c.put(f"/api/v1/admin/templates/{tid}", json=stale, headers=h)
         assert r.status_code == 409
         assert r.json()["code"] == "template.version_conflict"
 
         # 路径与 body id 不一致 → 422
         r = await c.put(
-            "/api/v1/admin/templates/route-t1",
+            f"/api/v1/admin/templates/{tid}",
             json=_body("other-id"), headers=h,
         )
         assert r.status_code == 422
 
         # 业务校验（字段 key 重复）→ 422 + code
-        bad = _body("route-t1")
+        bad = _body(tid)
         bad["session"]["base_fields"].append({"key": "project", "label": "重复"})
-        r = await c.put("/api/v1/admin/templates/route-t1", json=bad, headers=h)
+        r = await c.put(f"/api/v1/admin/templates/{tid}", json=bad, headers=h)
         assert r.status_code == 422
-        assert r.json()["code"] == "template.invalid"
+        assert r.json()["code"] == "template.invalid.duplicate_field"
 
         # 无引用可删
-        r = await c.delete("/api/v1/admin/templates/route-t1", headers=h)
+        r = await c.delete(f"/api/v1/admin/templates/{tid}", headers=h)
         assert r.status_code == 200 and r.json()["ok"] is True
 
 

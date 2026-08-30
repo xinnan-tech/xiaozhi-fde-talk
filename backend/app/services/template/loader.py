@@ -34,19 +34,16 @@ def _bump_version(v: str) -> str:
         n = int(v)
     except (TypeError, ValueError):
         raise I18nError(
-            Keys.TEMPLATE_INVALID, http_status=422,
-            field="version", reason="版本号必须是数字字符串",
+            Keys.TEMPLATE_INVALID_VERSION_FORMAT, http_status=422,
         ) from None
     if n < 1:
         raise I18nError(
-            Keys.TEMPLATE_INVALID, http_status=422,
-            field="version", reason="版本号必须 >= 1",
+            Keys.TEMPLATE_INVALID_VERSION_TOO_SMALL, http_status=422,
         )
     bumped = n + 1
     if len(str(bumped)) > 14:
         raise I18nError(
-            Keys.TEMPLATE_INVALID, http_status=422,
-            field="version", reason="版本号已接近上限，无法继续 +1",
+            Keys.TEMPLATE_INVALID_VERSION_OVERFLOW, http_status=422,
         )
     return str(bumped)
 
@@ -55,24 +52,21 @@ def _validate(tpl: Template) -> None:
     """业务校验（结构合法性由 pydantic 在路由层把关，这里管跨字段规则）。"""
     if not _TEMPLATE_ID_RE.match(tpl.id):
         raise I18nError(
-            Keys.TEMPLATE_INVALID, http_status=422,
-            field="id", reason="仅允许小写字母、数字、连字符（如 fde-research）",
+            Keys.TEMPLATE_INVALID_ID_FORMAT, http_status=422, id=tpl.id,
         )
     keys = [f.key for f in tpl.session.base_fields]
     dup = sorted(k for k, c in Counter(keys).items() if c > 1)
     if dup:
         raise I18nError(
-            Keys.TEMPLATE_INVALID, http_status=422,
-            field="session.base_fields[].key",
-            reason=f"重复字段：{'、'.join(dup)}",
+            Keys.TEMPLATE_INVALID_DUPLICATE_FIELD, http_status=422,
+            keys="、".join(dup),
         )
     ids = [m.id for m in tpl.coaching.must_ask]
     dup_ids = sorted(i for i, c in Counter(ids).items() if c > 1)
     if dup_ids:
         raise I18nError(
-            Keys.TEMPLATE_INVALID, http_status=422,
-            field="coaching.must_ask[].id",
-            reason=f"重复 id：{'、'.join(dup_ids)}",
+            Keys.TEMPLATE_INVALID_DUPLICATE_MUST_ASK_ID, http_status=422,
+            ids="、".join(dup_ids),
         )
     # goal / end_time 是保留字段：goal 不在 base_fields 里也能被 setup 引用；
     # end_time 是创建访谈时由时长算出的运行时字段（历史模板会引用）
@@ -83,9 +77,8 @@ def _validate(tpl: Template) -> None:
         )
         if missing:
             raise I18nError(
-                Keys.TEMPLATE_INVALID, http_status=422,
-                field=f"session.setup.{attr}",
-                reason=f"引用了未定义字段：{'、'.join(missing)}",
+                Keys.TEMPLATE_INVALID_MISSING_REF, http_status=422,
+                attr=attr, missing="、".join(missing),
             )
 
 

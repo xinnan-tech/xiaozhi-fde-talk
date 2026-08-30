@@ -32,6 +32,16 @@ class Keys(StrEnum):
     TEMPLATE_ID_TAKEN = "template.id_taken"
     TEMPLATE_REFERENCED = "template.referenced"
     TEMPLATE_INVALID = "template.invalid"
+    TEMPLATE_INVALID_ID_FORMAT = "template.invalid.id_format"
+    TEMPLATE_INVALID_VERSION_FORMAT = "template.invalid.version_format"
+    TEMPLATE_INVALID_VERSION_TOO_SMALL = "template.invalid.version_too_small"
+    TEMPLATE_INVALID_VERSION_OVERFLOW = "template.invalid.version_overflow"
+    TEMPLATE_INVALID_DUPLICATE_FIELD = "template.invalid.duplicate_field"
+    TEMPLATE_INVALID_DUPLICATE_MUST_ASK_ID = "template.invalid.duplicate_must_ask_id"
+    TEMPLATE_INVALID_MISSING_REF = "template.invalid.missing_ref"
+    TEMPLATE_INVALID_ID_MISMATCH = "template.invalid.id_mismatch"
+    TEMPLATE_INVALID_BRIEF_EMPTY = "template.invalid.brief_empty"
+    TEMPLATE_INVALID_BRIEF_TOO_LONG = "template.invalid.brief_too_long"
     TEMPLATE_VERSION_CONFLICT = "template.version_conflict"
 
     # ---- WebSocket frames ----

@@ -232,12 +232,12 @@ async def generate_template(brief: str) -> Template:
     """一句话需求 → 模板（不落库）。LLM 未配置/超时等错误原样上抛给前端。"""
     brief = (brief or "").strip()
     if not brief:
-        raise I18nError(Keys.TEMPLATE_INVALID, http_status=422,
-                        field="brief", reason="需求描述不能为空")
+        raise I18nError(Keys.TEMPLATE_INVALID_BRIEF_EMPTY, http_status=422)
     if len(brief) > _BRIEF_MAX_CHARS:
-        raise I18nError(Keys.TEMPLATE_INVALID, http_status=422,
-                        field="brief",
-                        reason=f"需求描述过长（>{_BRIEF_MAX_CHARS} 字）")
+        raise I18nError(
+            Keys.TEMPLATE_INVALID_BRIEF_TOO_LONG, http_status=422,
+            max_chars=_BRIEF_MAX_CHARS,
+        )
 
     llm = get_llm()
     if not llm.configured:

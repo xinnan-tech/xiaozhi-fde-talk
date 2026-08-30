@@ -227,7 +227,7 @@ async def test_generate_passes_max_tokens_and_prompt():
 async def test_generate_blank_brief_rejected():
     with pytest.raises(I18nError) as e:
         await generate_template("   ")
-    assert e.value.code == "template.invalid"
+    assert e.value.code == "template.invalid.brief_empty"
 
 
 @pytest.mark.asyncio
@@ -322,5 +322,5 @@ async def test_endpoint_validates_body(_lifespan_app, monkeypatch):
         r = await c.post("/api/v1/admin/templates/generate",
                          json={"brief": "   "}, headers=h)
         assert r.status_code == 422
-        assert r.json()["code"] == "template.invalid"
+        assert r.json()["code"] == "template.invalid.brief_empty"
         assert fake.calls == []

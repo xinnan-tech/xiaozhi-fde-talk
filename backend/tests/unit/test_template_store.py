@@ -118,22 +118,25 @@ async def test_validate_rules(_lifespan_app):
     bad = _tpl(tid="Bad_Id!")
     with pytest.raises(I18nError) as ei:
         await loader.create_template(bad)
-    assert ei.value.code == Keys.TEMPLATE_INVALID
-    assert ei.value.params["field"] == "id"
+    assert ei.value.code == Keys.TEMPLATE_INVALID_ID_FORMAT
+    assert ei.value.params["id"] == "Bad_Id!"
 
     # 2) base_fields key 重复
     dup = _tpl()
     dup.session.base_fields.append(dup.session.base_fields[0].model_copy())
     with pytest.raises(I18nError) as ei:
         await loader.create_template(dup)
-    assert "重复" in ei.value.params["reason"]
+    assert ei.value.code == Keys.TEMPLATE_INVALID_DUPLICATE_FIELD
+    assert ei.value.params["keys"]  # 含重复字段名
 
     # 3) extract_to 引用不存在的字段
     ghost = _tpl()
     ghost.session.setup.extract_to = ["nope"]
     with pytest.raises(I18nError) as ei:
         await loader.create_template(ghost)
-    assert ei.value.params["field"] == "session.setup.extract_to"
+    assert ei.value.code == Keys.TEMPLATE_INVALID_MISSING_REF
+    assert ei.value.params["attr"] == "extract_to"
+    assert ei.value.params["missing"] == "nope"
 
 
 async def test_resolve_template_snapshot_priority(_lifespan_app):

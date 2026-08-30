@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-# 列宽对齐 TemplateRecord（迁移 0009_templates_to_db）：name=128 / icon_url=512 /
+# 列宽对齐 TemplateRecord（迁移 0002_templates_to_db）：name=128 / icon_url=512 /
 # icon_alt=32 / id=64 / version=16
 _ID_MAX = 64
 _NAME_MAX = 128

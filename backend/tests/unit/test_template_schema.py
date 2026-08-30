@@ -148,3 +148,137 @@ def test_migration_0002_creates_tables(tmp_path, monkeypatch):
         # monkeypatch 只还原 env 不还原 lru_cache——不清会让后续测试
         # 连到已消失的 tmp 库
         get_settings.cache_clear()
+
+
+# === P2 模板校验加强（#3 / #5 / #6 / #7 / #9） ===
+
+def _minimal_template(**overrides) -> dict:
+    """最小可构造的模板 dict；tests 用 overrides 触发各校验路径。"""
+    base = {
+        "id": "qa-tpl",
+        "name": "QA 测试模板",
+        "session": {
+            "name": "s", "goal": "",
+            "base_fields": [{"key": "project", "label": "项目"}],
+            "setup": {"intro": "", "extract_to": [], "required": []},
+        },
+        "coaching": {"playbook": "", "must_ask": []},
+        "report": {"doc": ""},
+        "safety": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_template_session_required():
+    """#3 session 缺则 pydantic 直接 422，不再填空壳。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.domain.template import Template
+
+    data = _minimal_template()
+    del data["session"]
+    with pytest.raises(ValidationError) as exc:
+        Template.model_validate(data)
+    assert "session" in str(exc.value).lower()
+
+
+def test_template_coaching_required():
+    """#3 coaching 缺则 422。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.domain.template import Template
+
+    data = _minimal_template()
+    del data["coaching"]
+    with pytest.raises(ValidationError) as exc:
+        Template.model_validate(data)
+    assert "coaching" in str(exc.value).lower()
+
+
+def test_template_report_required():
+    """#3 report 缺则 422。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.domain.template import Template
+
+    data = _minimal_template()
+    del data["report"]
+    with pytest.raises(ValidationError) as exc:
+        Template.model_validate(data)
+    assert "report" in str(exc.value).lower()
+
+
+def test_base_field_type_must_be_enum():
+    """#5 type 仅允许 text/datetime/duration；非法值 422。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.domain.template import BaseField
+
+    BaseField(key="ok1", label="x", type="text")
+    BaseField(key="ok2", label="x", type="datetime")
+    BaseField(key="ok3", label="x", type="duration")
+    BaseField(key="ok4", label="x")  # 默认 text
+
+    with pytest.raises(ValidationError):
+        BaseField(key="bad", label="x", type="number")
+    with pytest.raises(ValidationError):
+        BaseField(key="bad", label="x", type="select")
+
+
+def test_base_field_key_pattern():
+    """#6 key 必须是 ^[a-z][a-z0-9_]*$：空串 / 中文 / 大写 / 连字符开头 全拒。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.domain.template import BaseField
+
+    # 合法
+    BaseField(key="project")
+    BaseField(key="customer_name")
+    BaseField(key="visit_time_2")
+
+    # 非法
+    with pytest.raises(ValidationError):
+        BaseField(key="")  # 空串
+    with pytest.raises(ValidationError):
+        BaseField(key="Project")  # 大写
+    with pytest.raises(ValidationError):
+        BaseField(key="_internal")  # 下划线开头
+    with pytest.raises(ValidationError):
+        BaseField(key="中文键")  # 中文
+    with pytest.raises(ValidationError):
+        BaseField(key="customer-name")  # 连字符
+
+
+def test_template_name_strips_whitespace():
+    """#7 name 纯空格 trim 后判空——min_length=1 单独不够。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.domain.template import Template
+
+    data = _minimal_template(name="  qa 模板  ")
+    tpl = Template.model_validate(data)
+    assert tpl.name == "qa 模板"  # 内部空白保留，两端 strip
+
+    data = _minimal_template(name="   ")
+    with pytest.raises(ValidationError):
+        Template.model_validate(data)
+
+
+def test_template_extra_forbidden():
+    """#9 extra=forbid：未知顶层字段直接 422，避免「mustAsk 错写 must_ask」之类静默丢数据。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.domain.template import Template
+
+    data = _minimal_template()
+    data["evil_extra"] = "boom"
+    with pytest.raises(ValidationError):
+        Template.model_validate(data)

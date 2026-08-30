@@ -9,7 +9,6 @@ SEED_TEMPLATES: list[dict] = [
         "icon_alt": "📋",
         "name": "产品经理",
         "session": {
-            "name": "用户/需求访谈",
             "goal": "本次访谈想搞清楚什么（用户在设置页填，喂给辅导首算）",
             "title_default": "企业官网改版需求调研",
             "goal_default": "搞清楚对方对官网改版的核心诉求、现有痛点和拍板人",

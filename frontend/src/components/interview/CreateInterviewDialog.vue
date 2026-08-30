@@ -51,6 +51,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
+// 弹窗宽度：桌面端 900px 让模板 4 字段一行放下（1600px 视口下不再 3+1 折行）；
+// 92vw 保证窄屏不会超出视口；移动端 @media 里有 !important 兜底到 100%-24px
+const dialogWidth = "min(900px, 92vw)";
+
 const userIcon = markRaw(useRenderIcon("tabler:user"));
 const calendarIcon = markRaw(useRenderIcon("tabler:calendar"));
 const microphoneIcon = markRaw(useRenderIcon("tabler:microphone"));
@@ -337,6 +341,23 @@ const applyTemplateDefaults = async (templateId: string) => {
   const baseInfo = form.base_info as Record<string, string>;
   const hints: Record<string, string> = {};
 
+  // 切模板时清理残留：上一模板的 default + 用户输入可能让 base_info 留下
+  // 不属于当前模板 base_fields 的键（孤儿数据：报告占位符用不到、用户
+  // 在表单里也看不到，但会随提交一起落库）。保留 title（伪字段）和
+  // end_time（提交时根据 datetime+duration 重算）；goal 是 form 顶层字段，
+  // 不在 base_info 里，留给后续 goal_default 逻辑处理
+  const validKeys = new Set<string>([
+    ...fields.map(f => f.key),
+    "title",
+    "end_time",
+  ]);
+  for (const key of Object.keys(baseInfo)) {
+    if (!validKeys.has(key)) delete baseInfo[key];
+  }
+  for (const key of Object.keys(autoValues)) {
+    if (!validKeys.has(key)) delete autoValues[key];
+  }
+
   // 先补兜底初值（只补缺失的键，已有值不动）
   for (const field of fields) {
     if (!(field.key in baseInfo)) {
@@ -365,6 +386,11 @@ const applyTemplateDefaults = async (templateId: string) => {
     }
   }
   templateHints.value = hints;
+  // 默认值填好后清掉 el-form 已挂上的错误态（rules computed 重新绑定 prop
+  // 时偶尔会让「name」这种 required 字段带着 stale error 出现，视觉上像
+  // 「已经填好却报错」——#12）。nextTick 等 prop/render 同步完再清
+  await nextTick();
+  formRef.value?.clearValidate();
 };
 
 watch(
@@ -841,7 +867,7 @@ watch(
 <template>
   <el-dialog
     :model-value="modelValue"
-    width="660px"
+    :width="dialogWidth"
     align-center
     destroy-on-close
     class="create-interview-dialog"
@@ -869,16 +895,43 @@ watch(
         </div>
         <div class="form-grid">
           <div class="secondary-fields-row">
-            <el-form-item
-              :label="$t('create.dialog.interview_name')"
-              prop="base_info.title"
-            >
+            <el-form-item prop="base_info.title">
+              <template #label>
+                <span class="form-label-content">
+                  <span class="required-prefix">*</span>
+                  {{ $t("create.dialog.interview_name") }}
+                </span>
+              </template>
               <el-input
                 v-model="form.base_info.title"
                 :placeholder="$t('create.dialog.name_placeholder')"
               />
             </el-form-item>
           </div>
+
+          <!-- 访谈模板提到访谈名称之后：先告诉系统这条访谈是什么，
+               下面的 base_fields 才会按所选模板渲染对应的字段 -->
+          <el-form-item prop="template_id" class="template-field">
+            <template #label>
+              <span class="form-label-content">
+                <span class="required-prefix">*</span>
+                {{ $t("create.dialog.template") }}
+              </span>
+            </template>
+            <el-select
+              v-model="form.template_id"
+              :placeholder="$t('create.dialog.template_placeholder')"
+              :loading="interviewTemplatesLoading"
+              :disabled="interviewTemplatesLoading"
+            >
+              <el-option
+                v-for="template in interviewTemplates"
+                :key="template.id"
+                :label="template.name"
+                :value="template.id"
+              />
+            </el-select>
+          </el-form-item>
 
           <!-- 业务字段按模板 base_fields 渲染（label=显示名，控件跟类型走）：
                text→输入框 datetime→时间选择 duration→档位下拉 -->
@@ -887,9 +940,16 @@ watch(
               v-for="f in templateFields"
               :key="f.key"
               :class="{ 'is-duration': f.type === 'duration' }"
-              :label="fieldLabelOf(f)"
               :prop="`base_info.${f.key}`"
             >
+              <template #label>
+                <span class="form-label-content">
+                  <!-- Element Plus 在 label-position=top 下不会渲染 .el-form-item__required 红星（#15），
+                       这里手动拼红字「* 」绕开；模板字段级 required:true 才显示 -->
+                  <span v-if="f.required" class="required-prefix">*</span>
+                  {{ fieldLabelOf(f) }}
+                </span>
+              </template>
               <el-date-picker
                 v-if="f.type === 'datetime'"
                 v-model="form.base_info[f.key]"
@@ -929,32 +989,13 @@ watch(
             </el-form-item>
           </div>
 
-          <el-form-item
-            :label="$t('create.dialog.template')"
-            prop="template_id"
-            class="template-field"
-          >
-            <el-select
-              v-model="form.template_id"
-              :placeholder="$t('create.dialog.template_placeholder')"
-              :loading="interviewTemplatesLoading"
-              :disabled="interviewTemplatesLoading"
-            >
-              <el-option
-                v-for="template in interviewTemplates"
-                :key="template.id"
-                :label="template.name"
-                :value="template.id"
-              />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item
-            :label="$t('create.dialog.goal')"
-            prop="goal"
-            class="goal-field"
-            :show-message="false"
-          >
+          <el-form-item prop="goal" class="goal-field" :show-message="false">
+            <template #label>
+              <span class="form-label-content">
+                <span class="required-prefix">*</span>
+                {{ $t("create.dialog.goal") }}
+              </span>
+            </template>
             <div class="goal-field-stack">
               <el-input
                 v-model="form.goal"
@@ -1235,9 +1276,11 @@ watch(
       align-items: flex-start;
     }
 
+    // 改单列：早期设计里这一行放两个固定字段，现只剩「访谈名称」一个，
+    // 2 列布局导致它被压成半宽。整行只有 1 项时让输入框撑满容器
     .secondary-fields-row {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: minmax(0, 1fr);
       gap: 14px;
     }
 
@@ -1270,6 +1313,24 @@ watch(
       font-size: 13px;
       line-height: 1.2;
       color: #6d737c;
+    }
+
+    // 必填红字前缀：label-top 模式下 Element Plus 不渲染红星（#15），
+    // 手动加在 label 文字前。
+    // 但「required」规则会触发 EP 自动在 ::after 加一个 *（右侧红星），
+    // 跟我们的 * 前缀撞车，必须显式关掉
+    .el-form-item.is-required .el-form-item__label::after {
+      content: none !important;
+    }
+
+    .form-label-content {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .required-prefix {
+      margin-right: 2px;
+      color: #f56c6c;
     }
 
     .el-form-item__content {

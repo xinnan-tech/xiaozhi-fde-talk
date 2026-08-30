@@ -7,17 +7,22 @@
  */
 .section-grid {
   display: grid;
-  gap: 8px;
+  // 短字段默认两列：避免「产品经理」4 字配 1148px 输入框的极端浪费；
+  // 长字段用 field-row-wide 跨双列
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
 }
 
 .field-row {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
+  grid-template-columns: 100px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
 
   &-wide {
-    grid-template-columns: 120px minmax(0, 1fr);
+    // 长字段（intro / playbook / report.doc / 多选项组）跨双列
+    grid-column: 1 / -1;
+    grid-template-columns: 100px minmax(0, 1fr);
     align-items: flex-start;
   }
 }

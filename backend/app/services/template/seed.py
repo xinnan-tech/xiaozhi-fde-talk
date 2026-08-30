@@ -11,9 +11,11 @@ SEED_TEMPLATES: list[dict] = [
         "session": {
             "name": "用户/需求访谈",
             "goal": "本次访谈想搞清楚什么（用户在设置页填，喂给辅导首算）",
+            "title_default": "企业官网改版需求调研",
+            "goal_default": "搞清楚对方对官网改版的核心诉求、现有痛点和拍板人",
             "base_fields": [
-                {"key": "project", "label": "项目/对象"},
-                {"key": "interviewee", "label": "受访者"},
+                {"key": "project", "label": "项目/对象", "default": "企业官网改版", "placeholder": "如：企业官网改版"},
+                {"key": "interviewee", "label": "受访者", "default": "客户方产品负责人", "placeholder": "如：客户方产品负责人"},
                 {"key": "start_time", "label": "开始时间", "type": "datetime"},
                 {"key": "duration", "label": "访谈时长", "type": "duration"},
             ],

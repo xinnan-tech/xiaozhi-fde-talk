@@ -6,12 +6,22 @@ import Sortable from "sortablejs";
 defineOptions({ name: "TemplateEditorSession" });
 const { t } = useI18n();
 
-type Field = { key: string; label: string; type: string; required: boolean };
+type Field = {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  default?: string;
+  placeholder?: string;
+};
 const session = defineModel<{
   name: string;
   goal: string;
   base_fields: Field[];
   setup: { intro: string; extract_to: string[]; required: string[] };
+  // 访谈名称/访谈目标是固定伪字段，默认值挂 session（空串=无）
+  title_default?: string;
+  goal_default?: string;
 }>({ required: true });
 
 const tbody = ref<HTMLElement>();
@@ -51,7 +61,9 @@ const addField = () => {
     key: "",
     label: "",
     type: "text",
-    required: false
+    required: false,
+    default: "",
+    placeholder: ""
   });
 };
 const removeField = (i: number) => {
@@ -77,6 +89,22 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
       <span class="field-label">{{ t("system.template.session_goal") }}</span>
       <el-input v-model="session.goal" class="field-input" />
     </label>
+    <label class="field-row">
+      <span class="field-label">{{ t("system.template.title_default") }}</span>
+      <el-input
+        v-model="session.title_default"
+        :placeholder="t('system.template.title_default_ph')"
+        class="field-input"
+      />
+    </label>
+    <label class="field-row">
+      <span class="field-label">{{ t("system.template.goal_default") }}</span>
+      <el-input
+        v-model="session.goal_default"
+        :placeholder="t('system.template.goal_default_ph')"
+        class="field-input"
+      />
+    </label>
   </div>
 
   <div class="field-table">
@@ -96,6 +124,10 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
             <span class="required-star">*</span>
           </th>
           <th>{{ t("system.template.field_label") }}</th>
+          <th class="col-default">
+            {{ t("system.template.field_default") }}
+          </th>
+          <th>{{ t("system.template.field_placeholder") }}</th>
           <th class="col-type">{{ t("system.template.field_type") }}</th>
           <th class="col-required">
             {{ t("system.template.field_required") }}
@@ -117,6 +149,20 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
             <el-input
               v-model="f.label"
               :placeholder="t('system.template.field_label')"
+              size="small"
+            />
+          </td>
+          <td class="col-default">
+            <el-input
+              v-model="f.default"
+              :placeholder="t('system.template.field_default_ph')"
+              size="small"
+            />
+          </td>
+          <td>
+            <el-input
+              v-model="f.placeholder"
+              :placeholder="t('system.template.field_placeholder_ph')"
               size="small"
             />
           </td>
@@ -234,6 +280,10 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
 
   .col-type {
     width: 120px;
+  }
+
+  .col-default {
+    width: 110px;
   }
 
   .col-required {

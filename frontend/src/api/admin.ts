@@ -34,8 +34,13 @@ export type TemplateDoc = {
       label: string;
       type: string;
       required: boolean;
+      default?: string;
+      placeholder?: string;
     }[];
     setup: { intro: string; extract_to: string[]; required: string[] };
+    // 访谈名称/访谈目标是固定伪字段，默认值挂在 session 上（空串=无）
+    title_default?: string;
+    goal_default?: string;
   };
   coaching: {
     playbook: string;

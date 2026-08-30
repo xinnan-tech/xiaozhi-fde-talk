@@ -26,6 +26,54 @@ def test_interview_record_has_snapshot():
     assert "template_snapshot" in cols
 
 
+def test_base_field_default_and_placeholder():
+    """BaseField 支持可选 default / placeholder：空串=未配置；列宽与 label 对齐。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.domain.template import BaseField
+
+    bare = BaseField(key="project", label="项目")
+    assert bare.default == ""
+    assert bare.placeholder == ""
+
+    filled = BaseField(
+        key="project", label="项目",
+        default="售前", placeholder="如：智慧园区项目",
+    )
+    assert filled.default == "售前"
+    assert filled.placeholder == "如：智慧园区项目"
+
+    with pytest.raises(ValidationError):
+        BaseField(key="p", label="项目", placeholder="x" * 129)
+    with pytest.raises(ValidationError):
+        BaseField(key="p", label="项目", default="x" * 129)
+
+
+def test_session_title_goal_defaults():
+    """访谈名称/访谈目标是固定伪字段：默认值挂 SessionBlock，空串=未配置。"""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.domain.template import SessionBlock
+
+    bare = SessionBlock()
+    assert bare.title_default == ""
+    assert bare.goal_default == ""
+
+    filled = SessionBlock(
+        title_default="企业官网改版需求调研",
+        goal_default="搞清楚核心诉求与拍板人",
+    )
+    assert filled.title_default == "企业官网改版需求调研"
+    assert filled.goal_default == "搞清楚核心诉求与拍板人"
+
+    with pytest.raises(ValidationError):
+        SessionBlock(title_default="x" * 129)
+    with pytest.raises(ValidationError):
+        SessionBlock(goal_default="x" * 129)
+
+
 def test_seed_contains_pm_template():
     from app.services.template.seed import SEED_TEMPLATES
 
@@ -33,6 +81,22 @@ def test_seed_contains_pm_template():
     assert len(pm) == 1
     assert pm[0]["name"] == "产品经理"
     assert pm[0]["coaching"]["must_ask"][0]["id"] == "objective"
+
+    # 行业通用演示：文本字段配默认值（预填）+ 占位提示；访谈名称/访谈目标
+    # 是固定伪字段，默认值在 session.title_default / goal_default；
+    # start_time/duration 由建访谈对话框自动兜底（此刻/45），不预置默认值
+    session = pm[0]["session"]
+    fields = {f["key"]: f for f in session["base_fields"]}
+    assert session["title_default"] == "企业官网改版需求调研"
+    assert session["goal_default"] == "搞清楚对方对官网改版的核心诉求、现有痛点和拍板人"
+    assert fields["project"]["default"] == "企业官网改版"
+    assert fields["interviewee"]["default"] == "客户方产品负责人"
+    assert fields["project"].get("placeholder", "").startswith("如：")
+    assert fields["interviewee"].get("placeholder", "").startswith("如：")
+    assert all(
+        not f.get("default") for f in session["base_fields"]
+        if f["key"] not in ("project", "interviewee")
+    )
 
 
 def test_migration_0002_creates_tables(tmp_path, monkeypatch):

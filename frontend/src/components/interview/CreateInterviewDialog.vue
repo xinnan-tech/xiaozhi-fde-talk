@@ -74,17 +74,9 @@ const cameraVideoRef = ref<HTMLVideoElement>();
 const fileInputRef = ref<HTMLInputElement>();
 const frozenImageSrc = ref("");
 const createDefaultForm = (): CreateInterviewForm => ({
-  base_info: {
-    // 不再预填演示值（旧版预填「欣南科技/彭经理」等假数据，用户不删就会
-    // 创建出带假人名假项目的访谈）；placeholder 负责引导，必填规则负责兜底
-    title: "",
-    project: "",
-    interviewee: "",
-    // 默认「此刻」：访谈多为马上开始，留空只会制造最常见的必填报错
-    start_time: dayjs().format("YYYY-MM-DD HH:mm:ss"),
-    duration: "45",
-    end_time: ""
-  },
+  // base_info 的键由所选模板的 base_fields 决定（applyTemplateDefaults
+  // 加载时逐字段初始化兜底值），这里不再预置固定键
+  base_info: {},
   goal: "",
   template_id: ""
 });
@@ -118,65 +110,78 @@ const {
   snap: snapCamera
 } = useCameraCapture();
 
-const rules = computed<FormRules>(() => ({
-  "base_info.title": [
-    {
-      required: true,
-      message: t("create.dialog.name_required"),
-      trigger: "blur"
-    }
-  ],
-  "base_info.interviewee": [
-    {
-      required: true,
-      message: t("create.dialog.interviewee_required"),
-      trigger: "blur"
-    }
-  ],
-  "base_info.start_time": [
-    {
-      required: true,
-      message: t("create.dialog.start_time_required"),
-      trigger: "change"
-    }
-  ],
-  "base_info.duration": [
-    {
-      required: true,
-      message: t("create.dialog.duration_required"),
-      trigger: "change"
-    }
-  ],
-  template_id: [
-    {
-      required: true,
-      message: t("create.dialog.template_required"),
-      trigger: "change"
-    }
-  ],
-  "base_info.project": [
-    {
-      required: true,
-      message: t("create.dialog.project_required"),
-      trigger: "blur"
-    }
-  ],
-  goal: [
-    {
-      required: true,
-      trigger: "blur",
-      validator: (_rule, value, callback) => {
-        if (!value?.trim()) {
-          goalError.value = t("create.dialog.goal_required");
-          callback(new Error(t("create.dialog.goal_required")));
-          return;
-        }
-        goalError.value = "";
-        callback();
+// 显示名/占位：模板 label 优先；canonical 键（历史模板没配 label 时）
+// 回退全局文案，其余回退 key 本身
+const canonicalLabel = (key: string): string =>
+  ({
+    project: t("create.dialog.project"),
+    interviewee: t("create.dialog.interviewee"),
+    start_time: t("create.dialog.start_time"),
+    duration: t("create.dialog.duration")
+  })[key] ?? key;
+const canonicalPlaceholder = (key: string): string =>
+  ({
+    project: t("create.dialog.project_placeholder"),
+    interviewee: t("create.dialog.interviewee_placeholder"),
+    start_time: t("create.dialog.start_time_placeholder"),
+    duration: t("create.dialog.duration_placeholder")
+  })[key] ?? "";
+const fieldLabelOf = (field: TemplateBaseField) =>
+  field.label?.trim() || canonicalLabel(field.key);
+const fieldPlaceholderOf = (field: TemplateBaseField) =>
+  templateHints.value[field.key] ||
+  canonicalPlaceholder(field.key) ||
+  (field.type === "duration" || field.type === "datetime"
+    ? t("create.dialog.field_select_ph", { label: fieldLabelOf(field) })
+    : t("create.dialog.field_input_ph", { label: fieldLabelOf(field) }));
+
+const rules = computed<FormRules>(() => {
+  const result: FormRules = {
+    "base_info.title": [
+      {
+        required: true,
+        message: t("create.dialog.name_required"),
+        trigger: "blur"
       }
-    }
-  ]
-}));
+    ],
+    template_id: [
+      {
+        required: true,
+        message: t("create.dialog.template_required"),
+        trigger: "change"
+      }
+    ],
+    goal: [
+      {
+        required: true,
+        trigger: "blur",
+        validator: (_rule, value, callback) => {
+          if (!value?.trim()) {
+            goalError.value = t("create.dialog.goal_required");
+            callback(new Error(t("create.dialog.goal_required")));
+            return;
+          }
+          goalError.value = "";
+          callback();
+        }
+      }
+    ]
+  };
+  // 业务字段的必填规则跟着模板走（BaseField.required），trigger 按控件类型定
+  for (const field of templateFields.value) {
+    if (!field.required) continue;
+    result[`base_info.${field.key}`] = [
+      {
+        required: true,
+        message: t("create.dialog.field_required", {
+          label: fieldLabelOf(field)
+        }),
+        trigger: field.type === "text" || !field.type ? "blur" : "change"
+      }
+    ];
+  }
+  return result;
+});
 
 const inputMethods = computed(() => [
   {
@@ -219,6 +224,9 @@ const resetForm = async () => {
   closeCamera();
   formRef.value?.resetFields();
   Object.assign(form, createDefaultForm());
+  // 兜底值记录随表单一起清空：模板默认值只取代兜底值，不取代用户改动
+  for (const key of Object.keys(autoValues)) delete autoValues[key];
+  templateHints.value = {};
   form.template_id = interviewTemplates.value[0]?.id ?? "";
   selectedInputMethod.value = "";
   activePanel.value = "";
@@ -297,12 +305,81 @@ const loadTemplateFields = async (templateId: string) => {
 
   const template = await getInterviewTemplateDetailApi(templateId);
   templateFields.value = template.session?.base_fields ?? [];
+  templateSession.value = template.session ?? {};
   templateFieldsTemplateId.value = templateId;
   return templateFields.value;
 };
 
-const normalizeExtractedValue = (key: string, value: string) => {
-  if (key === "duration") {
+// 模板字段的兜底初值/默认值与占位提示
+// - 兜底初值按类型：datetime=此刻（访谈多为马上开始）、duration=45、其余空串，
+//   加载模板时只补缺失的键
+// - 模板默认值（default）只取代兜底值或空值，用户改过的不动——预填永远
+//   不覆盖人的输入；访谈名称/访谈目标是固定伪字段，默认值在
+//   session.title_default / goal_default
+// - 占位提示：模板配了就替代全局文案；重置时清空回退
+const templateHints = ref<Record<string, string>>({});
+const templateSession = ref<{
+  title_default?: string;
+  goal_default?: string;
+}>({});
+// 各字段「未经用户手」的兜底值：模板 default 只取代兜底值
+const autoValues: Record<string, string> = {};
+
+const fallbackForType = (type: string): string => {
+  if (type === "datetime") return dayjs().format("YYYY-MM-DD HH:mm:ss");
+  if (type === "duration") return "45";
+  return "";
+};
+
+const applyTemplateDefaults = async (templateId: string) => {
+  if (!templateId) return;
+  const fields = await loadTemplateFields(templateId);
+  const baseInfo = form.base_info as Record<string, string>;
+  const hints: Record<string, string> = {};
+
+  // 先补兜底初值（只补缺失的键，已有值不动）
+  for (const field of fields) {
+    if (!(field.key in baseInfo)) {
+      const fallback = fallbackForType(field.type || "text");
+      baseInfo[field.key] = fallback;
+      autoValues[field.key] = fallback;
+    }
+  }
+
+  const titlePreset = templateSession.value.title_default?.trim();
+  if (titlePreset && !baseInfo.title?.trim()) baseInfo.title = titlePreset;
+  const goalPreset = templateSession.value.goal_default?.trim();
+  if (goalPreset && !form.goal.trim()) form.goal = goalPreset;
+
+  for (const field of fields) {
+    const preset = field.default?.trim();
+    if (preset) {
+      const current = baseInfo[field.key] ?? "";
+      // 当前值既非空也非兜底值 = 用户已动过，不覆盖
+      if (current && current !== autoValues[field.key]) continue;
+      const value = normalizeByType(field.type || "text", preset);
+      if (value) baseInfo[field.key] = value;
+    }
+    if (field.placeholder?.trim()) {
+      hints[field.key] = field.placeholder.trim();
+    }
+  }
+  templateHints.value = hints;
+};
+
+watch(
+  () => form.template_id,
+  id => {
+    if (!id || !props.modelValue) return;
+    // 拉取失败不阻塞建访谈，占位/默认值退回全局兜底
+    applyTemplateDefaults(id).catch(() => undefined);
+  }
+);
+
+// 按字段类型规整提取/预填值：duration 吸附到最近档位，datetime 补全秒位，
+// 其余原样返回。类型来自模板 base_fields（text/datetime/duration）
+const normalizeByType = (type: string, value: string) => {
+  if (type === "duration") {
     const source = Number.parseInt(value, 10);
     if (!Number.isFinite(source)) return "";
     return durationOptions.value.reduce((closest, option) => {
@@ -313,7 +390,7 @@ const normalizeExtractedValue = (key: string, value: string) => {
     }, durationOptions.value[0]?.value ?? "");
   }
 
-  if (key === "start_time") {
+  if (type === "datetime") {
     const parsed = dayjs(value, "YYYY-MM-DDTHH:mm", true);
     if (parsed.isValid()) {
       return parsed.format("YYYY-MM-DD HH:mm:ss");
@@ -372,15 +449,22 @@ const runExtractAndFill = async (transcript: string) => {
     // 请求返回前已取消时，不再回填表单或显示结果消息
     if (signal.aborted) return null;
 
-    // 将提取结果写回表单控件；值与当前一致的回显不计入 filled，filled表示更新字段数
+    // 将提取结果写回表单控件；只回填模板字段/名称/目标（后端不会返回
+    // 之外的键，这里再拦一道），值与当前一致的回显不计入 filled
+    const fieldKeySet = new Set(fields.map(f => f.key));
+    const fieldTypeOf = (key: string) =>
+      fields.find(f => f.key === key)?.type || "text";
     let filled = 0;
     for (const [key, rawValue] of Object.entries(response.values ?? {})) {
       if (!rawValue) continue;
-      const value = normalizeExtractedValue(key, String(rawValue));
-      if (!value) continue;
-      if (key !== "title" && key !== "goal" && !(key in form.base_info)) {
+      if (key !== "title" && key !== "goal" && !fieldKeySet.has(key)) {
         continue;
       }
+      const value =
+        key === "title" || key === "goal"
+          ? String(rawValue)
+          : normalizeByType(fieldTypeOf(key), String(rawValue));
+      if (!value) continue;
 
       const previous =
         key === "title"
@@ -410,11 +494,8 @@ const runExtractAndFill = async (transcript: string) => {
     if (filled > 0) {
       formRef.value?.clearValidate([
         "base_info.title",
-        "base_info.project",
-        "base_info.interviewee",
-        "base_info.start_time",
-        "base_info.duration",
-        "goal"
+        "goal",
+        ...fields.map(f => `base_info.${f.key}`)
       ]);
     }
     return filled;
@@ -667,13 +748,17 @@ watchEffect(
 );
 
 const loadInterviewTemplates = async () => {
+  // 先清模板字段缓存再拉列表：template_id 观察者可能在列表返回前就触发
+  // applyTemplateDefaults，清晚了它读到旧缓存、随后又被这里清空——
+  // 动态表单的字段会凭空消失。清在设 template_id 之前，观察者必然重拉
+  templateFields.value = [];
+  templateSession.value = {};
+  templateFieldsTemplateId.value = "";
   interviewTemplatesLoading.value = true;
   try {
     const response = await getInterviewsTemplatesApi();
     interviewTemplates.value = response.items;
     form.template_id = response.items[0]?.id ?? "";
-    templateFields.value = [];
-    templateFieldsTemplateId.value = "";
   } catch {
     interviewTemplates.value = [];
     form.template_id = "";
@@ -682,17 +767,26 @@ const loadInterviewTemplates = async () => {
   }
 };
 
+// end_time = 第一个 datetime 字段 + 第一个 duration 字段（模板没配则空）
 const calculateEndTime = () => {
+  const fields = templateFields.value;
+  const datetimeKey =
+    fields.find(f => f.type === "datetime")?.key ?? "start_time";
+  const durationKey =
+    fields.find(f => f.type === "duration")?.key ?? "duration";
+  const startRaw = form.base_info[datetimeKey];
+  const durationRaw = form.base_info[durationKey];
+  if (!startRaw || !durationRaw) return "";
+
   const startTime = dayjs(
-    form.base_info.start_time,
+    startRaw,
     ["YYYY-MM-DD HH:mm:ss", "YYYY-MM-DDTHH:mm:ss"],
     true
   );
-  if (!startTime.isValid()) return "";
+  const minutes = Number(durationRaw);
+  if (!startTime.isValid() || !Number.isFinite(minutes)) return "";
 
-  return startTime
-    .add(Number(form.base_info.duration), "minute")
-    .format("YYYY-MM-DD HH:mm:ss");
+  return startTime.add(minutes, "minute").format("YYYY-MM-DD HH:mm:ss");
 };
 
 const handleModelValueChange = (value: boolean) => {
@@ -784,58 +878,36 @@ watch(
                 :placeholder="$t('create.dialog.name_placeholder')"
               />
             </el-form-item>
-
-            <el-form-item
-              :label="$t('create.dialog.project')"
-              prop="base_info.project"
-            >
-              <el-input
-                v-model="form.base_info.project"
-                :placeholder="$t('create.dialog.project_placeholder')"
-              />
-            </el-form-item>
           </div>
 
+          <!-- 业务字段按模板 base_fields 渲染（label=显示名，控件跟类型走）：
+               text→输入框 datetime→时间选择 duration→档位下拉 -->
           <div class="basic-fields-row">
             <el-form-item
-              :label="$t('create.dialog.interviewee')"
-              prop="base_info.interviewee"
-            >
-              <el-input
-                v-model="form.base_info.interviewee"
-                :placeholder="$t('create.dialog.interviewee_placeholder')"
-              >
-                <template #suffix>
-                  <component :is="userIcon" />
-                </template>
-              </el-input>
-            </el-form-item>
-
-            <el-form-item
-              :label="$t('create.dialog.start_time')"
-              prop="base_info.start_time"
+              v-for="f in templateFields"
+              :key="f.key"
+              :class="{ 'is-duration': f.type === 'duration' }"
+              :label="fieldLabelOf(f)"
+              :prop="`base_info.${f.key}`"
             >
               <el-date-picker
-                v-model="form.base_info.start_time"
+                v-if="f.type === 'datetime'"
+                v-model="form.base_info[f.key]"
                 type="datetime"
                 value-format="YYYY-MM-DD HH:mm:ss"
                 format="YYYY-MM-DD HH:mm:ss"
-                :placeholder="$t('create.dialog.start_time_placeholder')"
+                :placeholder="fieldPlaceholderOf(f)"
                 class="field-control"
               >
                 <template #suffix>
                   <component :is="calendarIcon" />
                 </template>
               </el-date-picker>
-            </el-form-item>
 
-            <el-form-item
-              :label="$t('create.dialog.duration')"
-              prop="base_info.duration"
-            >
               <el-select
-                v-model="form.base_info.duration"
-                :placeholder="$t('create.dialog.duration_placeholder')"
+                v-else-if="f.type === 'duration'"
+                v-model="form.base_info[f.key]"
+                :placeholder="fieldPlaceholderOf(f)"
               >
                 <el-option
                   v-for="option in durationOptions"
@@ -844,6 +916,16 @@ watch(
                   :value="option.value"
                 />
               </el-select>
+
+              <el-input
+                v-else
+                v-model="form.base_info[f.key]"
+                :placeholder="fieldPlaceholderOf(f)"
+              >
+                <template v-if="f.key === 'interviewee'" #suffix>
+                  <component :is="userIcon" />
+                </template>
+              </el-input>
             </el-form-item>
           </div>
 
@@ -1148,6 +1230,7 @@ watch(
 
     .basic-fields-row {
       display: flex;
+      flex-wrap: wrap;
       gap: 14px;
       align-items: flex-start;
     }
@@ -1164,10 +1247,11 @@ watch(
 
     .basic-fields-row {
       .el-form-item {
-        flex: 1 1 0;
+        flex: 1 1 180px;
         min-width: 0;
 
-        &:nth-child(3) {
+        // 时长是固定档位下拉，窄列即可（字段数随模板变，不再按位置写死）
+        &.is-duration {
           flex: 0 0 128px;
         }
       }

@@ -192,6 +192,21 @@ async def test_normalize_safety_none_handled():
     assert tpl.safety == []
 
 
+async def test_normalize_field_placeholder():
+    """placeholder 是字符串则保留、非字符串丢弃；default 不由 LLM 决定（恒空）。"""
+    tpl = _normalize({
+        "id": "ph-1", "name": "占位",
+        "session": {"base_fields": [
+            {"key": "project", "label": "项目", "placeholder": "如：门店巡检系统"},
+            {"key": "owner", "label": "负责人", "placeholder": 123},
+        ]},
+    })
+    fields = {f.key: f for f in tpl.session.base_fields}
+    assert fields["project"].placeholder == "如：门店巡检系统"
+    assert fields["owner"].placeholder == ""
+    assert all(f.default == "" for f in tpl.session.base_fields)
+
+
 @pytest.mark.asyncio
 async def test_generate_passes_max_tokens_and_prompt():
     fake = _FakeLLM(_DIRTY_OUTPUT)

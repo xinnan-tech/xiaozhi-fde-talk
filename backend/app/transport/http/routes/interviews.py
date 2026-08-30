@@ -132,12 +132,20 @@ async def _summary_from_session_id(session_id: str) -> dict:
 
 
 def _state_detail(state) -> dict:
+    from app.services.template.loader import resolve_template
     s = state.session
+    # 模板字段定义（快照优先）：运行页据此渲染 base_info 的 label/控件，
+    # 不再写死固定键；模板删了也不怕——快照随访谈存
+    tpl = resolve_template(s.template_id, s.template_snapshot)
     return {
         "id": s.id,
         "template_id": s.template_id,
         "template_version": s.template_version,
         "status": s.status.value,
+        "template_fields": [
+            {"key": f.key, "label": f.label, "type": f.type}
+            for f in tpl.session.base_fields
+        ] if tpl else [],
         "base_info": s.base_info,
         "goal": s.goal,
         "first_batch_generated": s.first_batch_generated,

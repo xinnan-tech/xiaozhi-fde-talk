@@ -35,7 +35,7 @@ _SYSTEM_PROMPT = """你是访谈模板设计师，为语音访谈助手设计模
     "name": "会话名称（如 用户/需求访谈）",
     "goal": "目标提示语：告诉访谈者这一栏该填什么",
     "base_fields": [
-      {"key": "英文小写下划线", "label": "中文名", "type": "text|datetime|duration", "required": false}
+      {"key": "英文小写下划线", "label": "中文名", "type": "text|datetime|duration", "required": false, "placeholder": "文本字段的输入示例（可选，以\"如：\"开头）"}
     ],
     "setup": {
       "intro": "开场提示语：引导访谈者一句话描述本次访谈",
@@ -55,7 +55,8 @@ _SYSTEM_PROMPT = """你是访谈模板设计师，为语音访谈助手设计模
 }
 
 硬性要求：
-1. base_fields 3~6 个：通常含访谈对象/项目，时间类用 datetime、时长用 duration。
+1. base_fields 3~6 个：通常含访谈对象/项目，时间类用 datetime、时长用 duration；\
+文本字段的 placeholder 给行业通用示例（以"如："开头），不要输出 default。
 2. must_ask 5~8 条：覆盖目标→痛点→现状→约束→决策→验收这条主线；不要输出 priority。
 3. report.doc：`# 标题`（引用 {{session.字段key}}）+ 4~6 个 `## 小节`；用 {{session.字段key}} \
 引用基础信息，用 {{ 中文占位说明 }} 标记由 AI 按访谈记录填写的部分。
@@ -170,6 +171,9 @@ def _normalize(raw: dict[str, Any]) -> Template:
             "label": f.get("label") if isinstance(f.get("label"), str) else key,
             "type": f.get("type") if f.get("type") in ("text", "datetime", "duration") else "text",
             "required": bool(f.get("required")),
+            # placeholder 保留（LLM 生成示例占位）；default 不取 LLM 的——
+            # 默认值是业务决定，由管理员在编辑器里配，AI 生成假默认值会被直接提交
+            "placeholder": f.get("placeholder") if isinstance(f.get("placeholder"), str) else "",
         })
     session["base_fields"] = clean_fields
 

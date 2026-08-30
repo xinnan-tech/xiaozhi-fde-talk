@@ -43,7 +43,9 @@ const blank = (): TemplateDoc => ({
     name: "",
     goal: "",
     base_fields: [],
-    setup: { intro: "", extract_to: [], required: [] }
+    setup: { intro: "", extract_to: [], required: [] },
+    title_default: "",
+    goal_default: ""
   },
   coaching: { playbook: "", must_ask: [] },
   report: { doc: "" },

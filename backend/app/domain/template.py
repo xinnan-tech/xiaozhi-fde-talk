@@ -25,6 +25,10 @@ class BaseField(BaseModel):
     label: str = Field(default="", max_length=128)
     type: str = "text"            # text / datetime / ...
     required: bool = False
+    # default：建访谈时预填的值（空串=无；只填空字段，不覆盖用户输入）
+    # placeholder：输入框灰字示例提示（空串=无；不参与提交）
+    default: str = Field(default="", max_length=128)
+    placeholder: str = Field(default="", max_length=128)
 
 
 class SetupBlock(BaseModel):
@@ -39,6 +43,11 @@ class SessionBlock(BaseModel):
     goal: str = ""
     base_fields: list[BaseField] = Field(default_factory=list)
     setup: SetupBlock = Field(default_factory=SetupBlock)
+    # 访谈名称/访谈目标是建访谈表单的固定伪字段，不进 base_fields
+    # （base_fields 只描述 base_info 的业务字段，goal 甚至不在 base_info），
+    # 默认值单独放这：空串=无，建访谈时只填空字段，不覆盖用户输入
+    title_default: str = Field(default="", max_length=128)
+    goal_default: str = Field(default="", max_length=128)
 
 
 class MustAskItem(BaseModel):

@@ -24,10 +24,31 @@ _cache: dict[str, Template] = {}
 
 
 def _bump_version(v: str) -> str:
+    """版本号 +1；非法字符串、负数、或 +1 后超 14 位都抛 422。
+
+    14 位上限给 DB 列宽 String(16) 留 2 位余量；99 万亿次更新够用。
+    失败抛错比静默回退到 "1" 安全——前者暴露问题，后者让乐观锁条件恒真、
+    并发更新静默丢失（#1 旧实现的根因）。
+    """
     try:
-        return str(int(v) + 1)
-    except ValueError:
-        return "1"
+        n = int(v)
+    except (TypeError, ValueError):
+        raise I18nError(
+            Keys.TEMPLATE_INVALID, http_status=422,
+            field="version", reason="版本号必须是数字字符串",
+        ) from None
+    if n < 1:
+        raise I18nError(
+            Keys.TEMPLATE_INVALID, http_status=422,
+            field="version", reason="版本号必须 >= 1",
+        )
+    bumped = n + 1
+    if len(str(bumped)) > 14:
+        raise I18nError(
+            Keys.TEMPLATE_INVALID, http_status=422,
+            field="version", reason="版本号已接近上限，无法继续 +1",
+        )
+    return str(bumped)
 
 
 def _validate(tpl: Template) -> None:
@@ -125,6 +146,11 @@ def resolve_template(
 
 async def create_template(tpl: Template) -> Template:
     _validate(tpl)
+    # 创建时强制 version=1：忽略客户端指定值，避免「先指定 16 位 version
+    # 再 +1 触发 DB 列宽溢出」之类的边界（#2）；同时与 update 时由服务端 +1
+    # 的策略对齐——版本号是服务端发牌的，客户端不能伪造
+    if tpl.version != "1":
+        tpl = tpl.model_copy(update={"version": "1"})
     from sqlalchemy.exc import IntegrityError
     from app.persistence.db import SessionLocal
     async with SessionLocal() as db:
@@ -144,10 +170,12 @@ async def create_template(tpl: Template) -> Template:
 
 
 async def update_template(tpl: Template) -> Template:
-    """全量替换；version 由后端 +1（忽略请求里的 version，防并发错乱）。
+    """全量替换；期望版本由客户端提交，服务端 +1 后写回。
 
     乐观锁：UPDATE WHERE version = expected_version——影响 0 行说明另一写者
-    已先于本请求提交，返回 409 让客户端重新加载再决定。
+    已先于本请求提交，返回 409 让客户端重新加载再决定。客户端必须把上一次
+    响应里的 version 写回本地副本再保存，否则 `expected_version = tpl.version`
+    与刚读到的 DB 版本不匹配（条件恒假）会被 409 误伤。
     """
     from app.persistence.db import SessionLocal
     from app.persistence.repositories.template import _OptimisticLockError
@@ -156,14 +184,17 @@ async def update_template(tpl: Template) -> Template:
         rec = await template_repo.get(db, tpl.id)
         if rec is None:
             raise I18nError(Keys.HTTP_TEMPLATE_NOT_FOUND, http_status=404)
-        new_version = _bump_version(rec.version)
+        # 期望版本=客户端手里的版本号（=最近一次 GET/创建/更新响应的 version）。
+        # 用 DB 刚读到的版本会让条件恒真，完全拦不住「人类打开编辑器改两分钟」
+        # 这类真实场景（#1）；服务端只负责 +1，不背书客户端版本是否「最新」
+        new_version = _bump_version(tpl.version)
         # 先构造后传递：content 与 version 冗余列必须同源自增值，
         # 否则重启 warm() 用 Template(**content) 重建缓存会带回旧 version
         updated = tpl.model_copy(update={"version": new_version})
         try:
             await template_repo.replace(
                 db, updated, version=new_version,
-                expected_version=rec.version,
+                expected_version=tpl.version,
             )
             await db.commit()
         except _OptimisticLockError as e:

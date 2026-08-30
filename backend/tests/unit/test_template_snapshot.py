@@ -19,7 +19,7 @@ def _pop_cache_residue():
 def _tpl(tid: str = "snap-t1") -> Template:
     return Template(
         id=tid, name="快照测试", version="3",
-        session={"name": "s", "goal": "", "base_fields": [], "setup": {}},
+        session={"goal": "", "base_fields": [], "setup": {}},
         coaching={"playbook": "", "must_ask": [
             {"id": "q1", "text": "旧问题"},
         ]},

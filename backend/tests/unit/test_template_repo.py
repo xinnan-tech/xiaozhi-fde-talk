@@ -13,7 +13,7 @@ from app.persistence.repositories.template import template_repo
 def _tpl(tid: str = "fde-demo", name: str = "FDE 演示") -> Template:
     return Template(
         id=tid, name=name, icon_alt="🧪", version="1",
-        session={"name": "演示", "goal": "", "base_fields": [
+        session={"goal": "", "base_fields": [
             {"key": "project", "label": "项目"},
         ], "setup": {"intro": "", "extract_to": [], "required": []}},
         coaching={"playbook": "", "must_ask": [
@@ -106,3 +106,61 @@ async def test_replace_with_expected_version_blocks_concurrent_writers(db):
     await db.commit()
     assert updated.version == "3"
     assert updated.name == "v3"
+
+
+# === P2 _bump_version 校验（#2 / #8） ===
+
+def test_bump_version_happy_path():
+    """合法数字字符串 +1。"""
+    from app.services.template.loader import _bump_version
+
+    assert _bump_version("1") == "2"
+    assert _bump_version("99") == "100"
+
+
+def test_bump_version_rejects_non_numeric():
+    """非法字符串抛 I18nError 422（旧实现是静默回退到 "1"，会触发乐观锁恒真）。"""
+    from app.core.i18n.errors import I18nError
+
+    from app.services.template.loader import _bump_version
+
+    for bad in ["", "abc", "v2", "1.0", "0"]:
+        try:
+            _bump_version(bad)
+        except I18nError as e:
+            assert e.http_status == 422
+            assert "version" in str(e).lower() or "version" in str(e.code).lower()
+        else:
+            raise AssertionError(f"_bump_version({bad!r}) should have raised")
+
+    # 负数：int("-1")=-1 不抛 ValueError，但 n<1 也得拒
+    try:
+        _bump_version("-1")
+    except I18nError as e:
+        assert e.http_status == 422
+    else:
+        raise AssertionError("_bump_version('-1') should have raised")
+
+
+def test_bump_version_rejects_overflow():
+    """+1 后超 14 位（DB String(16) 留 2 位余量）抛 422。
+
+    上限 14 位来自 DB String(16) 列宽：14 位数字 = 10^14-1，+1 后 15 位
+    仍 ≤ 16；再大就被拒，让用户在版本号耗尽前收到清晰错误
+    （旧版静默写到 DB 才报错的情况）。
+    """
+    from app.core.i18n.errors import I18nError
+
+    from app.services.template.loader import _bump_version
+
+    # 13 位最大（9999999999999 = 10^13-1）+ 1 = 10000000000000（14 位）→ 合法
+    assert _bump_version("9" * 13) == "1" + "0" * 13
+
+    # 14 位（99999999999999 = 10^14-1）+ 1 = 100000000000000（15 位 > 14 上限）→ 拒
+    with pytest.raises(I18nError) as exc:
+        _bump_version("9" * 14)
+    assert exc.value.http_status == 422
+
+    # 15 位起更大也直接拒
+    with pytest.raises(I18nError):
+        _bump_version("9" * 15)

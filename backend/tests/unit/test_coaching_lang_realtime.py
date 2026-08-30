@@ -29,8 +29,12 @@ def _async_return(value):
 
 def _make_engine():
     """构造一个最小可用 CoachingEngine；不调 ainit（测试场景不需要 LLM）。"""
-    tpl = Template(id="t1", version="1", name="t", icon_alt="",
-                   coaching=CoachingBlock(playbook="", must_ask=[]))
+    tpl = Template(
+        id="t1", version="1", name="t", icon_alt="",
+        session={"goal": "", "base_fields": [], "setup": {}},
+        coaching=CoachingBlock(playbook="", must_ask=[]),
+        report={"doc": ""},
+    )
     # 模板经 template_snapshot 注入：CoachingEngine.__init__ 里
     # resolve_template 返 None 会直接抛 RuntimeError（模板缺失是配置错误），
     # 而 "t1" 不在 loader 缓存里。走 snapshot 比改全局 loader._cache 干净——

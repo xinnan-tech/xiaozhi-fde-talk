@@ -32,8 +32,7 @@ _SYSTEM_PROMPT = """你是访谈模板设计师，为语音访谈助手设计模
   "id": "模板标识：英文小写+连字符，简短达意（如 pm-research、cs-return-visit）",
   "name": "模板显示名，2~6 个中文字（如 产品经理）",
   "session": {
-    "name": "会话名称（如 用户/需求访谈）",
-    "goal": "目标提示语：告诉访谈者这一栏该填什么",
+    "goal": "访谈目标提示语：告诉访谈者这一栏该填什么",
     "base_fields": [
       {"key": "英文小写下划线", "label": "中文名", "type": "text|datetime|duration", "required": false, "placeholder": "文本字段的输入示例（可选，以\"如：\"开头）"}
     ],

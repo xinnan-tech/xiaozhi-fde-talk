@@ -15,7 +15,6 @@ type Field = {
   placeholder?: string;
 };
 const session = defineModel<{
-  name: string;
   goal: string;
   base_fields: Field[];
   setup: { intro: string; extract_to: string[]; required: string[] };
@@ -76,19 +75,17 @@ const removeField = (i: number) => {
   }
 };
 
-const FIELD_TYPES = ["text", "datetime", "duration"];
+// value 是 schema 枚举（要落到 base_fields[].type），label 是面向模板作者的中文
+// 别名：直接展示 "datetime"/"duration" 太技术化，文案走 i18n 让用户看懂
+const FIELD_TYPES: { value: "text" | "datetime" | "duration"; label: string }[] = [
+  { value: "text", label: t("system.template.field_type_text") },
+  { value: "datetime", label: t("system.template.field_type_datetime") },
+  { value: "duration", label: t("system.template.field_type_duration") }
+];
 </script>
 
 <template>
   <div class="section-grid">
-    <label class="field-row">
-      <span class="field-label">{{ t("system.template.session_name") }}</span>
-      <el-input v-model="session.name" class="field-input" />
-    </label>
-    <label class="field-row">
-      <span class="field-label">{{ t("system.template.session_goal") }}</span>
-      <el-input v-model="session.goal" class="field-input" />
-    </label>
     <label class="field-row">
       <span class="field-label">{{ t("system.template.title_default") }}</span>
       <el-input
@@ -104,6 +101,10 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
         :placeholder="t('system.template.goal_default_ph')"
         class="field-input"
       />
+    </label>
+    <label class="field-row">
+      <span class="field-label">{{ t("system.template.session_goal") }}</span>
+      <el-input v-model="session.goal" class="field-input" />
     </label>
   </div>
 
@@ -170,9 +171,9 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
             <el-select v-model="f.type" size="small">
               <el-option
                 v-for="ty in FIELD_TYPES"
-                :key="ty"
-                :value="ty"
-                :label="ty"
+                :key="ty.value"
+                :value="ty.value"
+                :label="ty.label"
               />
             </el-select>
           </td>
@@ -275,7 +276,8 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
   }
 
   .col-key {
-    width: 32%;
+    // 字段键是英文短词，没必要占太宽，腾空间给默认值
+    width: 22%;
   }
 
   .col-type {
@@ -283,7 +285,8 @@ const FIELD_TYPES = ["text", "datetime", "duration"];
   }
 
   .col-default {
-    width: 110px;
+    // 默认值常放工单号、姓名、渠道这类内容，给宽一些避免被截
+    width: 160px;
   }
 
   .col-required {

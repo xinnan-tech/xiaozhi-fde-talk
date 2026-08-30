@@ -32,7 +32,7 @@ async def _lifespan_app():
 def _tpl(tid: str = "store-t1", name: str = "存储测试") -> Template:
     return Template(
         id=tid, name=name, version="1",
-        session={"name": "s", "goal": "", "base_fields": [
+        session={"goal": "", "base_fields": [
             {"key": "project", "label": "项目"},
         ], "setup": {"intro": "", "extract_to": ["project"], "required": ["project"]}},
         coaching={"playbook": "", "must_ask": [{"id": "q1", "text": "问"}]},

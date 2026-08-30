@@ -88,14 +88,25 @@ async def test_crud_flow(_lifespan_app):
         assert r.status_code == 409
         assert r.json()["code"] == "template.id_taken"
 
-        # 更新：version 自增为 2（请求里的 version="99" 被忽略）
+        # 更新：客户端必须带着上次响应的 version（乐观锁），
+        # 服务端 +1 后写回。先从列表拿到当前 version（=1），再 PUT 时带上
+        listed = (await c.get("/api/v1/admin/templates", headers=h)).json()
+        current = next(i for i in listed if i["id"] == "route-t1")
         body = _body("route-t1")
         body["name"] = "改名"
-        body["version"] = "99"
+        body["version"] = current["version"]  # 客户端手里是「上次响应」里的 version
         r = await c.put("/api/v1/admin/templates/route-t1", json=body, headers=h)
-        assert r.status_code == 200
+        assert r.status_code == 200, r.text
         assert r.json()["version"] == "2"
         assert r.json()["name"] == "改名"
+
+        # 旧 version 再 PUT → 409 冲突（#1：之前是恒真更新静默吞对方改动）
+        stale = _body("route-t1")
+        stale["version"] = "1"  # 已经过期的版本
+        stale["name"] = "过期改名"
+        r = await c.put("/api/v1/admin/templates/route-t1", json=stale, headers=h)
+        assert r.status_code == 409
+        assert r.json()["code"] == "template.version_conflict"
 
         # 路径与 body id 不一致 → 422
         r = await c.put(

@@ -242,8 +242,31 @@ const save = async () => {
       router.replace(`/system/templates/edit/${saved.id}`);
     }
     applyDoc(saved);
+    // applyDoc 内部已经把 saved 深拷贝到 tpl 并 markSaved——本地 version
+    // 已是最新，下次保存把它作为期望版本提交，后端乐观锁
+    // WHERE version = tpl.version 才能匹配上（#1）
     ElMessage.success(t("system.template.save_success"));
   } catch (e) {
+    // 409 模板版本冲突：另一写者已先于本请求提交，强制让用户重新加载
+    // 否则继续编辑仍会基于旧 version，乐观锁永远 409
+    const code = (e as { response?: { data?: { code?: string } } })?.response?.data?.code;
+    if (code === "template.version_conflict") {
+      try {
+        await ElMessageBox.confirm(
+          t("system.template.version_conflict"),
+          t("system.template.version_conflict_title"),
+          {
+            confirmButtonText: t("system.template.version_conflict_reload"),
+            cancelButtonText: t("system.template.cancel"),
+            type: "warning"
+          }
+        );
+        location.reload();
+      } catch {
+        // 用户取消留在编辑器——下次保存仍会 409，但不丢改动
+      }
+      return;
+    }
     // HTTP 错误（含 4xx/5xx）已由 axios 拦截器统一 toast，
     // 这里只兜底无响应的异常（断网等），避免同一错误弹两次
     if (!(e as { response?: unknown })?.response) {

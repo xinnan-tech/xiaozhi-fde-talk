@@ -94,10 +94,11 @@ def _session_summary(rec, tpl) -> dict:
         "template_id": rec.template_id,
         "template_version": rec.template_version,
         "template_icon_url": tpl.icon_url if tpl else "",
+        "template_snapshot": rec.template_snapshot,
         "status": rec.status,
         "status_type": _STATUS_TYPE.get(rec.status, "info"),
         "base_info": base_info,
-        "title": base_info.get("project") or t(Keys.HTTP_SESSION_TITLE_DEFAULT, locale=current_locale()),
+        "title": base_info.get("title") or t(Keys.HTTP_SESSION_TITLE_DEFAULT, locale=current_locale()),
         "interviewee": base_info.get("interviewee", ""),
         "type": tpl.name if tpl else "",
         "recent_time": _utc_isoformat(max(
@@ -137,16 +138,21 @@ def _state_detail(state) -> dict:
     # 模板字段定义（快照优先）：运行页据此渲染 base_info 的 label/控件，
     # 不再写死固定键；模板删了也不怕——快照随访谈存
     tpl = resolve_template(s.template_id, s.template_snapshot)
+    base_info = s.base_info or {}
     return {
         "id": s.id,
         "template_id": s.template_id,
         "template_version": s.template_version,
+        "template_snapshot": s.template_snapshot,
         "status": s.status.value,
+        # 与列表接口对齐：title 顶层字段 = base_info.title，无值时回退到 i18n
+        # 默认文案；这样 list / detail 切换不会出现「字段消失 / 值不一致」
+        "title": base_info.get("title") or t(Keys.HTTP_SESSION_TITLE_DEFAULT, locale=current_locale()),
         "template_fields": [
             {"key": f.key, "label": f.label, "type": f.type}
             for f in tpl.session.base_fields
         ] if tpl else [],
-        "base_info": s.base_info,
+        "base_info": base_info,
         "goal": s.goal,
         "first_batch_generated": s.first_batch_generated,
         "consumed_seq": s.consumed_seq,

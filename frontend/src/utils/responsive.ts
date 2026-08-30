@@ -5,8 +5,7 @@ import { responsiveStorageNameSpace } from "@/config";
 export const injectResponsiveStorage = (app: App, config: PlatformConfigs) => {
   const nameSpace = responsiveStorageNameSpace();
   const storedConfigure = Storage.getData("configure", nameSpace) as
-    | ResponsiveStorage["configure"]
-    | undefined;
+    ResponsiveStorage["configure"] | undefined;
 
   app.use(Storage, {
     nameSpace,

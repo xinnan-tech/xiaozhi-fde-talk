@@ -122,22 +122,30 @@ async def _summary_from_session_id(session_id: str) -> dict:
     """
     from app.persistence.db import SessionLocal
     from app.persistence.models import InterviewRecord
-    from app.services.template.loader import get_template
+    from app.services.template.loader import resolve_template
     async with SessionLocal() as db:
         rec = await db.get(InterviewRecord, session_id)
         if rec is None:
             raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
-        tpl = get_template(rec.template_id)
+        tpl = resolve_template(rec.template_id, rec.template_snapshot)
         return _session_summary(rec, tpl)
 
 
 def _state_detail(state) -> dict:
+    from app.services.template.loader import resolve_template
     s = state.session
+    # 模板字段定义（快照优先）：运行页据此渲染 base_info 的 label/控件，
+    # 不再写死固定键；模板删了也不怕——快照随访谈存
+    tpl = resolve_template(s.template_id, s.template_snapshot)
     return {
         "id": s.id,
         "template_id": s.template_id,
         "template_version": s.template_version,
         "status": s.status.value,
+        "template_fields": [
+            {"key": f.key, "label": f.label, "type": f.type}
+            for f in tpl.session.base_fields
+        ] if tpl else [],
         "base_info": s.base_info,
         "goal": s.goal,
         "first_batch_generated": s.first_batch_generated,

@@ -90,7 +90,7 @@ def _patch_for_capture(monkeypatch, state: SessionState, captured: list[_Capture
 
     template = MagicMock()
     template.report = MagicMock(doc="## 背景\n{{ 简单说说项目背景 }}")
-    monkeypatch.setattr(generator, "get_template", lambda _id: template)
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: template)
 
     async def _capture_chat(system, user):
         captured.append(_CapturedCall(system=system, user=user))

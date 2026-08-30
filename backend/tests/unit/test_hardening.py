@@ -127,6 +127,7 @@ async def test_save_lock_recycled_via_save_state():
         session=SimpleNamespace(
             id=sid, status=SimpleNamespace(value="created"),
             template_id="pm-research", template_version="1", user_id="u1",
+            template_snapshot=None,
             base_info={}, goal="g", first_batch_generated=False, consumed_seq=0,
             created_at=None, started_at=None, ended_at=None,
         ),
@@ -162,6 +163,7 @@ async def test_save_state_cannot_regress_from_ended():
             session=SimpleNamespace(
                 id=sid, status=SimpleNamespace(value=status),
                 template_id="pm-research", template_version="1", user_id="u1",
+                template_snapshot=None,
                 base_info={}, goal="g", first_batch_generated=False, consumed_seq=0,
                 created_at=created_at, started_at=None,
                 ended_at=ended_at if status == "ended" else None,

@@ -28,6 +28,12 @@ class Keys(StrEnum):
     HTTP_OCR_IMAGE_TOO_LARGE = "http.ocr.image_too_large"
     HTTP_OCR_IMAGE_FORMAT_UNSUPPORTED = "http.ocr.image_format_unsupported"
 
+    # ---- Templates (admin CRUD) ----
+    TEMPLATE_ID_TAKEN = "template.id_taken"
+    TEMPLATE_REFERENCED = "template.referenced"
+    TEMPLATE_INVALID = "template.invalid"
+    TEMPLATE_VERSION_CONFLICT = "template.version_conflict"
+
     # ---- WebSocket frames ----
     WS_INTERNAL = "ws.internal"
     WS_HANDSHAKE_TIMEOUT = "ws.handshake.timeout"

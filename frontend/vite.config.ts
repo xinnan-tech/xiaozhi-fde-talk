@@ -225,6 +225,12 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
               /[\\/]element-plus[\\/]es[\\/]components[\\/]([^\\/]+)/
             );
             if (m) return `element-plus-${m[1]}`;
+            // CodeMirror（模板编辑器 JSON 模式）：独立 chunk。编辑器路由本身懒加载，
+            // 但 manualChunks 兜底优先于动态导入拆分——不单拆会被合进 vue-vendor
+            // （首屏 modulepreload 白名单），所有页面首屏都要为它多下载。
+            if (id.includes("codemirror") || id.includes("@lezer")) {
+              return "codemirror";
+            }
             // 兜底合并到 vue-vendor：element-plus 按需引入后，vendor 跟 vue-vendor
             // 之间出现循环依赖（chunk 边界切断执行顺序 → TDZ "Cannot access X before initialization"）。
             // 合并成一个 chunk 消除边界；首屏只多等一次 vue-vendor 下载，但 B3 已 modulepreload 它，无明显延迟。

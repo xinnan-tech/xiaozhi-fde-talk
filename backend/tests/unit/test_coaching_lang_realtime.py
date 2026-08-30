@@ -29,13 +29,18 @@ def _async_return(value):
 
 def _make_engine():
     """构造一个最小可用 CoachingEngine；不调 ainit（测试场景不需要 LLM）。"""
+    tpl = Template(id="t1", version="1", name="t", icon_alt="",
+                   coaching=CoachingBlock(playbook="", must_ask=[]))
+    # 模板经 template_snapshot 注入：CoachingEngine.__init__ 里
+    # resolve_template 返 None 会直接抛 RuntimeError（模板缺失是配置错误），
+    # 而 "t1" 不在 loader 缓存里。走 snapshot 比改全局 loader._cache 干净——
+    # 无需清理、不跨测试泄漏。本用例只验证 output_language 现读，模板内容无关。
     sess = Session(
         id="sid", template_id="t1", template_version="1", user_id="u",
         status="in_progress", base_info={}, goal="", created_at=None,
         started_at=None, ended_at=None,
+        template_snapshot=tpl.model_dump(mode="json"),
     )
-    tpl = Template(id="t1", version="1", name="t", icon_alt="",
-                   coaching=CoachingBlock(playbook="", must_ask=[]))
     state = SessionState(session=sess, items=[], transcript=[])
     eng = CoachingEngine(state, _noop_send)
     eng.version = 0

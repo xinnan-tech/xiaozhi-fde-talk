@@ -5,9 +5,11 @@
 //   - 单 chunk raw <= 1_000_000 B（约 977 KiB）：
 //     element-plus 全量打包后单 chunk 约 800KB，是当前已知最大 vendor chunk，
 //     待按需引入 follow-up 优化；阈值兜住「常规新增依赖」单点膨胀，不卡大库。
-//   - 所有 JS+CSS chunk gzip 之和 <= 800_000 B（约 781 KiB）：
-//     element-plus gzip 约 256KB + utils-vendor gzip 约 55KB + main gzip 约 32KB +
-//     CSS gzip 约 80KB ≈ 420KB 当前基线；800KB 给多 locale 文本 / 新依赖留余量。
+//   - 所有 JS+CSS chunk gzip 之和 <= 1_000_000 B（约 977 KiB）：
+//     element-plus 按组件拆分后实测基线 ~754KB（vue-vendor 190KB + 各组件
+//     chunk + CSS）；模板编辑器引入 CodeMirror 后实测 ~920KB（已拆独立
+//     chunk，编辑器路由懒加载）。1M 留 ~8% 余量，仍能拦住误引全量大库
+//     （如 element-plus 全量 / echarts 重复打包，单点约 +250KB）。
 //
 // 调整方法：直接改下面两个常量。常量集中在一处，PR 里 review 数字变更即可。
 
@@ -17,7 +19,7 @@ import { gzipSync } from "node:zlib"
 
 const DIST = "dist"
 const PER_CHUNK_RAW_LIMIT = 1_000_000
-const TOTAL_GZIP_LIMIT = 800_000
+const TOTAL_GZIP_LIMIT = 1_000_000
 
 // 双路径探测：vite 默认 chunkFileNames 用 static/js|static/css，
 // 但部分老配置会把资源放到 assets/（典型是 create-vite 模板）；同时兼容。

@@ -33,17 +33,35 @@ const loading = ref(false);
 
 const rules = computed<FormRules<ChangePwdForm>>(() => ({
   old_password: [
-    { required: true, message: t("auth.change_password_old_placeholder"), trigger: "blur" }
+    {
+      required: true,
+      message: t("auth.change_password_old_placeholder"),
+      trigger: "blur"
+    }
   ],
   new_password: [
-    { required: true, message: t("auth.change_password_new_placeholder"), trigger: "blur" },
-    { min: 8, message: t("auth.change_password_new_placeholder"), trigger: "blur" }
+    {
+      required: true,
+      message: t("auth.change_password_new_placeholder"),
+      trigger: "blur"
+    },
+    {
+      min: 8,
+      message: t("auth.change_password_new_placeholder"),
+      trigger: "blur"
+    }
   ],
   confirm_new_password: [
-    { required: true, message: t("auth.change_password_confirm_placeholder"), trigger: "blur" },
+    {
+      required: true,
+      message: t("auth.change_password_confirm_placeholder"),
+      trigger: "blur"
+    },
     {
       validator: (_, v, cb) =>
-        v === form.new_password ? cb() : cb(new Error(t("auth.change_password_mismatch"))),
+        v === form.new_password
+          ? cb()
+          : cb(new Error(t("auth.change_password_mismatch"))),
       trigger: "blur"
     }
   ]
@@ -97,12 +115,7 @@ async function submit(formEl: FormInstance | undefined) {
     :title="t('auth.change_password_title')"
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <el-form
-      ref="formRef"
-      :model="form"
-      :rules="rules"
-      label-position="top"
-    >
+    <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
       <el-form-item prop="old_password">
         <el-input
           v-model="form.old_password"

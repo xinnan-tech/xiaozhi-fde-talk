@@ -32,7 +32,7 @@ from app.persistence.repositories.interview import interview_repo
 from app.persistence.repositories.report import report_repo
 from app.services.reports.skill_renderer import render_skills
 from app.services.sessions.state import SessionState
-from app.services.template.loader import get_template
+from app.services.template.loader import resolve_template
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +354,7 @@ async def get_or_generate(
             return ("ready", rec.content_md)
 
         # 3. 加载模板
-        template = get_template(state.session.template_id)
+        template = resolve_template(state.session.template_id, state.session.template_snapshot)
         if template is None:
             raise ValueError(f"template not found: {state.session.template_id}")
 

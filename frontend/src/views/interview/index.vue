@@ -10,6 +10,8 @@ import Delete from "~icons/ep/delete";
 import Download from "~icons/ep/download";
 import Aim from "~icons/ep/aim";
 import Calendar from "~icons/ep/calendar";
+import Clock from "~icons/ep/clock";
+import Timer from "~icons/ep/timer";
 import SwitchButton from "~icons/ep/switch-button";
 import User from "~icons/ep/user";
 import VideoPlay from "~icons/ep/video-play";
@@ -57,6 +59,31 @@ const startedAtDisplay = computed(() => {
   const startedAt = interviewDetail.value?.started_at;
   return startedAt ? dayjs(startedAt).format("YYYY-MM-DD HH:mm:ss") : "--";
 });
+/** 会话信息条的业务字段：按模板定义（随访谈快照）渲染 label；详情缺字段定义时退回固定键 */
+const sessionMetaFields = computed(() => {
+  const fields = interviewDetail.value?.template_fields;
+  if (fields?.length) {
+    return fields.map(f => ({
+      key: f.key,
+      label: f.label?.trim() || f.key,
+      type: f.type || "text"
+    }));
+  }
+  return [
+    {
+      key: "interviewee",
+      label: t("interview.meta.interviewee"),
+      type: "text"
+    },
+    {
+      key: "start_time",
+      label: t("interview.meta.start_time"),
+      type: "datetime"
+    }
+  ];
+});
+const metaIconOf = (type: string) =>
+  type === "datetime" ? Clock : type === "duration" ? Timer : User;
 const interviewStatusClass = computed(() => {
   const status = interviewDetail.value?.status;
   switch (status) {
@@ -1386,16 +1413,22 @@ onMounted(() => {
         <section class="right-panel">
           <div class="session-bar glass-card">
             <div class="session-meta">
-              <div class="session-meta-item session-meta-interviewee">
+              <!-- 业务字段按模板定义（快照）渲染：label/顺序跟模板走 -->
+              <div
+                v-for="f in sessionMetaFields"
+                :key="f.key"
+                class="session-meta-item session-meta-field"
+              >
                 <div class="session-meta-copy">
                   <span class="session-meta-label">
-                    <User class="session-meta-icon" />
-                    <span>{{ $t("interview.meta.interviewee") }}</span>
+                    <component
+                      :is="metaIconOf(f.type)"
+                      class="session-meta-icon"
+                    />
+                    <span>{{ f.label }}</span>
                   </span>
-                  <strong
-                    :title="interviewDetail?.base_info?.interviewee || '--'"
-                  >
-                    {{ interviewDetail?.base_info?.interviewee || "--" }}
+                  <strong :title="interviewDetail?.base_info?.[f.key] || '--'">
+                    {{ interviewDetail?.base_info?.[f.key] || "--" }}
                   </strong>
                 </div>
               </div>
@@ -2154,9 +2187,9 @@ onMounted(() => {
     border-right: 0;
   }
 
-  .session-meta-interviewee {
-    flex: 0 1 7em;
-    max-width: 7em;
+  .session-meta-field {
+    flex: 0 1 auto;
+    max-width: 12em;
   }
 
   .session-meta-time {

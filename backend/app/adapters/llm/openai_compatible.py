@@ -208,6 +208,7 @@ class OpenAILLMProvider(LLMProvider):
         user: str,
         retries: int = 2,
         json_mode: bool = False,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """返回原始文本（Markdown 或 JSON 字符串），由调用方解析。
 
@@ -231,6 +232,9 @@ class OpenAILLMProvider(LLMProvider):
             body["max_tokens"] = _JSON_MAX_TOKENS
         else:
             body["temperature"] = 0.4
+        if max_tokens is not None:
+            # 大输出场景（如整份模板生成）显式覆盖默认截断值
+            body["max_tokens"] = max_tokens
         self._apply_thinking_disabled(body)
         # 外层总预算：跨所有重试 + 退避，避免 LLM 半挂拖住报告生成
         budget = self._llm_timeout_s * (retries + 1) * 1.5

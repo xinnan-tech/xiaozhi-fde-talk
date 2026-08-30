@@ -134,6 +134,7 @@ class Keys(StrEnum):
     # ---- Config validation ----
     CONFIG_INVALID_ENUM_VALUE = "config.invalid_enum_value"
     CONFIG_INVALID_BOOL = "config.invalid_bool"
+    CONFIG_INVALID_NUMERIC = "config.invalid_numeric"
 
     # ---- Auth (registration / login) ----
     AUTH_USERNAME_INVALID_FORMAT = "auth.username_invalid_format"

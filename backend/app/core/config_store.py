@@ -109,9 +109,9 @@ BOOL_KEYS: frozenset[str] = frozenset({
 def validate_value(key: str, value: str) -> None:
     """key 写入校验：BOOL_KEYS / NUMERIC_KEYS / ENUM_KEYS 三类。其他 key 放行。
 
-    布尔与枚举分支都走 I18nError(code, http_status=400)，让 admin 配置页 / API
-    客户端拿到结构化的 code + params；数值分支保留 ValueError（仅 admin 后台
-    CLI 路径，暂无对应 Keys）。
+    布尔 / 枚举 / 数值分支都走 I18nError(code, http_status=400)，让 admin 配置
+    页 / API 客户端拿到结构化的 code + params。数值分支额外拦截 float('nan' /
+    'inf')——它们会绕过 `v <= 0` 判断直接落库，运行时才在 int()/float() 转换炸。
     """
     if key in BOOL_KEYS:
         if value not in ("true", "false"):
@@ -136,15 +136,33 @@ def validate_value(key: str, value: str) -> None:
     typ = NUMERIC_KEYS.get(key)
     if typ is None:
         return
+    # 拒绝 NaN / Infinity 字符串：int("nan")/int("inf") 直接抛 ValueError，
+    # 但 float("nan")/float("inf") 会绕过 v <= 0（NaN 的 <= 永远 False）落库。
+    if typ is float and value.strip().lower() in {"nan", "inf", "infinity", "-inf", "-infinity"}:
+        raise I18nError(
+            Keys.CONFIG_INVALID_NUMERIC,
+            http_status=400,
+            name=key,
+            value=value,
+            positive_integer="positive number",
+        )
     try:
         v = typ(value)
-    except ValueError:
-        raise ValueError(
-            f"{key} 须为{'正整数' if typ is int else '正数值'}：{value!r}"
+    except (ValueError, TypeError):
+        raise I18nError(
+            Keys.CONFIG_INVALID_NUMERIC,
+            http_status=400,
+            name=key,
+            value=value,
+            positive_integer="positive integer" if typ is int else "positive number",
         ) from None
     if v <= 0:
-        raise ValueError(
-            f"{key} 须为{'正整数' if typ is int else '正数值'}：{value!r}"
+        raise I18nError(
+            Keys.CONFIG_INVALID_NUMERIC,
+            http_status=400,
+            name=key,
+            value=value,
+            positive_integer="positive integer" if typ is int else "positive number",
         )
 
 

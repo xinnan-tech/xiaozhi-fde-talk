@@ -95,6 +95,7 @@
   "password.charset_insufficient": "密碼需包含至少 3 類字元（小寫/大寫/數字/符號），目前不足",
   "config.invalid_enum_value": "{field} 的取值無效：{value}（允許：{allowed}）",
   "config.invalid_bool": "{name} 值必須是 true 或 false",
+  "config.invalid_numeric": "{name} 須為{positive_integer}：{value}",
   "auth.username_invalid_format": "使用者名稱須為 4-32 位字母、數字、底線或連字號",
   "auth.username_taken": "該使用者名稱已被佔用",
   "auth.password_mismatch": "兩次輸入的密碼不一致",

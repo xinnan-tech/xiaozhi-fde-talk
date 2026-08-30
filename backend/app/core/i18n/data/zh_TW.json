@@ -17,7 +17,6 @@
   "http.ocr.image_format_unsupported": "不支援該圖片格式，僅允許 jpg / jpeg / jpe / png / bmp",
   "template.id_taken": "範本 ID 已存在：{id}",
   "template.referenced": "範本已被 {count} 場訪談引用，無法刪除",
-  "template.invalid": "{field}：{reason}",
   "template.invalid.id_format": "id 須為小寫字母、數字、連字號（如 fde-research）",
   "template.invalid.version_format": "version 須為數字字串",
   "template.invalid.version_too_small": "version 必須 ≥ 1",

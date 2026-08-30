@@ -31,7 +31,6 @@ class Keys(StrEnum):
     # ---- Templates (admin CRUD) ----
     TEMPLATE_ID_TAKEN = "template.id_taken"
     TEMPLATE_REFERENCED = "template.referenced"
-    TEMPLATE_INVALID = "template.invalid"
     TEMPLATE_INVALID_ID_FORMAT = "template.invalid.id_format"
     TEMPLATE_INVALID_VERSION_FORMAT = "template.invalid.version_format"
     TEMPLATE_INVALID_VERSION_TOO_SMALL = "template.invalid.version_too_small"

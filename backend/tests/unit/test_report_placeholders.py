@@ -86,6 +86,23 @@ def test_prefill_session_keeps_chinese_placeholders():
     assert out == "{{ 项目背景 }}\nX"
 
 
+def test_prefill_session_single_curly_form():
+    """回归 issue #122：单花括号 `{session.X}` 也走预填。
+
+    qwen-plus 偶尔会把 `{{session.start_time}}` 吞掉一个 `{`，所以 L1 预填必
+    须同时识别两种形态，避免 LLM 之后看到的是空字段再瞎填。
+    """
+    state = _FakeState(
+        session=_FakeSession(base_info={"interviewee": "张三"}),
+    )
+    doc = "> 受访者：{session.interviewee}　开始：{session.start}　结束：{session.end}"
+    out = _prefill_session_placeholders(doc, state)
+    assert "{session" not in out
+    assert "张三" in out
+    # start/end 没有值 → 留空，不应回显字面量
+    assert "开始：　结束：" in out
+
+
 # --- Bug 2: {{skill: ...}} 容错解析 ---
 
 def test_skill_no_inputs_simple():

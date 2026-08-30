@@ -38,7 +38,10 @@ logger = logging.getLogger(__name__)
 
 # 骨架里的 {{session.X}}：由后端从 state 预填，再交给 LLM。
 # LLM 不该看到这些占位符（曾因 transcript 里没有 start_time / end_time 而原样留着）。
-_SESSION_PLACEHOLDER_RE = re.compile(r"\{\{session\.([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
+# 同时兼容单花括号 {session.X}：qwen-plus 等 LLM 在翻译骨架时偶尔把
+# {{session.start_time}} 误输出成 {session.start}（吞了一个 {），骨架里若
+# 已预填为空字符串则 LLM 看到的还是空，仍会按单花括号形态写出。
+_SESSION_PLACEHOLDER_RE = re.compile(r"\{\{?session\.([a-zA-Z_][a-zA-Z0-9_]*)\}\}?")
 
 
 def _transcript_signature(transcript: list[TranscriptSegment]) -> str:
@@ -159,11 +162,16 @@ _ALLOWED_ATTRS = {"a": ["href", "title"], "code": ["class"]}
 
 
 # 兜底：LLM 偶尔会在 `{{ ... }}` 里填内容但忘了删 `{{`/`}}` 包装，整块清除。
-# 保留两类 EXEMPT：`{{skill: ...}}`（技能调用点，系统后处理要识别）+ `{{session.X}}`
-# （会话元数据占位符，与 base skeleton 的 _prefill_session_placeholders 同形态——
-# 如果误以为是 orphan 删掉，会丢项目名/受访者/时间等关键元数据，且前端无法再补回）。
-# 匹配 `{{` 后面既非 `skill:` 也非 `session.` 开头的占位符。
-_ORPHAN_PLACEHOLDER_RE = re.compile(r"\{\{(?!(?:skill:|session\.))[^}]*\}\}", re.DOTALL)
+# 保留 EXEMPT：`{{skill: ...}}`（技能调用点，_find_markers 要识别）。
+# 不再保留 `{{session.X}}`：L1 预填后这两种形态本就不该出现在 LLM 输出里——
+# 同时把 `{session.X}` 也加入 orphan 范围：qwen-plus 等模型偶尔会把
+# `{{session.start_time}}` 吞掉一个 `{` 后以 `{session.start}` 单花括号形态写
+# 出；这种情况只能 strip，否则字面量会以原样落到报告里（issue #122）。
+# 单花括号只匹配 `session.X` 这类合法 session 元数据形态——避免误吞 markdown
+# 里普通 `{...}` 文本（如代码示例）。
+_ORPHAN_PLACEHOLDER_RE = re.compile(
+    r"\{\{(?!skill:)[^}]*?}}|\{session\.[a-zA-Z_][a-zA-Z0-9_]*\}",
+)
 
 
 def _strip_orphan_placeholders(md: str) -> str:

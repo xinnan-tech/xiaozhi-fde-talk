@@ -257,11 +257,14 @@ async def update_interview(
     # PATCH 是增量合并：UpdateInterviewRequest 已校验 req.base_info 单字段 / 整体上限，
     # 但合并到 DB 现值后总字节仍可能超 BASE_INFO_TOTAL_MAX_BYTES（先 POST 60KB、
     # 再 PATCH 10KB 增量，多次 PATCH 可无限放大）。
-    # 在落库前对 merged 兜底跑一遍 _validate_base_info_size，挡住放大器。
+    # route 层对 merged 跑一遍 _validate_base_info_size 是 fast-fail（基于本路由 GET
+    # 快照；多数单请求场景足够早返 422）。manager.update 内部还会基于它自己的 GET
+    # 快照再校验一次，挡住 route GET 与 manager.update GET 之间的并发 PATCH 累计
+    # 放大（见 openrz 第二轮评审 #171）。两层都过则 merged ≤ 64KB 才落库。
     if req.base_info is not None:
         _validate_base_info_size({**state.session.base_info, **req.base_info})
-    # manager.update 抛 I18nError 子类（SessionIllegalTransitionError / Edit/...），
-    # 全局 I18nError handler 会以 409 + 本地化 detail 返回，无需在此 catch。
+    # manager.update 抛 I18nError 子类（SessionIllegalTransitionError / Edit / 总字节超限），
+    # 全局 I18nError handler 会以 409 / 422 + 本地化 detail 返回，无需在此 catch。
     await manager.update(session_id, req.base_info, req.goal)
     return await _summary_from_session_id(session_id)
 

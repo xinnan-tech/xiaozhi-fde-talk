@@ -7,6 +7,7 @@
   "http.session.unknown_status": "Trạng thái không xác định: {value}",
   "http.report.not_ready": "Báo cáo chưa sẵn sàng",
   "http.report.format_unsupported": "Định dạng xuất không được hỗ trợ: {fmt}. Có sẵn: {supported}",
+  "http.coaching.item_not_found": "Không tìm thấy mục coaching: {item_id}",
   "http.admin.required": "Cần quyền quản trị viên",
   "http.admin.config_group_not_found": "Nhóm cấu hình không tồn tại: {group}",
   "http.admin.config_unknown_keys": "Khóa cấu hình không xác định: {unknown} (cho phép: {allowed})",

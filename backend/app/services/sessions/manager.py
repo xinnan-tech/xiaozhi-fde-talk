@@ -278,17 +278,28 @@ class SessionManager:
         return state
 
     async def set_item_status(
-        self, session_id: str, item_id: str, action: str
+        self, session_id: str, item_id: str, action: str,
+        valid_ids: Optional[set[str]] = None,
     ) -> SessionState:
         """REST 端的 ignore/skip/unignore/unskip。不要求 runtime 存活。
         action ∈ {"ignore", "unignore", "skip", "unskip"}.
+
+        valid_ids：可选，调用方传入当前访谈模板的合法 item_id 集合（即
+        `template_snapshot["coaching"]["must_ask"]` 的 id 列表）。对
+        `skip` / `ignore` 写入操作强制校验——错 id 直接 404，不污染
+        DB（#164）。`unskip` / `unignore` 是 idempotent 的 discard，不校验
+        （错 id 本就静默无操作，前端未渲染亦无害）。
         """
         if action not in ("ignore", "unignore", "skip", "unskip"):
             raise ValueError(f"unknown action: {action}")
         state = await self.get(session_id)
         if state is None:
             raise KeyError(session_id)
-        # 与 runtime.ignore/skip 一致：不做 item 存在性校验（不存在的 id 塞入集合无害，前端不渲染）
+        if action in ("ignore", "skip") and valid_ids is not None and item_id not in valid_ids:
+            # 路由层负责把这条 I18nError 转 404 + {detail, code}
+            from app.core.i18n import Keys
+            from app.core.i18n.errors import I18nError
+            raise I18nError(Keys.HTTP_COACHING_ITEM_NOT_FOUND, http_status=404, item_id=item_id)
         if action == "ignore":
             state.ignored_ids.add(item_id)
         elif action == "unignore":

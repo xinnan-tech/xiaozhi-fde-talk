@@ -7,6 +7,7 @@
   "http.session.unknown_status": "Unknown status: {value}",
   "http.report.not_ready": "Report is not yet ready",
   "http.report.format_unsupported": "Unsupported export format: {fmt}. Available: {supported}",
+  "http.coaching.item_not_found": "Coaching item not found: {item_id}",
   "http.admin.required": "Admin privileges required",
   "http.admin.config_group_not_found": "Unknown config group: {group}",
   "http.admin.config_unknown_keys": "Unknown config keys: {unknown} (allowed: {allowed})",

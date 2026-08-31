@@ -94,6 +94,10 @@ ENUM_KEYS: dict[str, set[str]] = {
     },
     # LLM 输出语种：跟 ASR 是独立维度（详见 plan Task 2.5 注释）。
     "llm.output_language": derived_output_language_enum(),
+    # LLM 提供方类型：跟 factory.py:_REGISTRY 对齐；任意脏值落库会让
+    # create_llm() 在 factory.py:53 抛 ValueError，admin 端 PUT 链路上没有
+    # catch 转 422，全站 LLM 调 500。在写入层校验一次性挡掉。
+    "llm.type": {"openai", "stub"},
     # OCR 模型类型：openai 兼容（qwen-vl、gpt-4o）或百度
     "ocr.type": {"openai", "baidu"},
 }

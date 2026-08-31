@@ -14,6 +14,7 @@ import math
 import weakref
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 
@@ -102,6 +103,13 @@ ENUM_KEYS: dict[str, set[str]] = {
     "ocr.type": {"openai", "baidu"},
 }
 
+# URL key：写入前校验 scheme + 主机段。funasr_server 是 ws/wss；doubao_stream
+# 不存 URL（走 appid/access_token），不进表。坏 URL 落库要等到首次 connect
+# 才被 websockets.InvalidURI 抛，admin 配置页不会显示错因——写入层挡掉。
+URL_KEYS: dict[str, set[str]] = {
+    "asr.funasr_server.ws_url": {"ws", "wss"},
+}
+
 # bool key 集合：写入前校验，只接受 "true" / "false"。
 # 坏值若放行，运行时 bool(value) 在 truthy/falsy 边界行为诡异（如 "yes"→True），
 # 注册开关注定踩坑。
@@ -137,6 +145,28 @@ def validate_value(key: str, value: str) -> None:
                 field=key,
                 value=value,
                 allowed=" / ".join(sorted(allowed)),
+            )
+        return
+    if key in URL_KEYS:
+        allowed_schemes = URL_KEYS[key]
+        # 前后空白整段拒：runtime _ws_url.strip() 会静默吞掉空格，admin 看不到
+        # 自己手抖输入的空格，误以为值是「wss://x」实际上落到 DB 里带空格。
+        if value != value.strip():
+            raise I18nError(
+                Keys.CONFIG_INVALID_ENUM_VALUE,
+                http_status=400,
+                field=key,
+                value=value,
+                allowed=" / ".join(f"{s}://host:port" for s in sorted(allowed_schemes)),
+            )
+        parsed = urlparse(value)
+        if parsed.scheme.lower() not in allowed_schemes or not parsed.netloc:
+            raise I18nError(
+                Keys.CONFIG_INVALID_ENUM_VALUE,
+                http_status=400,
+                field=key,
+                value=value,
+                allowed=" / ".join(f"{s}://host:port" for s in sorted(allowed_schemes)),
             )
         return
     typ = NUMERIC_KEYS.get(key)

@@ -1,17 +1,4 @@
-"""#166：空访谈 GET /report / POST /export 不再调 LLM、不再落库假报告。
-
-两层防御：
-1. 路由层 `get_interview_report` / `export_interview_report`：访谈 status 必须在
-   {ended, extracting, done} 之一；早期状态（created/setting_up/in_progress/suspended）
-   一律 409 HTTP_REPORT_NOT_READY，**绝不进入 generator**。
-2. generator 层 `get_or_generate`：拿到 state 后再做一道 transcript 空检测——空就
-   返 ("empty", "") + 跳过 DB upsert + 跳过 LLM。即便调用方绕过路由（e2e / 后台
-   异步任务）直接调 generator 也守得住，避免 680 字虚构报告落库（#166 证据）。
-
-测试只断 generator 的 internal 契约：路由层 409 是同步前置短路，不在单测范围里复刻
-（FastAPI 路由级 happy path 已被现有 test_extract_endpoint_i18n.py 等覆盖，状态
-闸门仅是在 route 层加一个 `if` 分支，没必要拉整套 TestClient 起来）。
-"""
+"""#166：空访谈（无任何可读段）拒出报告，路由与 generator 双层守卫。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -20,9 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.services.reports import generator
-
-
-# ────────────── generator：空 transcript 短路 ──────────────
 
 
 @dataclass
@@ -50,7 +34,7 @@ class _FakeState:
 
 @pytest.mark.asyncio
 async def test_get_or_generate_empty_transcript_short_circuits(monkeypatch):
-    """空 transcript → 返 ("empty", "")，**不**调 LLM、**不**落库、**不**推 on_ready 误为 ready。"""
+    """空 transcript → 返 ("empty", "")，不调 LLM、不落库、不触发 on_ready。"""
     state = _FakeState(transcript=[])  # 空：核心触发条件
 
     monkeypatch.setattr(generator, "interview_repo", MagicMock(
@@ -77,8 +61,39 @@ async def test_get_or_generate_empty_transcript_short_circuits(monkeypatch):
     assert md == ""
     llm.chat_text.assert_not_called()
     upsert_mock.assert_not_called()
-    # on_ready 必须被回调（status="empty"），但不能是 "ready"
-    on_ready_mock.assert_awaited_once_with("empty")
+    # "empty" 不广播（runtime 仅识别 ready/failed；HTTP 层 GET/POST 在此处翻 409）
+    on_ready_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_or_generate_segments_with_empty_text_short_circuits(monkeypatch):
+    """段存在但每段 text/corrected_text 都为空（如 ASR 全失败）→ 同样短路。"""
+    seg = _FakeSeg(seg_id="s1", text="", corrected_text="")
+    state = _FakeState(transcript=[seg])
+
+    monkeypatch.setattr(generator, "interview_repo", MagicMock(
+        get_state_auto=AsyncMock(return_value=state),
+    ))
+    upsert_mock = AsyncMock()
+    monkeypatch.setattr(generator, "report_repo", MagicMock(
+        get_by_interview_auto=AsyncMock(return_value=None),
+        upsert_auto=upsert_mock,
+    ))
+    llm = MagicMock()
+    llm.chat_text = AsyncMock(return_value="LLM 居然被调到 = 测试失败")
+    monkeypatch.setattr(generator, "get_llm", lambda: llm)
+    monkeypatch.setattr(generator, "resolve_template", MagicMock(
+        side_effect=AssertionError("resolve_template 不该被空内容段调用"),
+    ))
+
+    on_ready_mock = AsyncMock()
+    status, md = await generator.get_or_generate("s-empty-segs", on_ready=on_ready_mock)
+
+    assert status == "empty"
+    assert md == ""
+    llm.chat_text.assert_not_called()
+    upsert_mock.assert_not_called()
+    on_ready_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -107,9 +122,6 @@ async def test_get_or_generate_non_empty_transcript_still_calls_llm(monkeypatch)
     assert "报告" in md
     llm.chat_text.assert_awaited_once()
     upsert_mock.assert_awaited_once()
-
-
-# ────────────── 路由层：状态闸门（白盒——直接读路由函数体） ──────────────
 
 
 def test_route_status_gate_includes_only_terminal_states():

@@ -64,6 +64,10 @@ async def get_interview_report(
             await rt.push_report_ready(status)
 
     status_str, md = await get_or_generate(session_id, on_ready=on_ready, force=force)
+    if status_str == "empty":
+        # generator 内部三态（ready/failed/empty），HTTP 层对外只暴露二元语义：
+        # empty 也翻 409，与 /export 已有守卫一致，避免「GET 200 / POST 409」错位。
+        raise I18nError(Keys.HTTP_REPORT_NOT_READY, http_status=409)
     return {"status": status_str, "content_md": md}
 
 

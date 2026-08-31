@@ -532,10 +532,12 @@ async def test_d_jwt_manually_expired_signature_invalid(empty_db):
 # ─────────────────────────────────────────────────────────────────────
 
 
-async def test_e_admin_can_reset_own_password(three_users):
-    """admin 自己改自己密码（admin 端点允许改任何人含自己）→ 200。
+async def test_e_admin_cannot_reset_own_password_via_admin(three_users):
+    """admin 用 admin 端点改自己密码 → 403 + code=auth.admin_reset_self_forbidden。
 
-    防回归：admin 端点不应在 `target_user_id == admin_user_id` 时特殊拒绝。
+    防回归：admin 改自己密码统一走 /auth/change-password（需旧密码校验），
+    本端点拒绝以防绕过旧密码防御——拿到 admin 会话的攻击者不能借此静默
+    重置 admin 自己密码。
     """
     app = three_users["_app"]
     transport = ASGITransport(app=app)
@@ -545,8 +547,12 @@ async def test_e_admin_can_reset_own_password(three_users):
             headers={"Authorization": f"Bearer {three_users['admin_token']}"},
             json={"new_password": "AdminSelf1!new"},
         )
-        assert r.status_code == 200, (
-            f"admin 改自己密码应通过，实际 {r.status_code}：{r.text}"
+        assert r.status_code == 403, (
+            f"admin 改自己密码应被 self-block 403，实际 {r.status_code}：{r.text}"
+        )
+        assert r.json().get("code") == "auth.admin_reset_self_forbidden", (
+            f"应返 i18n code auth.admin_reset_self_forbidden，"
+            f"实际 {r.json().get('code')}"
         )
 
 

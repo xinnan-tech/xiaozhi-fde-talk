@@ -1426,10 +1426,6 @@ watch(locale, () => {
       display: grid;
       flex: 1;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      // 行高取 max(300px, 内容高)：模板管理卡片内容长也不会把同网格其它
-      // 卡片一起撑高（align-items: start 配合，避免 1fr 等高带来的大面积空白）
-      grid-auto-rows: minmax(300px, auto);
-      align-items: start;
       gap: 16px;
       min-width: 0;
       min-height: 100%;

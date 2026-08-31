@@ -160,6 +160,8 @@
   "system.template.err_field_key_duplicate": "重复字段：{keys}",
   "system.template.err_setup_field_undefined": "引用了未定义字段：{missing}",
   "system.template.err_must_ask_id_duplicate": "重复 id：{ids}",
+  "system.template.save_json_parse_failed": "保存失败：JSON 解析错误（第 {line} 行 第 {column} 列）：{message}",
+  "system.template.save_json_struct_invalid": "保存失败：JSON 结构校验未通过：{details}",
   "system.template.save": "保存",
   "system.template.cancel": "取消",
   "system.template.cancel_confirm": "放弃当前修改？未保存的改动将丢失。",

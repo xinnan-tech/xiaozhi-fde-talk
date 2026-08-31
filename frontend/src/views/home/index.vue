@@ -287,13 +287,19 @@ const refreshAfterCreate = async () => {
   await Promise.all([getStatistics(), getInterviewList()]);
 };
 
+// isLoggedIn 与 interviewStatusChanged 两个 immediate watcher 在 /home
+// 重新 mount 时会同 tick 各发一次 Promise.all([getStatistics(),
+// getInterviewList()])，竞速时列表闪烁。合到同一 debounced 函数里，
+// 100ms 内的多次触发只会真正发起一次刷新。
+const refreshAfterCreateDebounced = useDebounceFn(refreshAfterCreate, 100);
+
 watch(interviewCreated, async created => {
-  if (created > 0) await refreshAfterCreate();
+  if (created > 0) await refreshAfterCreateDebounced();
 });
 
 // pause / resume / end 成功后通知首页拉新
 watch(interviewStatusChanged, async changed => {
-  if (changed > 0) await refreshAfterCreate();
+  if (changed > 0) await refreshAfterCreateDebounced();
 }, { immediate: true });
 
 watch(
@@ -303,7 +309,7 @@ watch(
       logOut();
       return;
     }
-    await Promise.all([getStatistics(), getInterviewList()]);
+    await refreshAfterCreateDebounced();
   },
   { immediate: true }
 );

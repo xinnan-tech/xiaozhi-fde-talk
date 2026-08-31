@@ -118,7 +118,7 @@ const selfCheckRunning = ref(false);
 const selfCheckTarget = ref<CheckTarget>("all");
 const selfCheckResults = reactive<SelfCheckResult[]>([]);
 /** 敏感密码字段 */
-const sensitiveKeys = ["api_key", "access_token"];
+const sensitiveKeys = ["api_key", "access_token", "secret_key"];
 /** 复选框字段 */
 const checkboxKeys = [
   "ws_verify_ssl",

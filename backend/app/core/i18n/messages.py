@@ -147,8 +147,8 @@ class Keys(StrEnum):
     # 用 {positive_integer} 让翻译层在 zh-CN / vi-VN 看到夹英文单词（越语版尤其不可读）。
     CONFIG_INVALID_POSITIVE_INTEGER = "config.invalid_positive_integer"
     CONFIG_INVALID_POSITIVE_NUMBER = "config.invalid_positive_number"
-    # 必填字符串字段被留空（豆包 App ID / Access Token 等鉴权字段）：
-    # 留空会让 admin 看到虚假「Saved」toast，错误要等到首次握手才显形。
+    # 必填鉴权字段被留空（豆包 App ID / Access Token 等）：provider 构造路径
+    # 读不到合法值会在首次握手时抛 ValueError，admin 配置页 400 拦截前置。
     CONFIG_INVALID_REQUIRED_STRING = "config.invalid_required_string"
 
     # ---- Auth (registration / login) ----

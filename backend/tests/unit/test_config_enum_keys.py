@@ -48,8 +48,8 @@ def test_validate_value_rejects_doubao_access_token_empty():
         assert ei.value.http_status == 400
 
 
-def test_validate_value_accepts_doubao_appid_non_empty():
-    """#138 正向：合法非空值放行。"""
+def test_validate_value_accepts_doubao_required_strings_non_empty():
+    """#138 正向：合法非空值放行。覆盖 REQUIRED_STRING_KEYS 两个 key。"""
     validate_value("asr.doubao_stream.appid", "1234567890")
     validate_value("asr.doubao_stream.access_token", "abc-def_token_123")
 

@@ -106,13 +106,7 @@ BOOL_KEYS: frozenset[str] = frozenset({
     "asr.doubao_stream.enable_multilingual",
 })
 
-# 非空字符串 key 集合：写入前校验，空白（含全空格）一律拒绝。
-# 这些字段在 provider 构造时直接参与鉴权头 / 资源定位，缺失时第一次握手就 401
-# / connection reset。落库时若放行，错误要等到访谈启动那一刻才显形，admin
-# 看不出来是「忘了填必填项」还是「服务挂了」。
-# 当前只覆盖豆包流式：FunASR 那边 ws_url 已在 provider 构造路径挡（funasr_server
-# _ws_url 非空检查），但没在写入侧覆盖，跟 #134 一样属于「形同虚设」的写入
-# 校验——后续要补齐时直接加进这个集合。
+# 必填鉴权字段：写入侧挡空白，避免首握失败时 admin 误判是服务挂。
 REQUIRED_STRING_KEYS: frozenset[str] = frozenset({
     "asr.doubao_stream.appid",
     "asr.doubao_stream.access_token",
@@ -120,10 +114,10 @@ REQUIRED_STRING_KEYS: frozenset[str] = frozenset({
 
 
 def validate_value(key: str, value: str) -> None:
-    """key 写入校验：BOOL_KEYS / NUMERIC_KEYS / ENUM_KEYS / REQUIRED_STRING_KEYS
+    """key 写入校验：BOOL_KEYS / REQUIRED_STRING_KEYS / ENUM_KEYS / NUMERIC_KEYS
     四类。其他 key 放行。
 
-    布尔 / 枚举 / 数值 / 必填分支都走 I18nError(code, http_status=400)，让 admin
+    布尔 / 必填 / 枚举 / 数值分支都走 I18nError(code, http_status=400)，让 admin
     配置页 / API 客户端拿到结构化的 code + params。数值分支额外拦截
     float('nan' / 'inf' / 1e10000 等)——它们会绕过 `v <= 0` 判断直接落库，运
     行时才在 int()/float() 转换炸。改用 math.isfinite(v) 在解析后兜住所有浮点
@@ -246,13 +240,27 @@ class ConfigStore:
         return cls._instance
 
     async def warm(self) -> None:
-        """启动期一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入。"""
+        """启动期一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入。
+
+        DEFAULTS 中若有空字符串类必填字段（如豆包 appid/access_token 没有合法
+        默认），validate_value 会拒——跳过种入并 warn，让 DB 留空由 admin 通过
+        配置页补齐，避免无声写入"无效值"。
+        """
         async with SessionLocal() as session:
             existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
             have = {row.key: row.value for row in existing.scalars().all()}
             missing = [k for k in ALL_B_KEYS if k not in have]
             for k in missing:
                 v = DEFAULTS[k]
+                try:
+                    validate_value(k, v)
+                except I18nError:
+                    logger.warning(
+                        "ConfigStore 跳过种入 %s：DEFAULTS 值 %r 不通过 validate_value，"
+                        "需 admin 在配置页补齐后才会落库",
+                        k, v,
+                    )
+                    continue
                 session.add(SystemConfig(key=k, value=v))
             if missing:
                 await session.commit()
@@ -264,6 +272,25 @@ class ConfigStore:
         async with SessionLocal() as session:
             existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
             self._cache = {row.key: row.value for row in existing.scalars().all()}
+        # 老部署 DB 若已存在空值必填字段（手工改 DB / 镜像回放 / 早期 bug 落库），
+        # 加载后仅兜住 cache，不强行回退 DEFAULTS（DEFAULTS 自己也是 ""），由
+        # provider 构造路径的 ValueError 兜底——但这里要 warn 让 admin 可见。
+        self._sanitize_loaded_values()
+
+    def _sanitize_loaded_values(self) -> None:
+        """加载期兜底：识别 DB 中不合法值，对必填字符串空值写 warn。
+
+        只识别不修改 cache——已有 cache 值是 DB 真相，覆盖会掩盖真实状态。
+        必须 warn 而非 silent，否则 admin 完全不知道 DB 是空的就启起来了。
+        """
+        for key in REQUIRED_STRING_KEYS:
+            v = self._cache.get(key)
+            if v is None or not v.strip():
+                logger.warning(
+                    "ConfigStore 检测到 %s 值为 %r（必填字段），"
+                    "需 admin 在配置页补齐后 provider 才能正常握手",
+                    key, v,
+                )
 
     async def get(self, key: str) -> Optional[str]:
         if key not in self._cache:
@@ -330,10 +357,11 @@ class ConfigStore:
             for key, value in items.items():
                 if key not in ALL_B_KEYS:
                     raise ValueError(f"unknown config key: {key}")
-                validate_value(key, value)
-                # 敏感字段空值跳过
+                # 敏感字段空值跳过：必须早于 validate_value，因为 access_token
+                # 同时属于 REQUIRED_STRING_KEYS，不跳过会被新校验抛 400。
                 if key in SENSITIVE_KEYS and value == "":
                     continue
+                validate_value(key, value)
                 now = datetime.now(timezone.utc)
                 if dialect == "mysql":
                     stmt = mysql_insert(SystemConfig).values(

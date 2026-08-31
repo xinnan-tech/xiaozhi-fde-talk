@@ -103,11 +103,13 @@ ENUM_KEYS: dict[str, set[str]] = {
     "ocr.type": {"openai", "baidu"},
 }
 
-# URL key：写入前校验 scheme + 主机段。funasr_server 是 ws/wss；doubao_stream
-# 不存 URL（走 appid/access_token），不进表。坏 URL 落库要等到首次 connect
-# 才被 websockets.InvalidURI 抛，admin 配置页不会显示错因——写入层挡掉。
+# URL key：写入前校验 scheme + 主机段必填 + 拒整段前后空白。空串放行，让
+# admin 可以 PUT "" 把 ws_url 清空，runtime 走 funasr_server.py:144 未配置
+# 即 fail-fast 路径。
 URL_KEYS: dict[str, set[str]] = {
     "asr.funasr_server.ws_url": {"ws", "wss"},
+    "llm.base_url": {"http", "https"},
+    "ocr.base_url": {"http", "https"},
 }
 
 # bool key 集合：写入前校验，只接受 "true" / "false"。
@@ -149,8 +151,13 @@ def validate_value(key: str, value: str) -> None:
         return
     if key in URL_KEYS:
         allowed_schemes = URL_KEYS[key]
-        # 前后空白整段拒：runtime _ws_url.strip() 会静默吞掉空格，admin 看不到
-        # 自己手抖输入的空格，误以为值是「wss://x」实际上落到 DB 里带空格。
+        # 空串放行：admin PUT "" 清空 ws_url → runtime 走 funasr_server.py:144
+        # 未配置即 fail-fast 路径；llm.base_url / ocr.base_url 同理。
+        if value == "":
+            return
+        # 前后空白整段拒：runtime 传给 websockets.connect 的是
+        # funasr_server.py:150 self._ws_url.rstrip("/")，不去前后空白，会带空
+        # 格抛 InvalidURI；admin 在写入时拿不到结构化错因，故在写入层拒。
         if value != value.strip():
             raise I18nError(
                 Keys.CONFIG_INVALID_ENUM_VALUE,
@@ -307,6 +314,9 @@ class ConfigStore:
             missing = [k for k in ALL_B_KEYS if k not in have]
             for k in missing:
                 v = DEFAULTS[k]
+                # 种入前校验：避免 DEFAULTS 写错（含非法 scheme / 空 netloc /
+                # 全空白）静默落库——首次启动通道与 admin PUT 通道同等对待。
+                validate_value(k, v)
                 session.add(SystemConfig(key=k, value=v))
             if missing:
                 await session.commit()

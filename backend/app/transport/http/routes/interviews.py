@@ -450,13 +450,18 @@ async def unskip_item(
 def _valid_item_ids(state: SessionState) -> Optional[set[str]]:
     """当前访谈模板的合法 item_id 集合（coaching.must_ask[].id）。
 
-    仅看模板快照（创建访谈时的快照）：访谈创建后模板被改 / 删项不影响访谈
-    自身的合法集合（既保 immutability，也避免 admin 删 must_ask 时把活跃访谈
-    标成「错 id」）。快照空 / 损坏时返 None，让 manager 跳过校验——与历史
-    行为一致，旧访谈仍可用。
+    仅看模板快照（创建访谈时的快照），不走 resolve_template 的回退：访谈
+    创建后模板被改 / 删项不影响访谈自身的合法集合（既保 immutability，也避免
+    admin 删 must_ask 时把活跃访谈标成「错 id」、加项让旧访谈历史里根本没
+    有的 id 被误接受）。快照空 / 损坏时返 None，让 manager 跳过校验——
+    与历史行为一致，旧访谈仍可用。
     """
-    tpl = resolve_template(state.session.template_id, state.session.template_snapshot)
-    if tpl is None:
+    snap = state.session.template_snapshot
+    if not snap:
+        return None
+    try:
+        tpl = Template(**snap)
+    except Exception:  # noqa: BLE001
         return None
     return {m.id for m in tpl.coaching.must_ask}
 

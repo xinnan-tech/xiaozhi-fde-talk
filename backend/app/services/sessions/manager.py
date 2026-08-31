@@ -16,11 +16,13 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Container, Optional
 from uuid import uuid4
 
 from app.core.config_store import get_config_store, get_max_concurrent, get_session_runtime_config
+from app.core.i18n import Keys
 from app.core.i18n.errors import (
+    I18nError,
     SessionConcurrentLimitError,
     SessionDeleteForbiddenError,
     SessionEditForbiddenError,
@@ -279,7 +281,7 @@ class SessionManager:
 
     async def set_item_status(
         self, session_id: str, item_id: str, action: str,
-        valid_ids: Optional[set[str]] = None,
+        valid_ids: Optional[Container[str]] = None,
     ) -> SessionState:
         """REST 端的 ignore/skip/unignore/unskip。不要求 runtime 存活。
         action ∈ {"ignore", "unignore", "skip", "unskip"}.
@@ -297,8 +299,6 @@ class SessionManager:
             raise KeyError(session_id)
         if action in ("ignore", "skip") and valid_ids is not None and item_id not in valid_ids:
             # 路由层负责把这条 I18nError 转 404 + {detail, code}
-            from app.core.i18n import Keys
-            from app.core.i18n.errors import I18nError
             raise I18nError(Keys.HTTP_COACHING_ITEM_NOT_FOUND, http_status=404, item_id=item_id)
         if action == "ignore":
             state.ignored_ids.add(item_id)

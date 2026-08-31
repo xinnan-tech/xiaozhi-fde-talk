@@ -36,6 +36,9 @@ async def _make_state(sid: str, *, template_id: str = "pm-research") -> SessionS
         user_id="u",
         status=SessionStatus.ENDED,
         created_at=datetime.now(timezone.utc),
+        # 模拟真实创建流程固化模板快照（manager.create 时设；本测关心 valid_ids 校验，
+        # 让 session 与「正常创建」状态对齐）
+        template_snapshot=tpl.model_dump(mode="json"),
     )
     state = SessionState.initial(s, tpl)
     await interview_repo.save_state_auto(state)
@@ -138,34 +141,152 @@ async def test_skip_with_empty_valid_ids_rejects_everything():
 # ────────────── 路由层：valid_ids 透传自模板快照 ──────────────
 
 
-@pytest.mark.asyncio
-async def test_route_passes_snapshot_must_ask_ids_as_valid_set(monkeypatch):
-    """白盒：模拟路由调用，断言 manager 收到的 valid_ids 等于模板 must_ask[].id 集合。
+def _build_user_override(user_id: str):
+    """构造一个 get_current_user override，返 fake CurrentUser（不走 Bearer token）。"""
+    from app.domain.auth import CurrentUser
+    from app.transport.http.dependencies import get_current_user
 
-    直接调 ignore_item handler 链路（manager.get 走真实 repo，manager.set_item_status
-    monkeypatch 抓 valid_ids）——验证 routes/interviews.py 把模板快照透传给了 manager。
+    async def _fake_user() -> CurrentUser:
+        return CurrentUser(user_id=user_id, role="user", username=user_id)
+
+    return get_current_user, _fake_user
+
+
+def test_route_ignore_passes_snapshot_must_ask_ids_as_valid_set(monkeypatch):
+    """白盒：TestClient 真 POST /items/{id}/ignore，monkeypatch 抓 manager 收到的 valid_ids。
+
+    验证 routes/interviews.py ignore_item handler 把 `template_snapshot` 派生的合法
+    id 集合透传给 manager.set_item_status。如果路由里漏掉 `valid_ids=_valid_item_ids(state)`，
+    本测试会抓到 valid_ids=None 而 fail。
     """
-    await _make_state("s-164-9")
+    import asyncio
+    from fastapi.testclient import TestClient
+
+    from app.app import create_app
+
+    async def _setup():
+        await _make_state("s-164-9")
+
+    asyncio.get_event_loop().run_until_complete(_setup())
+
+    captured = {}
+
+    async def _fake_set(session_id, item_id, action, valid_ids=None):
+        captured["session_id"] = session_id
+        captured["item_id"] = item_id
+        captured["action"] = action
+        captured["valid_ids"] = valid_ids
+        # 走真实 repo 写回 state
+        state = await manager.get(session_id)
+        if action == "ignore":
+            state.ignored_ids.add(item_id)
+            from app.persistence.repositories.interview import interview_repo
+            await interview_repo.save_state_auto(state)
+        return state
+
+    monkeypatch.setattr(manager, "set_item_status", _fake_set)
+
+    app = create_app()
+    dep, fake_user = _build_user_override("u")
+    app.dependency_overrides[dep] = fake_user
+
+    client = TestClient(app)
+    r = client.post("/api/v1/interviews/s-164-9/items/objective/ignore")
+
+    assert r.status_code == 200, r.text
+    # 关键断言：handler 把模板快照的 must_ask[].id 集合透传给 manager
+    assert captured["valid_ids"] == VALID
+    assert captured["action"] == "ignore"
+    assert captured["item_id"] == "objective"
+
+
+def test_route_skip_passes_snapshot_must_ask_ids_as_valid_set(monkeypatch):
+    """同上，POST /items/{id}/skip：路由必须把 valid_ids 透传给 manager。"""
+    import asyncio
+    from fastapi.testclient import TestClient
+
+    from app.app import create_app
+
+    async def _setup():
+        await _make_state("s-164-10")
+
+    asyncio.get_event_loop().run_until_complete(_setup())
 
     captured = {}
 
     async def _fake_set(session_id, item_id, action, valid_ids=None):
         captured["valid_ids"] = valid_ids
-        # 走真实 manager 行为需要真实 repo，简化：返回原 state
-        return await manager.get(session_id)
+        captured["action"] = action
+        state = await manager.get(session_id)
+        if action == "skip":
+            state.skipped_ids.add(item_id)
+            from app.persistence.repositories.interview import interview_repo
+            await interview_repo.save_state_auto(state)
+        return state
 
     monkeypatch.setattr(manager, "set_item_status", _fake_set)
 
-    from app.transport.http.routes.interviews import ignore_item, _valid_item_ids
-    from app.domain.auth import CurrentUser
+    app = create_app()
+    dep, fake_user = _build_user_override("u")
+    app.dependency_overrides[dep] = fake_user
 
-    user = CurrentUser(user_id="u", role="user", username="u")
-    state = await manager.get("s-164-9")
-    # 路由 helper 必须能直接给出 VALID 集合
-    assert _valid_item_ids(state) == VALID
+    client = TestClient(app)
+    r = client.post("/api/v1/interviews/s-164-10/items/pain/skip")
 
-    # ignore_item 自身也要把 valid_ids 透传给 manager
-    # 这里通过 _fake_set 抓参数验证
-    valid = _valid_item_ids(state)
-    await manager.set_item_status("s-164-9", "objective", "ignore", valid_ids=valid)
+    assert r.status_code == 200, r.text
     assert captured["valid_ids"] == VALID
+    assert captured["action"] == "skip"
+
+
+def test_route_valid_item_ids_returns_none_when_snapshot_empty():
+    """legacy 访谈（snapshot 为空）→ _valid_item_ids 返 None，不走当前模板回退。
+
+    这是 P1.1 修的契约：旧访谈创建于本 PR 之前，snapshot 为空；admin 编辑当前模板
+    删/加 must_ask 时，旧访谈的合法集合必须保持原样（既不误报 404 也不误接受），
+    所以返 None 让 manager 跳过校验——而非用当前模板集合偷换。
+    """
+    from datetime import datetime, timezone
+    from app.domain.session import Session, SessionStatus
+    from app.services.sessions.state import SessionState
+    from app.services.template.loader import get_template
+    from app.transport.http.routes.interviews import _valid_item_ids
+
+    s = Session(
+        id="s-164-legacy",
+        template_id="pm-research",
+        user_id="u",
+        status=SessionStatus.ENDED,
+        created_at=datetime.now(timezone.utc),
+        # template_snapshot=None → legacy
+    )
+    tpl = get_template("pm-research")
+    state = SessionState.initial(s, tpl)
+    assert state.session.template_snapshot is None
+
+    assert _valid_item_ids(state) is None
+
+
+def test_route_valid_item_ids_returns_none_when_snapshot_corrupted():
+    """template_snapshot 是损坏 dict（缺必填字段）→ _valid_item_ids 返 None。
+
+    验证：catch Template(**snap) 抛 ValidationError 时返回 None 而非 fallback 到
+    当前模板——immutability 契约要求旧访谈保留自己创建时的合法集合。
+    """
+    from datetime import datetime, timezone
+    from app.domain.session import Session, SessionStatus
+    from app.services.sessions.state import SessionState
+    from app.services.template.loader import get_template
+    from app.transport.http.routes.interviews import _valid_item_ids
+
+    s = Session(
+        id="s-164-corrupt",
+        template_id="pm-research",
+        user_id="u",
+        status=SessionStatus.ENDED,
+        created_at=datetime.now(timezone.utc),
+        template_snapshot={"version": "1"},  # 缺 coaching / id 等必填
+    )
+    tpl = get_template("pm-research")
+    state = SessionState.initial(s, tpl)
+
+    assert _valid_item_ids(state) is None

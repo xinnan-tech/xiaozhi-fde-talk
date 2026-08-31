@@ -134,7 +134,10 @@ class Keys(StrEnum):
     # ---- Config validation ----
     CONFIG_INVALID_ENUM_VALUE = "config.invalid_enum_value"
     CONFIG_INVALID_BOOL = "config.invalid_bool"
-    CONFIG_INVALID_NUMERIC = "config.invalid_numeric"
+    # 拆成 int / float 两个 key 避免共占位符被硬塞英文字面量：原 single key
+    # 用 {positive_integer} 让翻译层在 zh-CN / vi-VN 看到夹英文单词（越语版尤其不可读）。
+    CONFIG_INVALID_POSITIVE_INTEGER = "config.invalid_positive_integer"
+    CONFIG_INVALID_POSITIVE_NUMBER = "config.invalid_positive_number"
 
     # ---- Auth (registration / login) ----
     AUTH_USERNAME_INVALID_FORMAT = "auth.username_invalid_format"

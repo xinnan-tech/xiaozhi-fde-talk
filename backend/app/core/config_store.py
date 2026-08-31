@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import weakref
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Optional
@@ -111,7 +112,8 @@ def validate_value(key: str, value: str) -> None:
 
     布尔 / 枚举 / 数值分支都走 I18nError(code, http_status=400)，让 admin 配置
     页 / API 客户端拿到结构化的 code + params。数值分支额外拦截 float('nan' /
-    'inf')——它们会绕过 `v <= 0` 判断直接落库，运行时才在 int()/float() 转换炸。
+    'inf' / 1e10000 等)——它们会绕过 `v <= 0` 判断直接落库，运行时才在
+    int()/float() 转换炸。改用 math.isfinite(v) 在解析后兜住所有浮点特殊值。
     """
     if key in BOOL_KEYS:
         if value not in ("true", "false"):
@@ -136,33 +138,31 @@ def validate_value(key: str, value: str) -> None:
     typ = NUMERIC_KEYS.get(key)
     if typ is None:
         return
-    # 拒绝 NaN / Infinity 字符串：int("nan")/int("inf") 直接抛 ValueError，
-    # 但 float("nan")/float("inf") 会绕过 v <= 0（NaN 的 <= 永远 False）落库。
-    if typ is float and value.strip().lower() in {"nan", "inf", "infinity", "-inf", "-infinity"}:
-        raise I18nError(
-            Keys.CONFIG_INVALID_NUMERIC,
-            http_status=400,
-            name=key,
-            value=value,
-            positive_integer="positive number",
-        )
+    # int / float 数值 key 走不同 i18n key——按类型给管理员「正整数 / 正数」
+    # 文案，避免共占位符被硬塞英文字面量（详见 messages.py 注释）。
+    err_key = (
+        Keys.CONFIG_INVALID_POSITIVE_INTEGER
+        if typ is int
+        else Keys.CONFIG_INVALID_POSITIVE_NUMBER
+    )
     try:
         v = typ(value)
     except (ValueError, TypeError):
         raise I18nError(
-            Keys.CONFIG_INVALID_NUMERIC,
+            err_key,
             http_status=400,
             name=key,
             value=value,
-            positive_integer="positive integer" if typ is int else "positive number",
         ) from None
-    if v <= 0:
+    # math.isfinite 兜住所有浮点特殊值（NaN / +Inf / -Inf / 1e10000）：
+    # float('nan')/float('inf') 解析成功但 v <= 0 为 False 会落库，且字符串预
+    # 检漏 +nan/+inf/科学记数法溢出。<= 0 单独判断覆盖负数与 0。
+    if not math.isfinite(v) or v <= 0:
         raise I18nError(
-            Keys.CONFIG_INVALID_NUMERIC,
+            err_key,
             http_status=400,
             name=key,
             value=value,
-            positive_integer="positive integer" if typ is int else "positive number",
         )
 
 

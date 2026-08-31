@@ -129,6 +129,23 @@ describe("utils/auth — setToken / getToken / removeToken", () => {
     const stored = memStore.get(userKey);
     expect(stored.userId).toBeUndefined();
     expect(stored.role).toBeUndefined();
+    expect(stored.refreshToken).toBeUndefined();
+  });
+
+  it("setToken 写入 refreshToken + getToken 完整 round-trip", () => {
+    // 401 静默续 access 的前提：refreshToken 跟 accessToken 一起落盘，重启浏览器后还能取到。
+    setToken({
+      accessToken: "at-1",
+      refreshToken: "rt-1",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    });
+    const got = getToken();
+    expect(got?.accessToken).toBe("at-1");
+    expect(got?.refreshToken).toBe("rt-1");
+    expect(got?.userId).toBe("u-1");
+    expect(got?.role).toBe("user");
   });
 });
 

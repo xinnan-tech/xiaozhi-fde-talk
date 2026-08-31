@@ -37,6 +37,8 @@ export type setType = {
 
 export type userType = {
   accessToken?: string;
+  /** refresh token：401 时静默续 access 用，留空表示旧登录会话无续期能力。 */
+  refreshToken?: string;
   username?: string;
   userId?: string;
   role?: "admin" | "user";

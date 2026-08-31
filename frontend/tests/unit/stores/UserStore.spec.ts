@@ -54,12 +54,14 @@ describe("stores/UserStore — loginByUsername", () => {
   it("按 result.access_token 写入 state", async () => {
     vi.spyOn(userApi, "loginApi").mockReset().mockResolvedValue({
       access_token: "tok-1",
+      refresh_token: "rt-1",
       token_type: "bearer",
       user: { id: "u-1", username: "alice", role: "admin" }
     });
     const store = useUserStore();
     await store.loginByUsername({ username: "alice", password: "x" });
     expect(store.accessToken).toBe("tok-1");
+    expect(store.refreshToken).toBe("rt-1");
     expect(store.username).toBe("alice");
     expect(store.userId).toBe("u-1");
     expect(store.role).toBe("admin");
@@ -68,12 +70,14 @@ describe("stores/UserStore — loginByUsername", () => {
   it("login: result.access_token 缺失时 state 保持空", async () => {
     vi.spyOn(userApi, "loginApi").mockReset().mockResolvedValue({
       access_token: "",
+      refresh_token: "rt-x",
       token_type: "bearer",
       user: { id: "u-1", username: "alice", role: "admin" }
     } as any);
     const store = useUserStore();
     await store.loginByUsername({ username: "alice", password: "x" });
     expect(store.accessToken).toBe("");
+    expect(store.refreshToken).toBe("");
     expect(store.username).toBe("");
     expect(store.userId).toBe("");
     expect(store.role).toBe("user");
@@ -89,6 +93,7 @@ describe("stores/UserStore — registerByUsername", () => {
   it("注册成功：写 result.user.username（不是 data.username）到 state", async () => {
     vi.spyOn(userApi, "registerApi").mockReset().mockResolvedValue({
       access_token: "tok-r",
+      refresh_token: "rt-r",
       token_type: "bearer",
       user: { id: "u-9", username: "canonical-name", role: "user" }
     });
@@ -99,6 +104,7 @@ describe("stores/UserStore — registerByUsername", () => {
       confirm_password: "pw"
     });
     expect(store.accessToken).toBe("tok-r");
+    expect(store.refreshToken).toBe("rt-r");
     expect(store.username).toBe("canonical-name");
     expect(store.userId).toBe("u-9");
     expect(store.role).toBe("user");
@@ -107,6 +113,7 @@ describe("stores/UserStore — registerByUsername", () => {
   it("register: result.access_token 缺失时 state 保持空", async () => {
     vi.spyOn(userApi, "registerApi").mockReset().mockResolvedValue({
       access_token: "",
+      refresh_token: "rt-r",
       token_type: "bearer",
       user: { id: "u-9", username: "canonical-name", role: "user" }
     } as any);
@@ -117,6 +124,7 @@ describe("stores/UserStore — registerByUsername", () => {
       confirm_password: "pw"
     });
     expect(store.accessToken).toBe("");
+    expect(store.refreshToken).toBe("");
     expect(store.username).toBe("");
     expect(store.userId).toBe("");
   });

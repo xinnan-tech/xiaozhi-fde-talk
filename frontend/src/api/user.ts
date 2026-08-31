@@ -16,6 +16,7 @@ export type UserInfo = {
 
 export type LoginResult = {
   access_token: string;
+  refresh_token: string;
   token_type: string;
   user: UserInfo;
 };
@@ -41,6 +42,21 @@ export type RegisterRequest = {
 };
 export const registerApi = (data: RegisterRequest) =>
   http.request<LoginResult>("post", baseUrlApi("/api/v1/auth/register"), {
+    data
+  });
+
+/** 用 refresh token 换新 access token（不签新 refresh，避免长期泄露放大）。 */
+export type RefreshRequest = { refresh_token: string };
+export type RefreshResult = { access_token: string; token_type: string };
+export const refreshApi = (data: RefreshRequest) =>
+  http.request<RefreshResult>("post", baseUrlApi("/api/v1/auth/refresh"), {
+    data
+  });
+
+/** 撤销 refresh token（前端 logOut 时主动调，后端把 jti 加进撤销表）。 */
+export type LogoutRequest = { refresh_token: string };
+export const logoutApi = (data: LogoutRequest) =>
+  http.request<{ ok: boolean }>("post", baseUrlApi("/api/v1/auth/logout"), {
     data
   });
 

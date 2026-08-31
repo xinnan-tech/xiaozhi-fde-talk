@@ -64,7 +64,7 @@ async def test_get_coach_config_parses_mixed_numbers(store_with_cache):
 
 async def test_get_auth_runtime_config_returns_two(store_with_cache):
     cfg = await get_auth_runtime_config()
-    assert cfg["jwt_expire_minutes"] == 1440
+    assert cfg["jwt_expire_minutes"] == 10080
     assert cfg["allow_registration"] is False
     # demo_password 不再走 ConfigStore（改密走 /admin/users/{id}/password）
 

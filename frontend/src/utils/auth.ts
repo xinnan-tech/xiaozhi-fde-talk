@@ -24,6 +24,8 @@ import { storageLocal } from "@pureadmin/utils";
 export interface DataInfo {
   /** token */
   accessToken: string;
+  /** refresh token：用于 401 时静默换 access，留空表示旧版登录（无静默续期）。 */
+  refreshToken?: string;
   /** 用户名 */
   username: string;
   userId?: string;
@@ -56,8 +58,14 @@ export function getToken(): DataInfo | null {
  * @description 设置访问令牌和用户名
  */
 export function setToken(data: DataInfo) {
-  const { accessToken, username, userId, role } = data;
-  const tokenInfo = JSON.stringify({ accessToken, username, userId, role });
+  const { accessToken, refreshToken, username, userId, role } = data;
+  const tokenInfo = JSON.stringify({
+    accessToken,
+    refreshToken,
+    username,
+    userId,
+    role
+  });
 
   Cookies.set(TokenKey, tokenInfo);
   const store = useUserStoreHook();
@@ -65,7 +73,13 @@ export function setToken(data: DataInfo) {
   store.SET_USERNAME(username);
   store.SET_USER_ID(userId ?? "");
   store.SET_ROLE(role ?? "user");
-  storageLocal().setItem(userKey, { accessToken, username, userId, role });
+  storageLocal().setItem(userKey, {
+    accessToken,
+    refreshToken,
+    username,
+    userId,
+    role
+  });
 }
 
 /** 删除`token`以及key值为`user-info`的localStorage信息 */

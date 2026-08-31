@@ -9,6 +9,7 @@ describe("LoginResult schema", () => {
   it("includes user.role", () => {
     const r: LoginResult = {
       access_token: "x",
+      refresh_token: "rt",
       token_type: "bearer",
       user: { id: "u-1", username: "alice", role: "admin" },
     };
@@ -20,6 +21,7 @@ describe("DataInfo schema", () => {
   it("includes userId and role", () => {
     const d: DataInfo = {
       accessToken: "x",
+      refreshToken: "rt",
       username: "alice",
       userId: "u-1",
       role: "admin",
@@ -34,6 +36,7 @@ describe("useUserStore", () => {
     setActivePinia(createPinia());
     vi.spyOn(userApi, "loginApi").mockResolvedValue({
       access_token: "tok",
+      refresh_token: "rt",
       token_type: "bearer",
       user: { id: "u-1", username: "alice", role: "admin" },
     });

@@ -155,8 +155,7 @@ class FunASRServerProvider(ASRProvider):
             ping_timeout=10,
             close_timeout=10,
         )
-        if _is_local(ws_url):
-            connect_kwargs["proxy"] = None  # 本地 FunASR 直连，绕开系统 SOCKS 代理
+        # websockets.connect() 无 proxy kwarg，默认走系统解析器直连即可
         try:
             self._ws = await websockets.connect(ws_url, **connect_kwargs)
             self._ws_dead = False

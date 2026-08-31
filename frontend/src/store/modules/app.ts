@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { type appType, store, deviceDetection } from "../utils";
+import { type appType, store } from "../utils";
 
 export const useAppStore = defineStore("xz-app", {
   state: (): appType => ({
@@ -10,7 +10,7 @@ export const useAppStore = defineStore("xz-app", {
     },
     // 当前系统固定使用 vertical 布局
     layout: "vertical",
-    device: deviceDetection() ? "mobile" : "desktop",
+    device: "desktop",
     // 浏览器窗口的可视区域大小
     viewportSize: {
       width: document.documentElement.clientWidth,

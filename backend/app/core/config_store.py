@@ -106,20 +106,42 @@ BOOL_KEYS: frozenset[str] = frozenset({
     "asr.doubao_stream.enable_multilingual",
 })
 
+# 非空字符串 key 集合：写入前校验，空白（含全空格）一律拒绝。
+# 这些字段在 provider 构造时直接参与鉴权头 / 资源定位，缺失时第一次握手就 401
+# / connection reset。落库时若放行，错误要等到访谈启动那一刻才显形，admin
+# 看不出来是「忘了填必填项」还是「服务挂了」。
+# 当前只覆盖豆包流式：FunASR 那边 ws_url 已在 provider 构造路径挡（funasr_server
+# _ws_url 非空检查），但没在写入侧覆盖，跟 #134 一样属于「形同虚设」的写入
+# 校验——后续要补齐时直接加进这个集合。
+REQUIRED_STRING_KEYS: frozenset[str] = frozenset({
+    "asr.doubao_stream.appid",
+    "asr.doubao_stream.access_token",
+})
+
 
 def validate_value(key: str, value: str) -> None:
-    """key 写入校验：BOOL_KEYS / NUMERIC_KEYS / ENUM_KEYS 三类。其他 key 放行。
+    """key 写入校验：BOOL_KEYS / NUMERIC_KEYS / ENUM_KEYS / REQUIRED_STRING_KEYS
+    四类。其他 key 放行。
 
-    布尔 / 枚举 / 数值分支都走 I18nError(code, http_status=400)，让 admin 配置
-    页 / API 客户端拿到结构化的 code + params。数值分支额外拦截 float('nan' /
-    'inf' / 1e10000 等)——它们会绕过 `v <= 0` 判断直接落库，运行时才在
-    int()/float() 转换炸。改用 math.isfinite(v) 在解析后兜住所有浮点特殊值。
+    布尔 / 枚举 / 数值 / 必填分支都走 I18nError(code, http_status=400)，让 admin
+    配置页 / API 客户端拿到结构化的 code + params。数值分支额外拦截
+    float('nan' / 'inf' / 1e10000 等)——它们会绕过 `v <= 0` 判断直接落库，运
+    行时才在 int()/float() 转换炸。改用 math.isfinite(v) 在解析后兜住所有浮点
+    特殊值。
     """
     if key in BOOL_KEYS:
         if value not in ("true", "false"):
             # 占位用 {name}，避免与 t() 的 `key` 形参撞名（TypeError）。
             raise I18nError(
                 Keys.CONFIG_INVALID_BOOL,
+                http_status=400,
+                name=key,
+            )
+        return
+    if key in REQUIRED_STRING_KEYS:
+        if not value or not value.strip():
+            raise I18nError(
+                Keys.CONFIG_INVALID_REQUIRED_STRING,
                 http_status=400,
                 name=key,
             )

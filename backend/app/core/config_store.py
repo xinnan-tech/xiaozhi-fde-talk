@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import weakref
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Optional
@@ -109,9 +110,10 @@ BOOL_KEYS: frozenset[str] = frozenset({
 def validate_value(key: str, value: str) -> None:
     """key 写入校验：BOOL_KEYS / NUMERIC_KEYS / ENUM_KEYS 三类。其他 key 放行。
 
-    布尔与枚举分支都走 I18nError(code, http_status=400)，让 admin 配置页 / API
-    客户端拿到结构化的 code + params；数值分支保留 ValueError（仅 admin 后台
-    CLI 路径，暂无对应 Keys）。
+    布尔 / 枚举 / 数值分支都走 I18nError(code, http_status=400)，让 admin 配置
+    页 / API 客户端拿到结构化的 code + params。数值分支额外拦截 float('nan' /
+    'inf' / 1e10000 等)——它们会绕过 `v <= 0` 判断直接落库，运行时才在
+    int()/float() 转换炸。改用 math.isfinite(v) 在解析后兜住所有浮点特殊值。
     """
     if key in BOOL_KEYS:
         if value not in ("true", "false"):
@@ -136,15 +138,31 @@ def validate_value(key: str, value: str) -> None:
     typ = NUMERIC_KEYS.get(key)
     if typ is None:
         return
+    # int / float 数值 key 走不同 i18n key——按类型给管理员「正整数 / 正数」
+    # 文案，避免共占位符被硬塞英文字面量（详见 messages.py 注释）。
+    err_key = (
+        Keys.CONFIG_INVALID_POSITIVE_INTEGER
+        if typ is int
+        else Keys.CONFIG_INVALID_POSITIVE_NUMBER
+    )
     try:
         v = typ(value)
-    except ValueError:
-        raise ValueError(
-            f"{key} 须为{'正整数' if typ is int else '正数值'}：{value!r}"
+    except (ValueError, TypeError):
+        raise I18nError(
+            err_key,
+            http_status=400,
+            name=key,
+            value=value,
         ) from None
-    if v <= 0:
-        raise ValueError(
-            f"{key} 须为{'正整数' if typ is int else '正数值'}：{value!r}"
+    # math.isfinite 兜住所有浮点特殊值（NaN / +Inf / -Inf / 1e10000）：
+    # float('nan')/float('inf') 解析成功但 v <= 0 为 False 会落库，且字符串预
+    # 检漏 +nan/+inf/科学记数法溢出。<= 0 单独判断覆盖负数与 0。
+    if not math.isfinite(v) or v <= 0:
+        raise I18nError(
+            err_key,
+            http_status=400,
+            name=key,
+            value=value,
         )
 
 

@@ -329,8 +329,14 @@ def _cache_hit(rec, sig: str, language: str) -> bool:
     不再比较语种相等：管理员切 llm.output_language 后，存量报告继续复用旧版本，
     由用户在前端手动点「重新生成报告」才按新语种重跑——避免无意义 token 浪费
     （issue #82）。`language` 参数保留只为签名稳定，本函数体不再消费。
+
+    status 必须为 "ready"：失败的报告会留一行 transcript_signature /
+    output_language 都有、但 content_md 为空的「假 ready」记录；之前这行被当
+    成命中直接返 ("ready", "")，把失败伪装成「内容空的成功」（#144）。
     """
     if not rec or not rec.transcript_signature or not rec.output_language:
+        return False
+    if rec.status != "ready":
         return False
     return rec.transcript_signature == sig
 

@@ -51,8 +51,8 @@ async def update_template(
 ) -> Template:
     if template_id != body.id:
         raise I18nError(
-            Keys.TEMPLATE_INVALID, http_status=422,
-            field="id", reason="路径 id 与请求体 id 不一致（id 创建后不可改）",
+            Keys.TEMPLATE_INVALID_ID_MISMATCH, http_status=422,
+            path=template_id, body=body.id,
         )
     return await loader.update_template(body)
 

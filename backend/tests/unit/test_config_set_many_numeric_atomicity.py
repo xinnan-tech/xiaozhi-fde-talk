@@ -1,16 +1,4 @@
-"""set_many 数值校验原子性：列表里任一项校验失败 → 整批不 commit、不污染 cache。
-
-回归 issue #139：原代码 admin 输 `-1 / -100 / abc / -9999` 这一串坏值时，
-set_many 一边循环一边调 validate_value；坏值抛 ValueError/I18nError 之前
-好的几项已经 execute 过 SQL，但 commit 是在 for 循环跑完才统一调——靠 session
-上下文退出时不 commit 触发 SQLAlchemy 自动回滚，所以即便 execute 已经下发，
-只要没 commit 就不会落库。
-
-本测试断言"部分写入"的兜底——commit 是真正的事务闸门，不是 execute：
-- 坏值在第 2/4/N 项：前几项 execute 可触发（无害，未 commit 不落库），但
-  commit 必须 0 次、cache 必须无任何更新、订阅者必须没收到通知
-- 坏值在第 1 项：execute 0 次（for 循环第一轮就炸）
-"""
+"""set_many 数值校验原子性：列表里任一项校验失败 → 整批不 commit、不污染 cache、不广播。"""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -19,25 +7,29 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.core.config_store import ConfigStore
+from app.core.i18n.errors import I18nError
 
 
 @pytest.fixture
 def store():
+    """内存 ConfigStore 实例，singleton 钉住；teardown 恢复 prev 防污染同进程后续测试。"""
+    prev_instance = ConfigStore._instance
     ConfigStore._instance = None
     s = ConfigStore()
-    # 初始 cache：模拟落库过的默认值；用于事后断言坏值未污染 cache
     s._cache = {
         "coach.pause_s": "5.0",
         "coach.max_pending_segments": "8",
         "coach.min_interval_s": "10.0",
         "coach.llm_timeout_s": "45.0",
     }
-    return s
+    ConfigStore._instance = s
+    yield s
+    ConfigStore._instance = prev_instance
 
 
 @pytest.mark.asyncio
 async def test_set_many_one_bad_numeric_aborts_at_commit(store, monkeypatch):
-    """3 项合法 + 第 4 项坏值（float 字段写 'abc'）：commit 不发生、cache 不动。"""
+    """3 项合法 + 第 4 项坏值（float 字段写 'abc'）：commit 不发生、cache 不动、订阅者未收到通知。"""
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=None)
@@ -54,7 +46,7 @@ async def test_set_many_one_bad_numeric_aborts_at_commit(store, monkeypatch):
 
     store.subscribe(_on_change)
 
-    with pytest.raises(Exception):  # I18nError；具体 type 由 i18n 模块兜住
+    with pytest.raises(I18nError) as ei:
         await store.set_many({
             "coach.pause_s": "8.0",
             "coach.max_pending_segments": "10",
@@ -62,6 +54,8 @@ async def test_set_many_one_bad_numeric_aborts_at_commit(store, monkeypatch):
             "coach.llm_timeout_s": "abc",  # 坏值 → I18nError
         })
 
+    # 精确断言异常类型 + code，区别于普通 Exception 兜底
+    assert ei.value.code == "config.invalid_positive_number", ei.value.code
     # 真闸门：commit 必须 0 次——即便前 3 项 execute 过，没 commit SQLAlchemy 必回滚
     session.commit.assert_not_called()
     # cache 一项都没变（set_many 在 commit 成功前不动 cache）
@@ -85,7 +79,7 @@ async def test_set_many_bad_first_item_blocks_all_execute(store, monkeypatch):
 
     monkeypatch.setattr("app.core.config_store.SessionLocal", lambda: session)
 
-    with pytest.raises(Exception):
+    with pytest.raises(I18nError):
         await store.set_many({
             "coach.pause_s": "abc",  # 第一项就炸
             "coach.llm_timeout_s": "45.0",
@@ -109,12 +103,13 @@ async def test_set_many_negative_int_aborts_at_commit(store, monkeypatch):
 
     monkeypatch.setattr("app.core.config_store.SessionLocal", lambda: session)
 
-    with pytest.raises(Exception):
+    with pytest.raises(I18nError) as ei:
         await store.set_many({
             "coach.pause_s": "8.0",
             "coach.max_pending_segments": "-100",  # 负数炸
         })
 
+    assert ei.value.code == "config.invalid_positive_integer", ei.value.code
     session.commit.assert_not_called()
     assert store._cache["coach.pause_s"] == "5.0"
 
@@ -131,10 +126,11 @@ async def test_set_many_nan_aborts_at_commit(store, monkeypatch):
 
     monkeypatch.setattr("app.core.config_store.SessionLocal", lambda: session)
 
-    with pytest.raises(Exception):
+    with pytest.raises(I18nError) as ei:
         await store.set_many({
             "coach.pause_s": "nan",  # math.isfinite 兜住
         })
 
+    assert ei.value.code == "config.invalid_positive_number", ei.value.code
     session.commit.assert_not_called()
     assert store._cache["coach.pause_s"] == "5.0"

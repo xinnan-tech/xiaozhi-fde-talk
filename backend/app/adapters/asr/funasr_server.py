@@ -155,8 +155,11 @@ class FunASRServerProvider(ASRProvider):
             ping_timeout=10,
             close_timeout=10,
         )
-        if _is_local(ws_url):
-            connect_kwargs["proxy"] = None  # 本地 FunASR 直连，绕开系统 SOCKS 代理
+        # 注：曾在这里塞 `connect_kwargs["proxy"] = None`，意图是绕开系统 SOCKS
+        # 代理，但 websockets.connect() 的签名里根本没有 proxy 这个 kwarg（httpx
+        # /aiohttp 那一派的接口），结果本地地址首调用就 TypeError，连握手都
+        # 到不了。websockets 直连默认走系统解析器，dev 站本地 FunASR 不需要
+        # 任何额外参数。
         try:
             self._ws = await websockets.connect(ws_url, **connect_kwargs)
             self._ws_dead = False

@@ -41,3 +41,33 @@ async def test_start_stream_enables_ping():
     assert kwargs.get("ping_timeout") == 10, (
         f"应启用 ping_timeout=10，got {kwargs.get('ping_timeout')!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_start_stream_does_not_pass_proxy_kwarg():
+    """self-check 本地 FunASR 必崩 TypeError（#136）的回归测试。
+
+    websockets.connect() 没有 proxy 这个 kwarg —— 那是 httpx / aiohttp 的接口。
+    之前 _is_local 分支塞了 `connect_kwargs["proxy"] = None`，结果首调用就
+    TypeError，连握手都到不了。确保 kwargs 里不再出现 proxy。
+    """
+    provider = funasr_mod.FunASRServerProvider()
+    provider._ws_url = "ws://localhost:10096"
+
+    fake_ws = AsyncMock()  # send(init_msg) 成功
+    mock_connect = AsyncMock(return_value=fake_ws)
+
+    with patch.object(funasr_mod.websockets, "connect", new=mock_connect):
+        await provider.start_stream(AsyncMock())
+
+    if provider._recv_task is not None:
+        provider._recv_task.cancel()
+        try:
+            await provider._recv_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+
+    kwargs = mock_connect.call_args.kwargs
+    assert "proxy" not in kwargs, (
+        f"不应向 websockets.connect() 传 proxy kwarg（会 TypeError），got {sorted(kwargs)!r}"
+    )

@@ -459,6 +459,8 @@ const setConfigCardRef = (key: string, element: unknown) => {
 
 /** 切换配置分组 */
 const selectGroup = async (key: string) => {
+  if (activeGroup.value === key) return;
+
   activeGroup.value = key;
 
   await nextTick();
@@ -552,7 +554,10 @@ const saveConfig = async (group: ConfigGroup) => {
     // 浏览器控制台截图 / Sentry 等日志聚合会同步把这些一并外发。仅打印
     // 显式字段，避免把鉴权凭证 / 配置秘密写进日志。
     const axiosErr = err as {
-      response?: { status?: number; data?: { detail?: unknown; code?: unknown } };
+      response?: {
+        status?: number;
+        data?: { detail?: unknown; code?: unknown };
+      };
       message?: string;
     };
     console.warn("[system] saveConfig rejected", {
@@ -1421,10 +1426,6 @@ watch(locale, () => {
       display: grid;
       flex: 1;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      // 行高取 max(300px, 内容高)：模板管理卡片内容长也不会把同网格其它
-      // 卡片一起撑高（align-items: start 配合，避免 1fr 等高带来的大面积空白）
-      grid-auto-rows: minmax(300px, auto);
-      align-items: start;
       gap: 16px;
       min-width: 0;
       min-height: 100%;

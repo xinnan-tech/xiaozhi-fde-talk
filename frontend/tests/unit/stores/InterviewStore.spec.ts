@@ -12,7 +12,7 @@ describe("stores/InterviewStore — state init", () => {
     expect(store.interviewCreated).toBe(0);
   });
 
-  it("默认 interviewStatusChanged=0（pause / resume / end 触发用）", () => {
+  it("默认 interviewStatusChanged=0（pause / resume / end 通知首页用）", () => {
     const store = useInterviewStore();
     expect(store.interviewStatusChanged).toBe(0);
   });
@@ -39,8 +39,7 @@ describe("stores/InterviewStore — markInterviewCreated", () => {
 });
 
 describe("stores/InterviewStore — markInterviewStatusChanged", () => {
-  // 回归 #91：pause / resume / end 后访谈页通知首页刷新；之前 store 没这字段，
-  // pause 后首页列表仍是 in_progress，直到下次手动刷新才更新。
+  // pause / resume / end 成功后通知首页拉新
   beforeEach(() => {
     setActivePinia(createPinia());
   });

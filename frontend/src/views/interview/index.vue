@@ -479,9 +479,7 @@ const handlePauseInterview = async () => {
   if (interviewDetail.value) {
     interviewDetail.value.status = "suspended";
   }
-  // API 真把 status 落库成功后再通知首页刷新；API 失败时 toast 已提示，
-  // 静默刷新只会让首页与本地状态错位。#91：之前只对「新建」触发刷新，
-  // pause 后回首页列表仍显示 in_progress。
+  // API 真把 status 落库成功后再通知首页刷新；失败时 toast 已提示，无需静默重试
   if (suspended) {
     interviewStore.markInterviewStatusChanged();
   }
@@ -1174,6 +1172,7 @@ const handleEndInterview = async () => {
 
   try {
     await endInterviewApi(getInterviewSessionId());
+    interviewStore.markInterviewStatusChanged();
   } catch (e: unknown) {
     ElMessage.error(extractBackendError(e, t("interview.end_failed")));
     return;
@@ -1184,7 +1183,6 @@ const handleEndInterview = async () => {
   if (isMicrophoneEnabled.value) sendListenState("stop");
   stopRecording();
   websocket.close();
-  interviewStore.markInterviewStatusChanged();
   router.push("/home");
 };
 

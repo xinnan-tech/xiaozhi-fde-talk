@@ -133,6 +133,7 @@ describe("stores/UserStore — registerByUsername", () => {
 describe("stores/UserStore — logOut", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    vi.restoreAllMocks();
   });
 
   it("清空 state 并调 router.push('/home')", async () => {
@@ -150,5 +151,94 @@ describe("stores/UserStore — logOut", () => {
     expect(store.userId).toBe("");
     expect(store.role).toBe("user");
     expect(routerMod.router.push as any).toHaveBeenCalledWith("/home");
+  });
+
+  it("logOut 同步清状态：调用后立刻可读空 state（不等 logoutApi）", async () => {
+    // P1.3: logOut 改成同步 fire-and-forget。原因是：
+    // - await logoutApi 在 60s 超时内页面卡在原路由；
+    // - 关页面后 refresh_token 没被清，下次开页面用户仍是登录态——「登出没生效」。
+    // 这里用 vi.mock 把 logoutApi 全替换掉，避免 axios 在 happy-dom 下打到
+    // http://localhost:3000（dev server），打出 ECONNREFUSED 噪音。
+    const logoutApiMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.doMock("@/api/user", async () => {
+      const actual = await vi.importActual<typeof import("@/api/user")>(
+        "@/api/user"
+      );
+      return { ...actual, logoutApi: logoutApiMock };
+    });
+    try {
+      const routerMod = await import("@/router");
+      // 清掉之前 import 的 store 模块（拿到新的 mocked logoutApi 绑定）。
+      vi.resetModules();
+      const { useUserStore: useStoreFresh } = await import(
+        "@/store/modules/user"
+      );
+      const store = useStoreFresh();
+      store.SET_ACCESS_TOKEN("tok");
+      store.SET_REFRESH_TOKEN("rt-1");
+      store.SET_USERNAME("alice");
+      store.SET_USER_ID("u-1");
+      store.SET_ROLE("user");
+
+      store.logOut();
+
+      // 调完立即可读：状态、router、removeToken 都不能等 logoutApi。
+      expect(store.accessToken).toBe("");
+      expect(store.refreshToken).toBe("");
+      expect(store.username).toBe("");
+      expect(store.userId).toBe("");
+      expect(store.role).toBe("user");
+      expect(routerMod.router.push as any).toHaveBeenCalledWith("/home");
+      expect(logoutApiMock).toHaveBeenCalledWith({ refresh_token: "rt-1" });
+    } finally {
+      vi.doUnmock("@/api/user");
+      vi.resetModules();
+    }
+  });
+
+  it("logOut：refreshToken 存在时 fire-and-forget 调 logoutApi（不等结果）", async () => {
+    // 验证 logoutApi 被 fire-and-forget 调用（不 await logOut）。
+    vi.spyOn(userApi, "logoutApi").mockReset().mockResolvedValue({
+      ok: true
+    } as any);
+    const store = useUserStore();
+    store.SET_ACCESS_TOKEN("tok");
+    store.SET_REFRESH_TOKEN("rt-1");
+
+    store.logOut();
+
+    // logoutApi 应已被发起（同步路径），但 logOut 自身已返回。
+    expect(userApi.logoutApi).toHaveBeenCalledWith({ refresh_token: "rt-1" });
+    // 等一个 microtask 让 promise 链把状态清掉（虽然同步路径已清），
+    // 主要是确认 fire-and-forget 不抛错。
+    await Promise.resolve();
+    expect(store.accessToken).toBe("");
+    expect(store.refreshToken).toBe("");
+  });
+
+  it("logOut：logoutApi reject 时本地状态仍被清空（fire-and-forget + console.warn）", async () => {
+    // P1.4: 后端撤销失败不应阻塞前端清状态，且要上报方便追踪。
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(userApi, "logoutApi").mockReset().mockRejectedValue(
+      new Error("boom")
+    );
+    const store = useUserStore();
+    store.SET_ACCESS_TOKEN("tok");
+    store.SET_REFRESH_TOKEN("rt-1");
+
+    store.logOut();
+
+    // 同步路径：状态立即清空、不等 logoutApi 的 reject。
+    expect(store.accessToken).toBe("");
+    expect(store.refreshToken).toBe("");
+
+    // 等 reject 的 .catch 跑完，warn 应被打到 console。
+    await new Promise(r => setTimeout(r, 0));
+    expect(warnSpy).toHaveBeenCalled();
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? "")).toContain(
+      "revoke refresh token failed"
+    );
+
+    warnSpy.mockRestore();
   });
 });

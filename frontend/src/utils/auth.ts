@@ -67,7 +67,13 @@ export function setToken(data: DataInfo) {
     role
   });
 
-  Cookies.set(TokenKey, tokenInfo);
+  // 临时缓解 XSS 一次即拿到 refresh token（30 天 TTL）的问题。
+  // 长期方案见文件顶部 TODO：后端下 httpOnly cookie + CSRF。
+  // Secure 强制 https；SameSite=Strict 阻止跨站请求附带 cookie。
+  Cookies.set(TokenKey, tokenInfo, {
+    secure: true,
+    sameSite: "Strict"
+  });
   const store = useUserStoreHook();
   store.SET_ACCESS_TOKEN(accessToken);
   store.SET_USERNAME(username);

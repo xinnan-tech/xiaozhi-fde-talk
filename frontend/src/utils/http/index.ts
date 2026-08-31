@@ -15,6 +15,7 @@ import { useUserStoreHook } from "@/store/modules/user";
 import { message } from "@/utils/message";
 import { getCurrentLocale, i18n } from "@/i18n";
 import { extractDetailText } from "@/utils/error";
+import { refreshApi } from "@/api/user";
 
 // 相关配置请参考：www.axios-js.com/zh-cn/docs/#axios-request-config-1
 const defaultConfig: AxiosRequestConfig = {
@@ -31,8 +32,14 @@ const defaultConfig: AxiosRequestConfig = {
   }
 };
 
-/** 用 refresh token 换 access 的响应体（独立 Axios 实例直接打，绕开本拦截器）。 */
-type RefreshResponse = { access_token: string; token_type?: string };
+/** 用 refresh token 换 access 的响应体。refreshApi 已在 @/api/user 暴露同名类型。 */
+
+/**
+ * 401 后允许静默重放的 HTTP 方法集合：HTTP 语义上保证幂等，重放不会产生副作用。
+ * POST/PUT/DELETE/PATCH 一律不重放，避免「改密双扣 / 新建访谈双发 / 写两条
+ * 审计」之类的二阶事故。来源：RFC 9110 §9.2.2（safe methods）。
+ */
+const SAFE_REPLAY_METHODS = new Set(["get", "head", "options"]);
 
 class PureHttp {
   constructor() {
@@ -53,23 +60,6 @@ class PureHttp {
    * - refresh 失败：统一清 token + 弹「登录已过期」。
    */
   private static refreshing: Promise<string | null> | null = null;
-
-  /** 用 refresh token 换新 access。失败返回 null（含网络/解析/业务失败）。 */
-  private static async doRefresh(refreshToken: string): Promise<string | null> {
-    try {
-      // 独立 axios 实例：绕开 PureHttp 的 401 拦截器，否则 refresh 自身失败会被
-      // 当作 expired session 二次触发递归。
-      const res = await Axios.post<RefreshResponse>(
-        "/api/v1/auth/refresh",
-        { refresh_token: refreshToken },
-        { headers: { "Content-Type": "application/json" }, timeout: 60000 }
-      );
-      const newAccess = res.data?.access_token;
-      return newAccess || null;
-    } catch {
-      return null;
-    }
-  }
 
   /** 请求拦截 */
   private httpInterceptorsRequest(): void {
@@ -142,51 +132,72 @@ class PureHttp {
           typeof responseBody?.code === "string" &&
           responseBody.code.length > 0;
 
+        const originalConfig = $error.config as
+          | PureHttpRequestConfig
+          | undefined;
         const isExpiredSession = response?.status === 401 && !hasBusinessCode;
-        // 已经在重试阶段的请求再次 401：放弃，不再触发 refresh 防止栈溢出。
-        const isRetry = ($error.config as PureHttpRequestConfig & {
-          _refreshRetried?: boolean;
-        })?._refreshRetried === true;
+        // refresh 调用自身的 401：不二次触发 refresh-on-401，杜绝递归。
+        const isRefreshCall = originalConfig?._refreshRequest === true;
+        // 重放过的请求再 401：不再触发第二轮 refresh。
+        const isRetry = originalConfig?._refreshRetried === true;
 
-        if (isExpiredSession && !isRetry) {
-          const originalConfig = $error.config as
-            | (PureHttpRequestConfig & { _refreshRetried?: boolean })
-            | undefined;
+        if (isExpiredSession && !isRefreshCall && !isRetry) {
           const token = getToken();
 
           if (token?.refreshToken && originalConfig) {
-            // 共享一次 refresh：第一个 401 触发 doRefresh，后续 401 等同一 promise。
+            // 共享一次 refresh：第一个 401 触发 refreshApi，后续 401 等同一 promise。
+            // refreshApi 走 http.request 套上请求拦截器（自动注入 X-Lang 等），同时
+            // config 上挂 _refreshRequest: true 让响应拦截器看到 401 不再二次递归。
             if (!PureHttp.refreshing) {
-              PureHttp.refreshing = PureHttp.doRefresh(token.refreshToken).then(
-                newAccess => {
+              PureHttp.refreshing = refreshApi({
+                refresh_token: token.refreshToken
+              })
+                .then(res => {
                   PureHttp.refreshing = null;
+                  const newAccess = res?.access_token;
                   if (newAccess) {
                     // 把新 access 写回 store + localStorage；refresh 自身保留。
-                    const refreshed = {
-                      ...token,
-                      accessToken: newAccess
-                    };
+                    const refreshed = { ...token, accessToken: newAccess };
                     setToken(refreshed);
                     return newAccess;
                   }
-                  // refresh 失败：清 token + 弹过期提示。
+                  // refresh 返回 200 但 access_token 缺失（极少见，业务异常）：
+                  // 走清会话 + 提示。
                   PureHttp.clearSession();
                   message(i18n.global.t("msg.session_expired"), {
                     type: "warning",
                     grouping: true
                   });
                   return null;
-                }
-              );
+                })
+                .catch(() => {
+                  PureHttp.refreshing = null;
+                  // refresh 自身 reject（含 401 refresh token 过期 / 429 / 5xx / 网络错误）：
+                  // 统一清会话 + 提示，让所有共享 promise 的并发 401 都走「已过期」分支。
+                  PureHttp.clearSession();
+                  message(i18n.global.t("msg.session_expired"), {
+                    type: "warning",
+                    grouping: true
+                  });
+                  return null;
+                });
             }
 
             const newAccess = await PureHttp.refreshing;
             if (newAccess) {
+              // P1.1: 仅对幂等方法重放。非幂等（POST/PUT/DELETE 等）一旦 401 触发
+              // 静默续期会被二次提交：改密双扣 / 新建访谈双发 / 写两条审计。
+              const method = (originalConfig.method ?? "").toLowerCase();
+              const isSafeToReplay = SAFE_REPLAY_METHODS.has(method);
+              if (!isSafeToReplay) {
+                // 直接拒绝；上层已经在 refreshing.then 里通知过「session_expired」，
+                // 没必要再 toast 一遍业务报错。
+                return Promise.reject($error);
+              }
               // 标记已重试，避免重放后再 401 触发第二次 refresh。
               originalConfig._refreshRetried = true;
-              originalConfig.headers = originalConfig.headers ?? {};
-              originalConfig.headers["Authorization"] =
-                formatToken(newAccess);
+              // request 拦截器会按 setToken(refreshed) 后最新的 accessToken 重写
+              // Authorization header，无需在这里手动覆写。
               return PureHttp.axiosInstance.request(originalConfig);
             }
             // refresh 失败 → 走到下面 toast（已经在 refreshing.then 里弹过）。
@@ -199,10 +210,11 @@ class PureHttp {
             type: "warning",
             grouping: true
           });
-        } else if (isExpiredSession && isRetry) {
-          // 重放后仍 401：refresh 拿到的是合法 access 但服务端仍拒（罕见，
-          // 比如 refresh 与 access 之间服务端强制失效）。直接拒绝，不再 toast
-          // ——上游已经在 refresh.then 里通知过用户。
+        } else if (isExpiredSession && (isRetry || isRefreshCall)) {
+          // 重放后仍 401，或 refresh 调用自身失败：refresh 拿到的是合法 access 但
+          // 服务端仍拒（比如 refresh 与 access 之间服务端强制失效），或 refresh
+          // token 本身已过期。直接拒绝，不再 toast ——上游已经在 refreshing.then
+          // 里通知过用户。
           return Promise.reject($error);
         }
 

@@ -49,9 +49,14 @@ export const registerApi = (data: RegisterRequest) =>
 export type RefreshRequest = { refresh_token: string };
 export type RefreshResult = { access_token: string; token_type: string };
 export const refreshApi = (data: RefreshRequest) =>
-  http.request<RefreshResult>("post", baseUrlApi("/api/v1/auth/refresh"), {
-    data
-  });
+  http.request<RefreshResult>(
+    "post",
+    baseUrlApi("/api/v1/auth/refresh"),
+    { data },
+    // 标记请求本身就是 refresh 调用，响应拦截器看到 401 不会二次触发
+    // refresh-on-401，避免递归。http/index.ts 的拦截器读这个标志。
+    { _refreshRequest: true }
+  );
 
 /** 撤销 refresh token（前端 logOut 时主动调，后端把 jti 加进撤销表）。 */
 export type LogoutRequest = { refresh_token: string };

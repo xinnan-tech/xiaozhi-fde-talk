@@ -74,15 +74,26 @@ export const useUserStore = defineStore("pure-user", {
       return result;
     },
 
-    /** 主动登出：先撤销 refresh token（best-effort），再清本地状态并跳转。 */
-    async logOut() {
+    /** 主动登出：先 enqueue 后端撤销（fire-and-forget），同时立刻清本地状态并跳转。
+     *
+     * 注意：撤销请求是 fire-and-forget，不 await。原因：
+     * 1. 后端撤销（写 jti 黑名单）失败不应阻塞用户登出体验——本地 token 反正已废弃；
+     * 2. 如果 await，PureHttp 默认 60s 超时期间用户卡在原路由、菜单仍为登录态；
+     * 3. 关页面后 refresh_token 没被清，下次开页面用户仍是登录态——「登出没生效」。
+     *
+     * catch 至少 console.warn 上报，避免后端撤销失败（429 / 5xx）被静默吃掉，
+     * 留下 refresh token 在剩余 TTL（默认 30 天）内仍可换 access 的口子。
+     */
+    logOut() {
       const refreshToken = this.refreshToken;
       if (refreshToken) {
-        try {
-          await logoutApi({ refresh_token: refreshToken });
-        } catch {
-          // 后端撤销失败不应阻塞前端清状态——本地 token 反正已废弃。
-        }
+        logoutApi({ refresh_token: refreshToken }).catch(e => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[user.logOut] revoke refresh token failed (jti 仍可能在剩余 TTL 内可用):",
+            e
+          );
+        });
       }
       this.accessToken = "";
       this.refreshToken = "";

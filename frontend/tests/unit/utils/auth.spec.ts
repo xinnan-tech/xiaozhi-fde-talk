@@ -121,6 +121,31 @@ describe("utils/auth — setToken / getToken / removeToken", () => {
     expect(Cookies.get(TokenKey)).toBeUndefined();
   });
 
+  it("setToken 写 Cookie 时挂 Secure + SameSite=Strict（缓解 XSS 一次性偷 refresh）", () => {
+    // document.cookie 不暴露 Secure / SameSite 这些属性（它们只在 Set-Cookie 头里），
+    // 所以直接 spyOn Cookies.set 抓 options 参数来断言。
+    const spy = vi.spyOn(Cookies, "set");
+    try {
+      setToken({
+        accessToken: "tok-sec",
+        refreshToken: "rt-sec",
+        username: "alice",
+        userId: "u-1",
+        role: "user"
+      });
+      expect(spy).toHaveBeenCalledWith(
+        TokenKey,
+        expect.any(String),
+        expect.objectContaining({
+          secure: true,
+          sameSite: "Strict"
+        })
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("setToken：role / userId 缺省时存原值（undefined，不强行给默认值）", () => {
     // 源码：storageLocal().setItem(userKey, { accessToken, username, userId, role })，
     // 没有 userId/role 时直接是 undefined；默认 "" / "user" 只作用于 store 的 SET_USER_ID / SET_ROLE，

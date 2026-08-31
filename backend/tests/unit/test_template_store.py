@@ -136,7 +136,7 @@ async def test_validate_rules(_lifespan_app):
         await loader.create_template(ghost)
     assert ei.value.code == Keys.TEMPLATE_INVALID_MISSING_REF
     assert ei.value.params["attr"] == "extract_to"
-    assert ei.value.params["missing"] == "nope"
+    assert ei.value.params["missing"] == ["nope"]
 
 
 async def test_resolve_template_snapshot_priority(_lifespan_app):

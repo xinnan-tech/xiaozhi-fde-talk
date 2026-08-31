@@ -134,22 +134,25 @@ async def test_delete_referenced_409(_lifespan_app):
     transport = ASGITransport(app=_lifespan_app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         h = await _admin_headers()
-        await c.post("/api/v1/admin/templates", json=_body("route-t2"), headers=h)
+        # 用 uuid 隔离——同 sqlite 文件跨测试可能残留同 id
+        tid = f"route-{uuid.uuid4().hex[:8]}"
+        iid = f"{tid}-i1"
+        await c.post("/api/v1/admin/templates", json=_body(tid), headers=h)
         async with SessionLocal() as db:
             db.add(InterviewRecord(
-                id="route-t2-i1", template_id="route-t2", status="created",
+                id=iid, template_id=tid, status="created",
             ))
             await db.commit()
         try:
-            r = await c.delete("/api/v1/admin/templates/route-t2", headers=h)
+            r = await c.delete(f"/api/v1/admin/templates/{tid}", headers=h)
             assert r.status_code == 409
             assert r.json()["code"] == "template.referenced"
         finally:
             async with SessionLocal() as db:
-                rec = await db.get(InterviewRecord, "route-t2-i1")
+                rec = await db.get(InterviewRecord, iid)
                 await db.delete(rec)
                 await db.commit()
-            await c.delete("/api/v1/admin/templates/route-t2", headers=h)
+            await c.delete(f"/api/v1/admin/templates/{tid}", headers=h)
 
 
 @pytest.mark.asyncio

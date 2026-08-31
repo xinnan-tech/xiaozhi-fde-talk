@@ -1,7 +1,7 @@
 """模板校验错误 i18n：每条具体原因在 4 个 locale 下都能翻译，detail 非空且不含中文残留。
 
 回归 issue #121：原实现把 `reason` 字段硬编码中文塞进 I18nError 模板，
-英文 / 越南文 admin 弹窗混杂中文。修复后 8 个具体原因都有独立 i18n key，
+英文 / 越南文 admin 弹窗混杂中文。修复后 10 个具体原因都有独立 i18n key，
 每个 locale 都翻译到位。
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.core.i18n.translator import t
 
-# 8 个具体 key——加新条目时务必同步到这里
+# 10 个具体 key——加新条目时务必同步到这里
 SPECIFIC_KEYS = [
     Keys.TEMPLATE_INVALID_ID_FORMAT,
     Keys.TEMPLATE_INVALID_VERSION_FORMAT,
@@ -27,16 +27,22 @@ SPECIFIC_KEYS = [
 
 def _sample_params(key: Keys) -> dict:
     """每个 key 给一组能填满占位符的最小参数。"""
-    if key in (Keys.TEMPLATE_INVALID_ID_FORMAT,):
+    if key == Keys.TEMPLATE_INVALID_ID_FORMAT:
         return {"id": "Bad_Id!"}
+    if key in (
+        Keys.TEMPLATE_INVALID_VERSION_FORMAT,
+        Keys.TEMPLATE_INVALID_VERSION_TOO_SMALL,
+        Keys.TEMPLATE_INVALID_VERSION_OVERFLOW,
+    ):
+        return {"version": "abc"}
     if key == Keys.TEMPLATE_INVALID_BRIEF_TOO_LONG:
         return {"max_chars": 2000}
     if key == Keys.TEMPLATE_INVALID_DUPLICATE_FIELD:
-        return {"keys": "project、customer"}
+        return {"keys": ["project", "customer"]}
     if key == Keys.TEMPLATE_INVALID_DUPLICATE_MUST_ASK_ID:
-        return {"ids": "q1、q2"}
+        return {"ids": ["q1", "q2"]}
     if key == Keys.TEMPLATE_INVALID_MISSING_REF:
-        return {"attr": "extract_to", "missing": "nope"}
+        return {"attr": "extract_to", "missing": ["nope"]}
     if key == Keys.TEMPLATE_INVALID_ID_MISMATCH:
         return {"path": "x", "body": "y"}
     return {}

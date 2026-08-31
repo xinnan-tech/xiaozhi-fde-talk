@@ -35,15 +35,18 @@ def _bump_version(v: str) -> str:
     except (TypeError, ValueError):
         raise I18nError(
             Keys.TEMPLATE_INVALID_VERSION_FORMAT, http_status=422,
+            version=v,
         ) from None
     if n < 1:
         raise I18nError(
             Keys.TEMPLATE_INVALID_VERSION_TOO_SMALL, http_status=422,
+            version=v,
         )
     bumped = n + 1
     if len(str(bumped)) > 14:
         raise I18nError(
             Keys.TEMPLATE_INVALID_VERSION_OVERFLOW, http_status=422,
+            version=v,
         )
     return str(bumped)
 
@@ -59,14 +62,14 @@ def _validate(tpl: Template) -> None:
     if dup:
         raise I18nError(
             Keys.TEMPLATE_INVALID_DUPLICATE_FIELD, http_status=422,
-            keys="、".join(dup),
+            keys=dup,
         )
     ids = [m.id for m in tpl.coaching.must_ask]
     dup_ids = sorted(i for i, c in Counter(ids).items() if c > 1)
     if dup_ids:
         raise I18nError(
             Keys.TEMPLATE_INVALID_DUPLICATE_MUST_ASK_ID, http_status=422,
-            ids="、".join(dup_ids),
+            ids=dup_ids,
         )
     # goal / end_time 是保留字段：goal 不在 base_fields 里也能被 setup 引用；
     # end_time 是创建访谈时由时长算出的运行时字段（历史模板会引用）
@@ -78,7 +81,7 @@ def _validate(tpl: Template) -> None:
         if missing:
             raise I18nError(
                 Keys.TEMPLATE_INVALID_MISSING_REF, http_status=422,
-                attr=attr, missing="、".join(missing),
+                attr=attr, missing=missing,
             )
 
 

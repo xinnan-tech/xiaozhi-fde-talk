@@ -5,13 +5,27 @@
  * - parseJsonSafe：语法错误换算行列（各引擎 JSON.parse 消息里的定位信息）
  * - validateTemplateStructure：与后端 _validate 同规则的结构检查，
  *   dot-path 报错（如 session.base_fields[2].key: 字段键重复）
+ *
+ * 错误一律返回 i18n key + 参数，由 utils 导出 formatSyntaxError /
+ * formatStructError 在 Vue 侧配合 useI18n 翻译；validator 保持纯函数
+ * 性质，不依赖任何 UI/i18n 实例。
  */
 
-export type StructError = { path: string; message: string };
+export type SyntaxError = {
+  line: number;
+  column: number;
+  message: string;
+};
+
+export type StructError = {
+  path: string;
+  key: string;
+  params?: Record<string, unknown>;
+};
 
 export function parseJsonSafe(text: string): {
   data?: unknown;
-  error?: { line: number; column: number; message: string };
+  error?: SyntaxError;
 } {
   try {
     return { data: JSON.parse(text) };
@@ -41,7 +55,7 @@ export function parseJsonSafe(text: string): {
 export function validateTemplateStructure(data: unknown): StructError[] {
   const errors: StructError[] = [];
   if (typeof data !== "object" || data === null || Array.isArray(data)) {
-    return [{ path: "$", message: "根节点必须是对象" }];
+    return [{ path: "$", key: "system.template.err_root_not_object" }];
   }
   const obj = data as Record<string, unknown>;
 
@@ -49,11 +63,17 @@ export function validateTemplateStructure(data: unknown): StructError[] {
   // 格式错了才拦——这类数据进了表单也改不对。留空由保存时的后端校验兜底。
   const id = typeof obj.id === "string" ? obj.id : "";
   if (id && !/^[a-z0-9-]+$/.test(id))
-    errors.push({ path: "id", message: "仅允许小写字母、数字、连字符" });
+    errors.push({
+      path: "id",
+      key: "system.template.err_id_format"
+    });
 
   const session = obj.session;
   if (typeof session !== "object" || session === null)
-    return [...errors, { path: "session", message: "缺失或不是对象" }];
+    return [
+      ...errors,
+      { path: "session", key: "system.template.err_session_missing" }
+    ];
   const s = session as Record<string, unknown>;
 
   const fields = Array.isArray(s.base_fields) ? s.base_fields : [];
@@ -61,19 +81,23 @@ export function validateTemplateStructure(data: unknown): StructError[] {
   fields.forEach((f, i) => {
     const p = `session.base_fields[${i}]`;
     if (typeof f !== "object" || f === null) {
-      errors.push({ path: p, message: "必须是对象" });
+      errors.push({ path: p, key: "system.template.err_field_not_object" });
       return;
     }
     const k = (f as Record<string, unknown>).key;
     if (typeof k !== "string" || !k.trim())
-      errors.push({ path: `${p}.key`, message: "字段键必填" });
+      errors.push({
+        path: `${p}.key`,
+        key: "system.template.err_field_key_required"
+      });
     else keys.push(k);
   });
   const dup = keys.filter((k, i) => keys.indexOf(k) !== i);
   if (dup.length)
     errors.push({
       path: "session.base_fields[].key",
-      message: `重复字段：${[...new Set(dup)].join("、")}`
+      key: "system.template.err_field_key_duplicate",
+      params: { keys: [...new Set(dup)].join("、") }
     });
 
   const setup =
@@ -91,7 +115,8 @@ export function validateTemplateStructure(data: unknown): StructError[] {
     if (missing.length)
       errors.push({
         path: `session.setup.${attr}`,
-        message: `引用了未定义字段：${missing.join("、")}`
+        key: "system.template.err_setup_field_undefined",
+        params: { missing: missing.join("、") }
       });
   }
 
@@ -113,8 +138,33 @@ export function validateTemplateStructure(data: unknown): StructError[] {
   if (dupIds.length)
     errors.push({
       path: "coaching.must_ask[].id",
-      message: `重复 id：${[...new Set(dupIds)].join("、")}`
+      key: "system.template.err_must_ask_id_duplicate",
+      params: { ids: [...new Set(dupIds)].join("、") }
     });
 
   return errors;
 }
+
+export type Translator = (
+  key: string,
+  params?: Record<string, unknown>
+) => string;
+
+export const formatSyntaxError = (
+  e: SyntaxError,
+  t: Translator
+): string =>
+  t("system.template.syntax_error", {
+    line: e.line,
+    column: e.column,
+    message: e.message
+  });
+
+export const formatStructError = (
+  e: StructError,
+  t: Translator
+): string =>
+  t("system.template.struct_error_with_path", {
+    path: e.path,
+    message: t(e.key, e.params)
+  });

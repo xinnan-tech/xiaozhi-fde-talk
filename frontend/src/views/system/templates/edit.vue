@@ -20,6 +20,9 @@ import JsonMode from "@/components/template-editor/JsonMode.vue";
 import {
   parseJsonSafe,
   validateTemplateStructure,
+  formatSyntaxError,
+  formatStructError,
+  type SyntaxError,
   type StructError
 } from "@/utils/templateValidation";
 
@@ -112,19 +115,12 @@ const applyDoc = (doc: TemplateDoc) => {
 
 const jsonEditor = ref<InstanceType<typeof JsonMode>>();
 const structErrors = ref<StructError[]>([]);
-const syntaxError = ref<{
-  line: number;
-  column: number;
-  message: string;
-} | null>(null);
+const syntaxError = ref<SyntaxError | null>(null);
 
 const jsonErrors = computed(() => {
   const list: string[] = [];
-  if (syntaxError.value) {
-    const { line, column, message } = syntaxError.value;
-    list.push(`第 ${line} 行 第 ${column} 列：${message}`);
-  }
-  for (const e of structErrors.value) list.push(`${e.path}：${e.message}`);
+  if (syntaxError.value) list.push(formatSyntaxError(syntaxError.value, t));
+  for (const e of structErrors.value) list.push(formatStructError(e, t));
   return list;
 });
 
@@ -211,14 +207,10 @@ const save = async () => {
   if (saving.value) return;
   // JSON 模式下直接点保存：先过同一道解析+结构闸门（通过则并入表单数据），
   // 失败不保存——否则 JSON 改动会被旧表单数据悄悄覆盖。
-  // 错误 toast 用 json_save_blocked（带具体原因），不复用 json_apply_blocked：
-  // 后者原文「切回 form 模式」跟「点 Save」动作无关，会误导 admin。
   if (mode.value === "json" && !applyJsonToForm()) {
     const reason = syntaxError.value
-      ? `${syntaxError.value.message}（第 ${syntaxError.value.line} 行）`
-      : structErrors.value[0]
-        ? structErrors.value[0].message
-        : t("system.template.json_errors");
+      ? formatSyntaxError(syntaxError.value, t)
+      : formatStructError(structErrors.value[0], t);
     ElMessage.warning(
       t("system.template.json_save_blocked", { reason })
     );

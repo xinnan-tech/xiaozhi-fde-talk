@@ -44,10 +44,13 @@ test.describe("create interview", () => {
       { timeout: 5_000 }
     )
 
-    // 7. URL 仍在 /home（不会跳 /interview/:id）
-    expect(page.url()).toMatch(/\/home/)
+    // 7. URL 跳到 /interview/:id（PR #135 行为：保存成功不再卡首页，按 status 路由）
+    expect(page.url()).toMatch(/\/interview\/[a-zA-Z0-9_-]+$/)
 
-    // 8. 新访谈出现在 home 列表（home 视图 watch(interviewCreated) 触发 getInterviewList）
+    // 8. 新访谈出现在 /interview/:id 页 header（views/interview/index.vue:1258
+    //    渲染 interviewDetail.base_info.title）；
+    //    home 列表的 watch(interviewCreated) 刷新由 markInterviewCreated() 触发，
+    //    已不在本测试路径上但仍由 App.vue 同步调用，行为不变。
     await expect(page.locator("body")).toContainText(uniqueTitle, {
       timeout: 10_000
     })

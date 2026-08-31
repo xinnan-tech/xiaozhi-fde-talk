@@ -81,6 +81,10 @@ export type CreateInterviewForm = {
   template_id: string;
 };
 
+// POST /api/v1/interviews 响应：完整 session 摘要的 id + status 子集。
+// status 复用 InterviewDetailType["status"] 避免单点真值漂移。
+export type CreatedInterview = Pick<InterviewDetailType, "id" | "status">;
+
 /** 获取访谈统计 */
 export const getStatisticsApi = () => {
   return http.request<InterviewStatisticsType>(
@@ -154,9 +158,11 @@ export const ocrInterviewImageApi = (data: OcrInterviewRequest) => {
 
 /** 创建访谈 */
 export const saveInterviewApi = (data: CreateInterviewForm) => {
-  return http.request<unknown>("post", baseUrlApi("/api/v1/interviews"), {
-    data
-  });
+  return http.request<CreatedInterview>(
+    "post",
+    baseUrlApi("/api/v1/interviews"),
+    { data }
+  );
 };
 
 export type TranscriptItem = {

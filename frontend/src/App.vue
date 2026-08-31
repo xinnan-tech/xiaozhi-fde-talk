@@ -16,6 +16,7 @@ import { ReDialog } from "@/components/ReDialog";
 import CreateInterviewDialog from "@/components/interview/CreateInterviewDialog.vue";
 import LoginDialog from "@/components/auth/LoginDialog.vue";
 import { saveInterviewApi, type CreateInterviewForm } from "@/api/interview";
+import { interviewRouteTarget } from "@/utils/interview";
 import { registrationStatusApi } from "@/api/user";
 
 const { locale, t } = useI18n();
@@ -43,20 +44,22 @@ const handleCreateInterview = async (form: CreateInterviewForm) => {
 
   creatingInterview.value = true;
   try {
-    // 后端 POST /api/v1/interviews 返的是完整 session 摘要，含 id + status。
-    // 跟 home/index.vue:openInterviewPage 走同一约定：status === 'ended' 去
-    // 报告页，否则去访谈页。新建访谈 status 必然不是 ended，直接进访谈页。
-    const created = (await saveInterviewApi(form)) as { id?: string; status?: string };
+    // 后端 POST /api/v1/interviews 返完整 session 摘要（id + status）。
+    // 走 utils/interview 的统一路由约定：status === "ended" 去报告页，
+    // 否则去访谈页。新建访谈 status 不会 ended，但抽公共函数避免
+    // 多入口用不同条件方向造成漂移。
+    const created = await saveInterviewApi(form);
+    if (!created?.id) {
+      // 响应 schema 漂移 / wrapper 变更等导致 id 缺失：不当作成功，
+      // 避免弹"创建成功"却停在原页（与本 PR 标题同一症状）。
+      throw new Error(t("app.interview_create_failed"));
+    }
     dialogStore.closeCreateInterview();
     ElMessage.success(t("app.interview_create_success"));
     interviewStore.markInterviewCreated();
-    if (created?.id) {
-      const target =
-        created.status === "ended"
-          ? `/report/${created.id}`
-          : `/interview/${created.id}`;
-      void router.push({ path: target });
-    }
+    router
+      .push({ path: interviewRouteTarget(created) })
+      .catch(() => ElMessage.error(t("app.interview_create_failed")));
   } catch (error: any) {
     const detail = error?.response?.data?.detail;
     ElMessage.error(

@@ -20,6 +20,7 @@ import {
   getStatisticsApi,
   getInterviewsApi
 } from "@/api/interview";
+import { interviewRouteTarget } from "@/utils/interview";
 
 defineOptions({
   name: "Home"
@@ -180,10 +181,7 @@ const openCreateDialog = () => {
 };
 
 const openInterviewPage = (item: (typeof interviewList.value)[number]) => {
-  router.push({
-    path:
-      item.status !== "ended" ? `/interview/${item.id}` : `/report/${item.id}`
-  });
+  router.push({ path: interviewRouteTarget(item) });
 };
 
 /** 格式化最近时间 */

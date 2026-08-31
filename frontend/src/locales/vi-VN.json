@@ -17,6 +17,7 @@
   "system.reload": "Tải lại",
   "system.save_group": "Lưu {group}",
   "system.save_failed": "Lưu {group} thất bại: {message}",
+  "system.save_refresh_failed": "Đã lưu trên máy chủ, nhưng giao diện chưa được làm mới. Vui lòng mở lại trang sau.",
   "system.save_success": "Đã lưu; thay đổi áp dụng cho yêu cầu tiếp theo",
   "system.close": "Đóng",
   "system.run_all": "Chạy tất cả",

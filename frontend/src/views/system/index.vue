@@ -524,36 +524,56 @@ const saveConfig = async (group: ConfigGroup) => {
     }
   }
 
-  // 后端 4xx/5xx 会经 http 拦截器弹出 i18n toast 后再 reject；
-  // 这里用 try/catch 吞掉拒绝，避免向上冒泡触发 Vue 全局 errorHandler
-  // 打 "[Vue warn]: Unhandled error during execution of component event handler"。
+  // 仅把 PUT 调用本身包在 try 中：响应拦截器已对 response.status 弹 toast，
+  // 此 catch 仅兜底断网 / 超时 / 取消 / 拦截器自身异常等无 response 的失败。
+  let res: Awaited<
+    ReturnType<typeof systemConfigSaveApi<Record<string, ConfigValue>>>
+  >;
   try {
-    const res = await systemConfigSaveApi<Record<string, ConfigValue>>(
+    res = await systemConfigSaveApi<Record<string, ConfigValue>>(
       group.key,
       payload as Record<string, ConfigValue>
     );
-    if (res.ok) {
-      ElMessage.success(t("system.save_success"));
-      await initCofig();
-      // auth.allow_registration 改变后，把最新值喂给 permission store 以刷新「用户管理」菜单可见性。
-      if (group.key === "auth") {
-        try {
-          const r = await registrationStatusApi();
-          permissionStore.setRegistrationAllowed(r.allow_registration);
-        } catch {
-          /* 取值失败不阻塞保存成功的提示 */
-        }
-      }
-    } else {
+  } catch (err) {
+    // 可验证约束：调用方必须保证 response.status 存在时已由拦截器 toast；
+    // 否则此 catch 必须补一条错误反馈，禁止静默吞掉。
+    if (!(err as { response?: unknown })?.response) {
       ElMessage.error(
         t("system.save_failed", {
           group: group.title,
-          message: getErrorMessage(res)
+          message: getErrorMessage(err)
         })
       );
     }
-  } catch {
-    /* 拦截器已展示错误 toast，这里只负责不让 promise rejection 冒泡到 Vue。 */
+    console.warn("[system] saveConfig rejected without toast", err);
+    return;
+  }
+
+  if (res.ok) {
+    ElMessage.success(t("system.save_success"));
+    // 本地刷新失败不应抹掉"保存成功"反馈，单独 try 兜底并给提示。
+    try {
+      await initCofig();
+    } catch {
+      ElMessage.warning(t("system.save_refresh_failed"));
+    }
+    // auth.allow_registration 改变后，把最新值喂给 permission store 以刷新
+    // 「用户管理」菜单可见性；此 try 仅保护该同步，与 initCofig 完全独立。
+    if (group.key === "auth") {
+      try {
+        const r = await registrationStatusApi();
+        permissionStore.setRegistrationAllowed(r.allow_registration);
+      } catch {
+        /* 取值失败不阻塞保存成功的提示 */
+      }
+    }
+  } else {
+    ElMessage.error(
+      t("system.save_failed", {
+        group: group.title,
+        message: getErrorMessage(res)
+      })
+    );
   }
 };
 

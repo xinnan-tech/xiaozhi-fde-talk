@@ -17,6 +17,7 @@
   "system.reload": "Reload",
   "system.save_group": "Save {group}",
   "system.save_failed": "Failed to save {group}: {message}",
+  "system.save_refresh_failed": "Saved on server, but the local view did not refresh. Please reopen the page shortly.",
   "system.save_success": "Saved; changes apply to the next request",
   "system.close": "Close",
   "system.run_all": "Run all",

@@ -17,6 +17,7 @@
   "system.reload": "重新載入",
   "system.save_group": "儲存 {group}",
   "system.save_failed": "儲存 {group} 設定失敗：{message}",
+  "system.save_refresh_failed": "設定已寫入，但本地未刷新，請稍後重新打開頁面",
   "system.save_success": "已儲存，下次請求時生效",
   "system.close": "關閉",
   "system.run_all": "執行全部",

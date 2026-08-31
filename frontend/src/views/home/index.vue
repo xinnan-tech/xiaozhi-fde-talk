@@ -30,7 +30,8 @@ const { locale, t } = useI18n();
 const userStore = useUserStoreHook();
 const dialogStore = useDialogStoreHook();
 const interviewStore = useInterviewStoreHook();
-const { interviewCreated } = storeToRefs(interviewStore);
+const { interviewCreated, interviewStatusChanged } =
+  storeToRefs(interviewStore);
 
 const searchIcon = useRenderIcon("tabler:search");
 const clearIcon = useRenderIcon("tabler:x");
@@ -288,6 +289,14 @@ const refreshAfterCreate = async () => {
 
 watch(interviewCreated, async created => {
   if (created > 0) await refreshAfterCreate();
+});
+
+// pause / resume / end 后访谈页会 markInterviewStatusChanged(+1)；
+// 这里调一次 refreshAfterCreate 保证回首页时列表里 status 已是最新值——
+// 之前的实现只对「新建」触发刷新，pause 后列表仍是 in_progress，
+// 直到 onActivated / 下次手动刷新才更新，#91 的延迟就是这样来的。
+watch(interviewStatusChanged, async changed => {
+  if (changed > 0) await refreshAfterCreate();
 });
 
 watch(

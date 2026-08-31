@@ -19,6 +19,7 @@ import VideoPause from "~icons/ep/video-pause";
 import CircleCheck from "~icons/ep/circle-check";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import ReSegmented from "@/components/ReSegmented";
+import { useInterviewStoreHook } from "@/store/modules/interview";
 import LayFooter from "@/layout/components/lay-footer/index.vue";
 import { extractBackendError } from "@/utils/error";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -45,6 +46,7 @@ defineOptions({
 
 const router = useRouter();
 const route = useRoute();
+const interviewStore = useInterviewStoreHook();
 const { locale, t } = useI18n();
 const backIcon = useRenderIcon("heroicons:arrow-long-left");
 const eraserIcon = useRenderIcon("boxicons:eraser-filled");
@@ -437,6 +439,7 @@ const handleStartInterview = async () => {
   if (wasSuspended) {
     try {
       await resumeInterviewApi(getInterviewSessionId());
+      interviewStore.markInterviewStatusChanged();
     } catch (e: unknown) {
       ElMessage.error(extractBackendError(e, t("interview.resume_failed")));
     }
@@ -462,8 +465,10 @@ const handleStartInterview = async () => {
 
 const handlePauseInterview = async () => {
   if (!isInterviewStarted.value) return;
+  let suspended = false;
   try {
     await suspendInterviewApi(getInterviewSessionId());
+    suspended = true;
   } catch (e: unknown) {
     ElMessage.error(extractBackendError(e, t("interview.pause_failed")));
   }
@@ -473,6 +478,12 @@ const handlePauseInterview = async () => {
   stopInterviewTimer();
   if (interviewDetail.value) {
     interviewDetail.value.status = "suspended";
+  }
+  // API 真把 status 落库成功后再通知首页刷新；API 失败时 toast 已提示，
+  // 静默刷新只会让首页与本地状态错位。#91：之前只对「新建」触发刷新，
+  // pause 后回首页列表仍显示 in_progress。
+  if (suspended) {
+    interviewStore.markInterviewStatusChanged();
   }
 };
 
@@ -1173,6 +1184,7 @@ const handleEndInterview = async () => {
   if (isMicrophoneEnabled.value) sendListenState("stop");
   stopRecording();
   websocket.close();
+  interviewStore.markInterviewStatusChanged();
   router.push("/home");
 };
 

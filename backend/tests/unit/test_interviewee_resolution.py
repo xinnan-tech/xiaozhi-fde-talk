@@ -6,8 +6,6 @@
 """
 from __future__ import annotations
 
-import pytest
-
 from app.domain.template import BaseField, SetupBlock, SessionBlock, Template
 from app.transport.http.routes.interviews import _resolve_interviewee
 
@@ -67,7 +65,7 @@ def test_fallback_skips_non_text_field_types():
 
 
 def test_returns_empty_when_no_text_field_has_value():
-    """text 字段都为空 → 返回空串，让前端 -- fallback。"""
+    """text 字段都为空 → 返回空串，让前端 — fallback。"""
     tpl = _tpl(
         BaseField(key="customer_name", label="客户名", type="text"),
         BaseField(key="phone", label="电话", type="text"),
@@ -88,3 +86,16 @@ def test_interviewee_key_with_only_whitespace_falls_back():
     )
     base_info = {"interviewee": "   ", "customer_name": "张三"}
     assert _resolve_interviewee(base_info, tpl) == "张三"
+
+
+def test_fallback_skips_whitespace_only_text_fields_via_heuristic():
+    """启发式回落时，text 字段值是纯空白 → 继续找下一个非空 text 字段。
+
+    与 test_interviewee_key_with_only_whitespace_falls_back 互补：前者验
+    named interviewee 键的空白场景，本条验启发式遍历时的空白场景。
+    """
+    tpl = _tpl(
+        BaseField(key="customer_name", label="客户名", type="text"),  # 纯空白
+        BaseField(key="contact", label="联系人", type="text"),
+    )
+    assert _resolve_interviewee({"customer_name": "   ", "contact": "赵六"}, tpl) == "赵六"

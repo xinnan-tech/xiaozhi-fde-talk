@@ -15,6 +15,7 @@ from app.core.i18n.extract_prompts import build_extract_system
 from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
+from app.domain.template import Template
 from app.services.coaching.engine import TERMINAL_SESSION_STATUSES
 from app.services.coaching.first_batch import generate_first_batch
 from app.services.sessions.manager import manager
@@ -72,13 +73,14 @@ def _is_supported_image_format(image_bytes: bytes) -> bool:
     return False
 
 
-def _resolve_interviewee(base_info: dict, tpl) -> str:
+def _resolve_interviewee(base_info: dict, tpl: Optional[Template]) -> str:
     """从 base_info 解析受访者展示字段。
 
-    优先取名为 `interviewee` 的键（与历史上前端约定一致）；空串 / 纯空白 / 缺
+    优先取名为 `interviewee` 的键（与前端展示约定一致）；空串 / 纯空白 / 缺
     失则启发式回落：按模板 `base_fields` 声明顺序选首个 type=text 且值非空的
-    字段。这样自定义模板不必死磕"必须叫 interviewee"——任何能识别人物的字段
-    都能上首页卡片。模板缺失时返回空串，保持现有前端 -- fallback。
+    字段。非 text 字段（datetime / duration / select / number / textarea 等）
+    均不参与。这样自定义模板不必死磕"必须叫 interviewee"——任何能识别人物的字段
+    都能上首页卡片。模板缺失时返回空串，保持现有前端 — fallback。
     """
     direct = base_info.get("interviewee")
     if direct and str(direct).strip():

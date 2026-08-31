@@ -92,16 +92,10 @@ const handleConfirm = () => {
 
 const rotateLeft = () => cropper?.rotate(-90);
 const rotateRight = () => cropper?.rotate(90);
-const flipHorizontal = () => {
-  if (!cropper) return;
-  const data = cropper.getImageData();
-  cropper.scaleX(-data.scaleX);
-};
-const flipVertical = () => {
-  if (!cropper) return;
-  const data = cropper.getImageData();
-  cropper.scaleY(-data.scaleY);
-};
+// checkOrientation: false 时 cropperjs 不会初始化 imageData.scaleX/scaleY，
+// 首次读取是 undefined（取负得 NaN 会被 scale() 静默丢弃），需兜底为 1
+const flipHorizontal = () => cropper?.scaleX(-(cropper?.getImageData().scaleX ?? 1));
+const flipVertical = () => cropper?.scaleY(-(cropper?.getImageData().scaleY ?? 1));
 const reset = () => cropper?.reset();
 </script>
 

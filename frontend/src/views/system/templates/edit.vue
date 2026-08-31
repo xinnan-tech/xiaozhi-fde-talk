@@ -210,9 +210,18 @@ onMounted(async () => {
 const save = async () => {
   if (saving.value) return;
   // JSON 模式下直接点保存：先过同一道解析+结构闸门（通过则并入表单数据），
-  // 失败不保存——否则 JSON 改动会被旧表单数据悄悄覆盖
+  // 失败不保存——否则 JSON 改动会被旧表单数据悄悄覆盖。
+  // 错误 toast 用 json_save_blocked（带具体原因），不复用 json_apply_blocked：
+  // 后者原文「切回 form 模式」跟「点 Save」动作无关，会误导 admin。
   if (mode.value === "json" && !applyJsonToForm()) {
-    ElMessage.warning(t("system.template.json_apply_blocked"));
+    const reason = syntaxError.value
+      ? `${syntaxError.value.message}（第 ${syntaxError.value.line} 行）`
+      : structErrors.value[0]
+        ? structErrors.value[0].message
+        : t("system.template.json_errors");
+    ElMessage.warning(
+      t("system.template.json_save_blocked", { reason })
+    );
     return;
   }
   saving.value = true;

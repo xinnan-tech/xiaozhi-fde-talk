@@ -144,6 +144,7 @@
   "system.template.doc_hint": "Variables above are pre-filled with collected session info; remaining placeholders are written by the AI from the transcript",
   "system.template.json_errors": "JSON Errors",
   "system.template.json_apply_blocked": "Fix JSON errors before switching back to form mode",
+  "system.template.json_save_blocked": "JSON validation failed, not saved: {reason}",
   "system.template.save": "Save",
   "system.template.cancel": "Cancel",
   "system.template.cancel_confirm": "Discard current edits? Unsaved changes will be lost.",

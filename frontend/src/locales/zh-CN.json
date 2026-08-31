@@ -144,6 +144,7 @@
   "system.template.doc_hint": "顶部变量会自动填入访谈收集的信息；其余花括号占位由 AI 依据访谈记录撰写",
   "system.template.json_errors": "JSON 错误",
   "system.template.json_apply_blocked": "JSON 有错误，修正后才能切回表单模式",
+  "system.template.json_save_blocked": "JSON 未通过校验，未保存：{reason}",
   "system.template.save": "保存",
   "system.template.cancel": "取消",
   "system.template.cancel_confirm": "放弃当前修改？未保存的改动将丢失。",

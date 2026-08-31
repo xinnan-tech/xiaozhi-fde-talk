@@ -144,6 +144,7 @@
   "system.template.doc_hint": "Biến ở trên được tự điền thông tin phỏng vấn; các chỗ giữ chỗ còn lại do AI viết dựa trên nội dung phỏng vấn",
   "system.template.json_errors": "Lỗi JSON",
   "system.template.json_apply_blocked": "Sửa lỗi JSON trước khi quay lại biểu mẫu",
+  "system.template.json_save_blocked": "JSON không hợp lệ, chưa lưu: {reason}",
   "system.template.save": "Lưu",
   "system.template.cancel": "Hủy",
   "system.template.cancel_confirm": "Bỏ các thay đổi hiện tại? Mọi chỉnh sửa chưa lưu sẽ bị mất.",

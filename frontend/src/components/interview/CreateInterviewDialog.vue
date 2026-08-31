@@ -20,6 +20,7 @@ import { AVMedia } from "vue-audio-visual";
 import { useAsrRecorder } from "@/composables/useAsrRecorder";
 import { useCameraCapture, blobToBase64 } from "@/composables/useCameraCapture";
 import { useAbortableRequests } from "@/composables/useAbortableRequests";
+import ImageCropDialog from "./ImageCropDialog.vue";
 import {
   extractInterviewFieldsApi,
   getInterviewsTemplatesApi,
@@ -63,7 +64,8 @@ const clipboardIcon = markRaw(useRenderIcon("tabler:clipboard-text"));
 
 const formRef = ref<FormInstance>();
 const selectedInputMethod = ref("");
-const activePanel = ref<"" | "clipboard" | "voice" | "camera">("");
+type ActivePanel = "" | "clipboard" | "voice" | "camera" | "cropPreview";
+const activePanel = ref<ActivePanel>("");
 const goalError = ref("");
 const interviewTemplates = ref<TemplateItem[]>([]);
 const interviewTemplatesLoading = ref(false);
@@ -77,6 +79,9 @@ const cameraFrozen = ref(false);
 const cameraVideoRef = ref<HTMLVideoElement>();
 const fileInputRef = ref<HTMLInputElement>();
 const frozenImageSrc = ref("");
+const showCropDialog = ref(false);
+const pendingImageBase64 = ref("");
+const cropPreviewSrc = ref("");
 const createDefaultForm = (): CreateInterviewForm => ({
   // base_info 的键由所选模板的 base_fields 决定（applyTemplateDefaults
   // 加载时逐字段初始化兜底值），这里不再预置固定键
@@ -240,6 +245,7 @@ const resetForm = async () => {
   cameraRecognizing.value = false;
   cameraFrozen.value = false;
   frozenImageSrc.value = "";
+  cropPreviewSrc.value = "";
   goalError.value = "";
   await nextTick();
   formRef.value?.clearValidate();
@@ -250,6 +256,7 @@ const closeActivePanel = () => {
   activePanel.value = "";
   cameraFrozen.value = false;
   frozenImageSrc.value = "";
+  cropPreviewSrc.value = "";
   closeCamera();
 };
 
@@ -717,14 +724,36 @@ const handleFileChange = async (event: Event) => {
     return;
   }
 
-  // 选择文件后开始识别时才关闭摄像头
+  // 选择文件后打开裁切弹窗，同时关闭摄像头
   closeCamera();
+  try {
+    pendingImageBase64.value = await blobToBase64(file);
+    showCropDialog.value = true;
+  } catch (error) {
+    message(extractBackendError(error, t("create.dialog.upload_failed")), {
+      type: "error"
+    });
+  } finally {
+    // 重置 input 以便下次选择同一文件
+    input.value = "";
+  }
+};
+
+const handleCropConfirm = async (croppedBase64: string) => {
+  showCropDialog.value = false;
+  cropPreviewSrc.value = `data:image/jpeg;base64,${croppedBase64}`;
+  selectedInputMethod.value = "cropPreview";
+  activePanel.value = "cropPreview";
+};
+
+const handleCropSubmit = async () => {
+  if (cameraRecognizing.value || !cropPreviewSrc.value) return;
   cameraRecognizing.value = true;
   try {
-    const imageBase64 = await blobToBase64(file);
-    const response = await ocrInterviewImageApi({
-      image_base64: imageBase64
-    });
+    const imageBase64 = cropPreviewSrc.value.slice(
+      cropPreviewSrc.value.indexOf(",") + 1
+    );
+    const response = await ocrInterviewImageApi({ image_base64: imageBase64 });
     const text = (response.text ?? "").trim();
     if (!text) {
       message(t("create.dialog.ocr_empty"), { type: "warning" });
@@ -743,9 +772,16 @@ const handleFileChange = async (event: Event) => {
     closeActivePanel();
   } finally {
     cameraRecognizing.value = false;
-    // 重置 input 以便下次选择同一文件
-    input.value = "";
+    cropPreviewSrc.value = "";
   }
+};
+
+const handleCropReselect = () => {
+  cropPreviewSrc.value = "";
+  selectedInputMethod.value = "camera";
+  activePanel.value = "camera";
+  cameraFrozen.value = false;
+  void openCamera();
 };
 
 // 服务端触发停止（60s 上限/连接断开）时，与手动停止走同一提取流程；
@@ -754,6 +790,16 @@ watch(asrState, (next, previous) => {
   if (previous !== "stopping" || next !== "idle") return;
   if (voiceExtracting.value || !asrEverRecorded.value) return;
   void extractVoiceTranscript();
+});
+
+// 裁切弹窗关闭时回到拍摄区并重新打开摄像头
+watch(showCropDialog, val => {
+  if (val) return;
+  if (cropPreviewSrc.value) return; // 裁切确认后会走这里，跳过摄像头重置
+  selectedInputMethod.value = "camera";
+  activePanel.value = "camera";
+  cameraFrozen.value = false;
+  void openCamera();
 });
 
 // 摄像头流挂到预览 <video>（面板渲染与取流完成先后不定，post flush 兜底）
@@ -831,6 +877,10 @@ const handleModelValueChange = (value: boolean) => {
   if (!value) {
     cancelRequest("extract");
     cancelAsrRecording();
+    // 关闭对话框时也要释放摄像头，与 handleClose 保持一致
+    cameraFrozen.value = false;
+    frozenImageSrc.value = "";
+    closeCamera();
   }
   emit("update:modelValue", value);
 };
@@ -849,6 +899,12 @@ const handleClose = () => {
 const handleSubmit = async () => {
   if (props.submitting) return;
   if (!formRef.value) return;
+
+  if ((form.goal?.length || 0) > 100) {
+    message(t("create.dialog.goal_too_long"), { type: "error" });
+    return;
+  }
+
   const valid = await formRef.value.validate().catch(() => false);
   if (!valid) {
     // 表单比一屏长（名称/时间/模板/目标），出错的字段常在滚动区外：
@@ -1013,11 +1069,12 @@ watch(
                 v-model="form.goal"
                 type="textarea"
                 :rows="3"
-                maxlength="100"
-                show-word-limit
                 :placeholder="$t('create.dialog.goal_placeholder')"
                 @input="goalError = ''"
               />
+              <div class="goal-count" :class="{ overlimit: (form.goal?.length || 0) > 100 }">
+                {{ form.goal?.length || 0 }} / 100
+              </div>
               <p class="goal-error" :class="{ visible: !!goalError }">
                 {{ goalError || " " }}
               </p>
@@ -1172,6 +1229,33 @@ watch(
               />
             </div>
 
+            <div
+              v-else-if="activePanel === 'cropPreview'"
+              key="cropPreview"
+              class="crop-preview-panel"
+            >
+              <div class="crop-preview-image">
+                <img :src="cropPreviewSrc" alt="crop preview" />
+              </div>
+              <div class="panel-actions">
+                <el-button
+                  type="primary"
+                  :loading="cameraRecognizing"
+                  :disabled="cameraRecognizing"
+                  @click="handleCropSubmit"
+                >
+                  {{ $t("create.dialog.crop_submit") }}
+                </el-button>
+                <el-button
+                  plain
+                  :disabled="cameraRecognizing"
+                  @click="handleCropReselect"
+                >
+                  {{ $t("create.dialog.crop_reselect") }}
+                </el-button>
+              </div>
+            </div>
+
             <div v-else key="methods" class="input-method-list">
               <button
                 v-for="method in inputMethods"
@@ -1219,6 +1303,12 @@ watch(
       >
     </template>
   </el-dialog>
+
+  <ImageCropDialog
+    v-model="showCropDialog"
+    :image-base64="pendingImageBase64"
+    @confirm="handleCropConfirm"
+  />
 </template>
 
 <style lang="scss">
@@ -1427,6 +1517,18 @@ watch(
       }
     }
 
+    .goal-count {
+      align-self: flex-end;
+      margin-top: 4px;
+      font-size: 12px;
+      line-height: 14px;
+      color: #909399;
+
+      &.overlimit {
+        color: #f56c6c;
+      }
+    }
+
     .el-form-item__error {
       position: static !important;
       display: block;
@@ -1566,6 +1668,29 @@ watch(
       }
 
       .frozen-preview {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+    }
+
+    .crop-preview-panel {
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+      width: 100%;
+      height: 216px;
+    }
+
+    .crop-preview-image {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      background: #000;
+      border-radius: 8px;
+
+      img {
         display: block;
         width: 100%;
         height: 100%;

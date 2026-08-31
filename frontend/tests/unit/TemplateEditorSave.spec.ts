@@ -58,7 +58,7 @@ vi.mock("@/api/admin", () => ({
  *  会让工厂在它赋值之前就被调用。 */
 const { jsonModeStub } = vi.hoisted(() => ({
   jsonModeStub: {
-    name: "TemplateEditorJson",
+    name: "JsonMode",
     props: ["code"],
     emits: ["update:code"],
     template: `<button class="json-mode-stub" type="button" />`
@@ -88,7 +88,7 @@ const i18n = createI18n({
       "system.template.cancel": "取消",
       "system.template.save": "保存",
       "system.template.json_errors": "JSON 错误",
-      "system.template.json_apply_blocked": "Fix JSON errors before switching back to form mode",
+      "system.template.json_apply_blocked": "JSON 有错误，修正后才能切回表单模式",
       "system.template.save_json_parse_failed": "保存失败：JSON 解析错误（第 {line} 行 第 {column} 列）：{message}",
       "system.template.save_json_struct_invalid": "保存失败：JSON 结构校验未通过：{details}"
     }
@@ -128,8 +128,7 @@ function mountEditor(routePath: string) {
         BaseInfoSection: sectionStub,
         SessionSection: sectionStub,
         CoachingSection: sectionStub,
-        ReportSection: sectionStub,
-        JsonMode: jsonModeStub
+        ReportSection: sectionStub
       }
     },
     attachTo: document.body
@@ -166,7 +165,7 @@ describe("SystemTemplateEdit · JSON 模式下 Save 报错文案", () => {
     await flushPromises();
 
     // 灌一份故意写错的 JSON：触发 parseJsonSafe 走到 syntaxError 分支
-    const jsonStub = wrapper.findComponent({ name: "TemplateEditorJson" });
+    const jsonStub = wrapper.findComponent({ name: "JsonMode" });
     expect(jsonStub.exists()).toBe(true);
     await jsonStub.vm.$emit("update:code", "{invalid json: hello}");
     await flushPromises();
@@ -201,7 +200,7 @@ describe("SystemTemplateEdit · JSON 模式下 Save 报错文案", () => {
     await flushPromises();
 
     // 合法 JSON 但根节点是数组 → validateTemplateStructure 报错
-    const jsonStub = wrapper.findComponent({ name: "TemplateEditorJson" });
+    const jsonStub = wrapper.findComponent({ name: "JsonMode" });
     await jsonStub.vm.$emit("update:code", "[1,2,3]");
     await flushPromises();
 
@@ -211,7 +210,7 @@ describe("SystemTemplateEdit · JSON 模式下 Save 报错文案", () => {
     expect(warningSpy).toHaveBeenCalledTimes(1);
     const msg = warningSpy.mock.calls[0][0];
     expect(msg).toMatch(/^保存失败：JSON 结构校验未通过：/);
-    // 结构错误应带字段路径，至少含一处「$：根节点必须是对象」
+    // 结构错误应带字段路径，至少含一处「$: 根节点必须是对象」
     expect(msg).toMatch(/根节点必须是对象|session\.base_fields/);
   });
 });

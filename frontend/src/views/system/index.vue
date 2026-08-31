@@ -524,29 +524,36 @@ const saveConfig = async (group: ConfigGroup) => {
     }
   }
 
-  const res = await systemConfigSaveApi<Record<string, ConfigValue>>(
-    group.key,
-    payload as Record<string, ConfigValue>
-  );
-  if (res.ok) {
-    ElMessage.success(t("system.save_success"));
-    await initCofig();
-    // auth.allow_registration 改变后，把最新值喂给 permission store 以刷新「用户管理」菜单可见性。
-    if (group.key === "auth") {
-      try {
-        const r = await registrationStatusApi();
-        permissionStore.setRegistrationAllowed(r.allow_registration);
-      } catch {
-        /* 取值失败不阻塞保存成功的提示 */
-      }
-    }
-  } else {
-    ElMessage.error(
-      t("system.save_failed", {
-        group: group.title,
-        message: getErrorMessage(res)
-      })
+  // 后端 4xx/5xx 会经 http 拦截器弹出 i18n toast 后再 reject；
+  // 这里用 try/catch 吞掉拒绝，避免向上冒泡触发 Vue 全局 errorHandler
+  // 打 "[Vue warn]: Unhandled error during execution of component event handler"。
+  try {
+    const res = await systemConfigSaveApi<Record<string, ConfigValue>>(
+      group.key,
+      payload as Record<string, ConfigValue>
     );
+    if (res.ok) {
+      ElMessage.success(t("system.save_success"));
+      await initCofig();
+      // auth.allow_registration 改变后，把最新值喂给 permission store 以刷新「用户管理」菜单可见性。
+      if (group.key === "auth") {
+        try {
+          const r = await registrationStatusApi();
+          permissionStore.setRegistrationAllowed(r.allow_registration);
+        } catch {
+          /* 取值失败不阻塞保存成功的提示 */
+        }
+      }
+    } else {
+      ElMessage.error(
+        t("system.save_failed", {
+          group: group.title,
+          message: getErrorMessage(res)
+        })
+      );
+    }
+  } catch {
+    /* 拦截器已展示错误 toast，这里只负责不让 promise rejection 冒泡到 Vue。 */
   }
 };
 

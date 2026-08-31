@@ -324,16 +324,21 @@ const loadTemplateFields = async (templateId: string) => {
 // 模板字段的兜底初值/默认值与占位提示
 // - 兜底初值按类型：datetime=此刻（访谈多为马上开始）、duration=45、其余空串，
 //   加载模板时只补缺失的键
-// - 模板默认值（default）只取代兜底值或空值，用户改过的不动——预填永远
-//   不覆盖人的输入；访谈名称/访谈目标是固定伪字段，默认值在
-//   session.title_default / goal_default
+// - 模板默认值（default）只取代未经用户手动的自动值——预填永远不覆盖人
+//   的输入；前后模板同 key 字段若都未经用户手，新 default 仍能继续覆盖
+//   （autoValues 跟踪真实写入的自动值，含已应用的 default）。
+//   datetime/duration 用户通常自行设置，不参与模板 default 覆盖；
+//   访谈名称/访谈目标是固定伪字段，默认值在 session.title_default /
+//   goal_default
 // - 占位提示：模板配了就替代全局文案；重置时清空回退
 const templateHints = ref<Record<string, string>>({});
 const templateSession = ref<{
   title_default?: string;
   goal_default?: string;
 }>({});
-// 各字段「未经用户手」的兜底值：模板 default 只取代兜底值
+// 记录各字段"未经用户手"的兜底值：模板 default 只取代这些值。
+// 同步写入时机：fallback 初始化（缺失键写入 fallback）、模板 default 实际
+// 写入。供模板切换时清理不再使用的字段，以及判断"是否仍是自动值"。
 const autoValues: Record<string, string> = {};
 
 const fallbackForType = (type: string): string => {
@@ -374,19 +379,29 @@ const applyTemplateDefaults = async (templateId: string) => {
     }
   }
 
+  // title_default / goal_default 后端恒为 ""（绝大多数模板没显式配置），
+  // 仅在模板配置了非空默认值、且当前没填时覆盖，避免切模板时把用户已填的
+  // 「访谈名称」「访谈目标」无意义清空。
   const titlePreset = templateSession.value.title_default?.trim();
   if (titlePreset && !baseInfo.title?.trim()) baseInfo.title = titlePreset;
   const goalPreset = templateSession.value.goal_default?.trim();
   if (goalPreset && !form.goal.trim()) form.goal = goalPreset;
 
   for (const field of fields) {
+    // datetime / duration 用户通常自行设置，不参与模板 default 覆盖
+    if (field.type === "datetime" || field.type === "duration") continue;
     const preset = field.default?.trim();
-    if (preset) {
-      const current = baseInfo[field.key] ?? "";
-      // 当前值既非空也非兜底值 = 用户已动过，不覆盖
-      if (current && current !== autoValues[field.key]) continue;
-      const value = normalizeByType(field.type || "text", preset);
-      if (value) baseInfo[field.key] = value;
+    if (!preset) continue;
+    const current = baseInfo[field.key] ?? "";
+    // 当前值既非空也非兜底值 = 用户已动过，不覆盖。
+    // 同 key 字段切模板时若前后 default 不一致，因 autoValues 已同步
+    // 记录上次写入的 default（含本函数下面这步更新），仍能继续匹配上。
+    if (current && current !== autoValues[field.key]) continue;
+    const value = normalizeByType(field.type || "text", preset);
+    if (value) {
+      baseInfo[field.key] = value;
+      // 同步更新 autoValues，让下一轮模板切换仍能识别为"未经用户手"
+      autoValues[field.key] = value;
     }
     if (field.placeholder?.trim()) {
       hints[field.key] = field.placeholder.trim();

@@ -1,7 +1,8 @@
 """GET /api/v1/admin/users + POST /api/v1/admin/users/{user_id}/password。
 
 schema 字段正确（无 password_hash），路由拒绝无 token 调用，
-service 层 update_password 同步刷新 password_changed_at。
+service 层 update_password 同步刷新 password_changed_at，
+admin 改自己密码走 change-password 流程，本端点拒绝（403）。
 """
 from __future__ import annotations
 
@@ -10,12 +11,15 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
+from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from app.core.password_policy import validate_password_strength
+from app.domain.auth import CurrentUser
 from app.persistence.db import SessionLocal
 from app.persistence.models import User
 from app.persistence.repositories.user import user_repo
+from app.transport.http.dependencies import get_current_user
 from app.transport.http.schemas import AdminUserInfo
 
 
@@ -135,3 +139,66 @@ async def test_reset_password_endpoint_requires_auth(_lifespan_app):
             json={"new_password": "StrongP@ssW0rd"},
         )
     assert r.status_code == 401
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Step 6: admin 改自己密码被端点拒（403 → auth.admin_reset_self_forbidden）
+# ─────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def admin_self_client(_lifespan_app):
+    """override get_current_user 返 fake admin，把 user_id 绑成可注入。
+
+    测试只关心「admin 改自己」分支，不触碰真实 user 表——通过 dependency_overrides
+    注入 CurrentUser.user_id，无需 DB 准备 admin 行。
+    """
+    holder: dict[str, CurrentUser] = {}
+
+    async def _fake_user() -> CurrentUser:
+        return holder["user"]
+
+    _lifespan_app.dependency_overrides[get_current_user] = _fake_user
+
+    class _Client:
+        def __init__(self, app):
+            self._c = TestClient(app)
+
+        def as_user(self, user: CurrentUser):
+            holder["user"] = user
+            return self
+
+        def post_reset(self, user_id: str, new_password: str = "StrongP@ssW0rd"):
+            return self._c.post(
+                f"/api/v1/admin/users/{user_id}/password",
+                json={"new_password": new_password},
+            )
+
+    return _Client(_lifespan_app)
+
+
+def test_reset_password_rejects_self(admin_self_client):
+    """admin 用本端点改自己密码 → 403 + i18n_key=auth.admin_reset_self_forbidden。
+
+    防御绕过 /auth/change-password「需旧密码」校验：拿到 admin 会话的攻击者
+    不能借此静默重置 admin 自己密码。
+    """
+    me = CurrentUser(user_id="admin-self-uuid", username="admin", role="admin")
+    r = admin_self_client.as_user(me).post_reset(me.user_id)
+    assert r.status_code == 403
+    body = r.json()
+    assert body.get("code") == "auth.admin_reset_self_forbidden"
+
+
+def test_reset_password_allows_other_admin(admin_self_client):
+    """admin 用本端点改 *其他* admin 密码不被自身守卫拦（仍会被 auth 401/200 流程
+
+    处理；这里只验证「user_id != self」时不进 self-block 分支——若端点最终 200
+    或 404 都与本守卫无关，但不应返回 403 auth.admin_reset_self_forbidden）。
+    """
+    me = CurrentUser(user_id="admin-self-uuid", username="admin", role="admin")
+    other = "other-admin-uuid"
+    r = admin_self_client.as_user(me).post_reset(other)
+    # 端点真实行为：目标用户不在测试 DB 中 → 404 user_not_found（不是 self-block 403）
+    assert r.status_code == 404
+    assert r.json().get("code") != "auth.admin_reset_self_forbidden"

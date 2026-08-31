@@ -56,13 +56,19 @@ async def list_users(
 async def reset_password(
     user_id: str,
     body: AdminResetPasswordRequest,
-    _admin: CurrentUser = Depends(require_admin),
+    admin: CurrentUser = Depends(require_admin),
 ) -> dict[str, bool]:
     """重置用户密码。同步刷新 password_changed_at，旧 token 立即失效。
 
     不限制 admin 改其他 admin 的密码——admin 数量本来就少，最低门槛 1 个
     即可恢复（自助注册关时人工种子仍可用 service 层 register_user 走后续任务）。
+
+    但禁止 admin 通过本端点改自己的密码：这条路径不校验旧密码，会让管理员
+    会话绕过 `/auth/change-password` 的「需旧密码」防御；改自己密码统一走
+    `/auth/change-password`，与前端「自己一行按钮 disabled」语义一致。
     """
+    if user_id == admin.user_id:
+        raise I18nError(Keys.AUTH_ADMIN_RESET_SELF_FORBIDDEN, http_status=403)
     validate_password_strength(body.new_password)
     async with SessionLocal() as s:
         row = await s.get(User, user_id)

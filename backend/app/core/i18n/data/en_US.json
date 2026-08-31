@@ -112,6 +112,7 @@
   "auth.password_mismatch": "Passwords do not match",
   "auth.registration_disabled": "User registration is currently disabled",
   "auth.user_not_found": "User not found",
+  "auth.admin_reset_self_forbidden": "Admins cannot reset their own password through this endpoint; use the change-password flow instead",
   "auth.refresh_invalid": "invalid refresh token",
   "auth.refresh_expired": "refresh token expired",
   "auth.refresh_revoked": "refresh token revoked",

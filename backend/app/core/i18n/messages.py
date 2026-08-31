@@ -157,6 +157,7 @@ class Keys(StrEnum):
     AUTH_PASSWORD_MISMATCH = "auth.password_mismatch"
     AUTH_REGISTRATION_DISABLED = "auth.registration_disabled"
     AUTH_USER_NOT_FOUND = "auth.user_not_found"
+    AUTH_ADMIN_RESET_SELF_FORBIDDEN = "auth.admin_reset_self_forbidden"
     AUTH_REFRESH_INVALID = "auth.refresh_invalid"
     AUTH_REFRESH_EXPIRED = "auth.refresh_expired"
     AUTH_REFRESH_REVOKED = "auth.refresh_revoked"

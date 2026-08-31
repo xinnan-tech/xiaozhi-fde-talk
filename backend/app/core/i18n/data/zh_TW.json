@@ -106,6 +106,7 @@
   "config.invalid_bool": "{name} 值必須是 true 或 false",
   "config.invalid_positive_integer": "{name} 須為正整數：{value}",
   "config.invalid_positive_number": "{name} 須為正數：{value}",
+  "config.invalid_required_string": "{name} 為必填項，請填寫後儲存",
   "auth.username_invalid_format": "使用者名稱須為 4-32 位字母、數字、底線或連字號",
   "auth.username_taken": "該使用者名稱已被佔用",
   "auth.password_mismatch": "兩次輸入的密碼不一致",

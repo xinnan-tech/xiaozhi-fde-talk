@@ -106,6 +106,7 @@
   "config.invalid_bool": "{name} value must be true or false",
   "config.invalid_positive_integer": "{name} must be a positive integer: {value}",
   "config.invalid_positive_number": "{name} must be a positive number: {value}",
+  "config.invalid_required_string": "{name} is required",
   "auth.username_invalid_format": "Username must be 4-32 chars (letters, digits, underscore, hyphen)",
   "auth.username_taken": "Username is already taken",
   "auth.password_mismatch": "Passwords do not match",

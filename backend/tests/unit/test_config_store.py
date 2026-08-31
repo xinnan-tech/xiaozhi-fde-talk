@@ -111,6 +111,136 @@ def test_subscribers_are_weakref(store):
     assert len(store._subscribers) == 0
 
 
+async def test_set_many_skips_empty_sensitive_before_required_check(store, monkeypatch):
+    """#138 P1-1: asr.doubao_stream.access_token 同时属于 SENSITIVE_KEYS 与
+    REQUIRED_STRING_KEYS，PUT 空值要走"不动原值"契约而非 400。
+
+    修复前 set_many 顺序：validate_value → SENSITIVE_KEYS skip → 必填串会被拦。
+    修复后顺序：SENSITIVE_KEYS skip → validate_value → 空值跳过保持原值。
+    """
+    store._cache = {"asr.doubao_stream.access_token": "old-real-token"}
+    notified: list[set[str]] = []
+
+    def _on_change(ks):
+        notified.append(ks)
+
+    store.subscribe(_on_change)
+
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    session.commit = AsyncMock()
+    # 任何 execute 调用都返回空——不应被触发（敏感字段空值被跳过）
+    noop_result = MagicMock()
+    noop_result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=noop_result)
+    monkeypatch.setattr("app.core.config_store.SessionLocal", lambda: session)
+
+    await store.set_many({"asr.doubao_stream.access_token": ""})
+
+    # 原值未被覆盖
+    assert store._cache["asr.doubao_stream.access_token"] == "old-real-token"
+    # DB 未写入
+    session.execute.assert_not_called()
+    # 广播触发一次但 changed 为空（set_many 始终调一次 _notify，跳过键不进 changed）
+    assert notified == [set()]
+
+
+async def test_set_many_rejects_whitespace_required_string(store, monkeypatch):
+    """#138: 全空格 access_token 不属于 SENSITIVE_KEYS 跳过路径（非 == ''），
+    必须被 REQUIRED_STRING_KEYS 校验拦下。"""
+    from app.core.i18n import Keys
+    from app.core.i18n.errors import I18nError
+
+    store._cache = {"asr.doubao_stream.access_token": "old"}
+
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    session.commit = AsyncMock()
+    monkeypatch.setattr("app.core.config_store.SessionLocal", lambda: session)
+
+    with pytest.raises(I18nError) as ei:
+        await store.set_many({"asr.doubao_stream.access_token": "   "})
+    assert ei.value.code == Keys.CONFIG_INVALID_REQUIRED_STRING.value
+    # 原值未被破坏
+    assert store._cache["asr.doubao_stream.access_token"] == "old"
+
+
+def test_sanitize_loaded_values_warns_on_empty_required_strings(store, caplog):
+    """#138 P1-3: 老部署 DB 已有 '' 的必填字段，加载时必须 warn。
+
+    不能简单回退 DEFAULTS（DEFAULTS 自己也是 ''），留 cache 真相 + warn 由
+    provider 构造路径 ValueError 兜底。
+    """
+    import logging
+    from app.core.config_store import _sanitize_loaded_values
+
+    loaded = {
+        "asr.doubao_stream.appid": "",
+        "asr.doubao_stream.access_token": "   \t",
+        "asr.doubao_stream.language": "zh-CN",  # 非必填，不该 warn
+    }
+
+    with caplog.at_level(logging.WARNING, logger="app.core.config_store"):
+        sanitized = _sanitize_loaded_values(loaded)
+
+    warned_keys = {
+        rec.message
+        for rec in caplog.records
+        if "必填字段" in rec.message or "必填鉴权" in rec.message or "需 admin" in rec.message
+    }
+    # 两个必填 key 都触发 warn
+    assert any("asr.doubao_stream.appid" in m for m in warned_keys)
+    assert any("asr.doubao_stream.access_token" in m for m in warned_keys)
+    # 非必填 key 不该 warn（仅抽样：language）
+    assert not any("asr.doubao_stream.language" in m for m in warned_keys)
+    # 必填字段透传——不回退（DEFAULTS 也是 ''），由 provider 构造路径兜底
+    assert sanitized["asr.doubao_stream.appid"] == ""
+    assert sanitized["asr.doubao_stream.access_token"] == "   \t"
+
+
+async def test_warm_skips_invalid_defaults(store, monkeypatch, caplog):
+    """#138 P1-2: warm() 种入前 validate_value，DEFAULTS 中空字符串必填字段
+    （如豆包 appid/access_token）不应被无声写入 DB。
+
+    预期：日志 warn + 该 key 不出现在 cache（与 cache miss 等价，由 provider
+    构造路径通过 get_sync 取到 None 触发 ValueError 兜底）。
+    """
+    import logging
+    from app.core.config_store import REQUIRED_STRING_KEYS
+
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+
+    # 第一次 query：DB 空 → 全 missing
+    empty_result = MagicMock()
+    empty_result.scalars.return_value.all.return_value = []
+    # 第二次 query（refresh）：空字符串必填字段不写入，其他 DEFAULTS 全有
+    seeded = [
+        MagicMock(key=k, value=v) for k, v in DEFAULTS.items()
+        if k not in REQUIRED_STRING_KEYS
+    ]
+    full_result = MagicMock()
+    full_result.scalars.return_value.all.return_value = seeded
+    session.execute = AsyncMock(side_effect=[empty_result, full_result])
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.get = AsyncMock(return_value=None)
+    monkeypatch.setattr("app.core.config_store.SessionLocal", lambda: session)
+
+    with caplog.at_level(logging.WARNING, logger="app.core.config_store"):
+        await store.warm()
+
+    # 必填字段未进 cache（跳过种入）
+    for k in REQUIRED_STRING_KEYS:
+        assert k not in store._cache, f"{k} 应被跳过但出现在 cache"
+    # warn 至少命中两个必填字段
+    warned = [r.message for r in caplog.records if "跳过种入" in r.message]
+    assert any("asr.doubao_stream.appid" in m for m in warned)
+    assert any("asr.doubao_stream.access_token" in m for m in warned)
+
 # ---- 加载层脏值收敛：warm() / _refresh_cache() 必须 sanitize ENUM/BOOL/NUMERIC ----
 #
 # PR #141 修复：写入层校验挡住新脏值落库，但 DB 已有行（手动改 DB / 迁移脚本

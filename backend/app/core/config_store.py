@@ -118,20 +118,36 @@ BOOL_KEYS: frozenset[str] = frozenset({
     "asr.doubao_stream.enable_multilingual",
 })
 
+# 必填鉴权字段：写入侧挡空白，避免首握失败时 admin 误判是服务挂。
+REQUIRED_STRING_KEYS: frozenset[str] = frozenset({
+    "asr.doubao_stream.appid",
+    "asr.doubao_stream.access_token",
+})
+
 
 def validate_value(key: str, value: str) -> None:
-    """key 写入校验：BOOL_KEYS / NUMERIC_KEYS / ENUM_KEYS 三类。其他 key 放行。
+    """key 写入校验：BOOL_KEYS / REQUIRED_STRING_KEYS / ENUM_KEYS / NUMERIC_KEYS
+    四类。其他 key 放行。
 
-    布尔 / 枚举 / 数值分支都走 I18nError(code, http_status=400)，让 admin 配置
-    页 / API 客户端拿到结构化的 code + params。数值分支额外拦截 float('nan' /
-    'inf' / 1e10000 等)——它们会绕过 `v <= 0` 判断直接落库，运行时才在
-    int()/float() 转换炸。改用 math.isfinite(v) 在解析后兜住所有浮点特殊值。
+    布尔 / 必填 / 枚举 / 数值分支都走 I18nError(code, http_status=400)，让 admin
+    配置页 / API 客户端拿到结构化的 code + params。数值分支额外拦截
+    float('nan' / 'inf' / 1e10000 等)——它们会绕过 `v <= 0` 判断直接落库，运
+    行时才在 int()/float() 转换炸。改用 math.isfinite(v) 在解析后兜住所有浮点
+    特殊值。
     """
     if key in BOOL_KEYS:
         if value not in ("true", "false"):
             # 占位用 {name}，避免与 t() 的 `key` 形参撞名（TypeError）。
             raise I18nError(
                 Keys.CONFIG_INVALID_BOOL,
+                http_status=400,
+                name=key,
+            )
+        return
+    if key in REQUIRED_STRING_KEYS:
+        if not value or not value.strip():
+            raise I18nError(
+                Keys.CONFIG_INVALID_REQUIRED_STRING,
                 http_status=400,
                 name=key,
             )
@@ -266,6 +282,9 @@ def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
     按 ENUM/BOOL/NUMERIC/URL 重新校验，命中失败回退到 DEFAULTS[k] 并 logger.warning——
     避免脏 URL 在 warm 路径绕过写入校验静默进缓存，runtime websockets.connect 才抛 InvalidURI。
 
+    必填鉴权字段（REQUIRED_STRING_KEYS）空值仅 warn、不回退（DEFAULTS 自身也是 ""，
+    无有效回退目标），由 provider 构造路径的 ValueError 兜底——但要让 admin 可见。
+
     非受控 key（不在 ENUM/BOOL/NUMERIC/URL 表内的）原样保留——它们只走 validate_value
     "放行"分支，重新校验无意义。
     """
@@ -290,6 +309,15 @@ def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
                     k, v,
                 )
                 continue
+        elif k in REQUIRED_STRING_KEYS and (v is None or not v.strip()):
+            # 老部署 DB 若已存在空值必填字段（手工改 DB / 镜像回放 / 早期 bug
+            # 落库），不回退 DEFAULTS（DEFAULTS 自己也是 ""），仅 warn 让 admin 可见，
+            # 留 cache 真相由 provider 构造路径 ValueError 兜底。
+            logger.warning(
+                "ConfigStore 检测到 %s 值为 %r（必填字段），"
+                "需 admin 在配置页补齐后 provider 才能正常握手",
+                k, v,
+            )
         sanitized[k] = v
     return sanitized
 
@@ -312,6 +340,12 @@ class ConfigStore:
     async def warm(self) -> None:
         """启动期一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入。
 
+        DEFAULTS 中若有空字符串类必填字段（如豆包 appid/access_token 没有合法
+        默认），validate_value 会拒——跳过种入并 warn，让 DB 留空由 admin 通过
+        配置页补齐，避免无声写入"无效值"。其他 key 的脏 DEFAULTS（URL / ENUM /
+        BOOL / NUMERIC 写错）属配置 bug，必须 fail-fast 抛出——首次启动通道与
+        admin PUT 通道同等对待。
+
         加载完成后遍历一次 ENUM_KEYS / BOOL_KEYS / NUMERIC_KEYS，命中校验失败
         的脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放等历史脏值）回退到 DEFAULTS
         并 logger.warning——避免首次 create_llm() 在 factory.py:54 抛 ValueError
@@ -324,9 +358,21 @@ class ConfigStore:
             missing = [k for k in ALL_B_KEYS if k not in have]
             for k in missing:
                 v = DEFAULTS[k]
-                # 种入前校验：避免 DEFAULTS 写错（含非法 scheme / 空 netloc /
-                # 全空白）静默落库——首次启动通道与 admin PUT 通道同等对待。
-                validate_value(k, v)
+                try:
+                    validate_value(k, v)
+                except I18nError:
+                    # 必填字段（豆包 appid/access_token 等）DEFAULTS 自身是 "" 无
+                    # 合法回退目标，跳过种入 + warn 让 admin 在配置页补齐；其他 key
+                    # 的脏 DEFAULTS（如 URL 写错）属配置 bug，必须 fail-fast 抛出
+                    # ——首次启动通道与 admin PUT 通道同等对待。
+                    if k not in REQUIRED_STRING_KEYS:
+                        raise
+                    logger.warning(
+                        "ConfigStore 跳过种入 %s：DEFAULTS 值 %r 不通过 validate_value，"
+                        "需 admin 在配置页补齐后才会落库",
+                        k, v,
+                    )
+                    continue
                 session.add(SystemConfig(key=k, value=v))
             if missing:
                 await session.commit()
@@ -405,10 +451,11 @@ class ConfigStore:
             for key, value in items.items():
                 if key not in ALL_B_KEYS:
                     raise ValueError(f"unknown config key: {key}")
-                validate_value(key, value)
-                # 敏感字段空值跳过
+                # 敏感字段空值跳过：必须早于 validate_value，因为 access_token
+                # 同时属于 REQUIRED_STRING_KEYS，不跳过会被新校验抛 400。
                 if key in SENSITIVE_KEYS and value == "":
                     continue
+                validate_value(key, value)
                 now = datetime.now(timezone.utc)
                 if dialect == "mysql":
                     stmt = mysql_insert(SystemConfig).values(

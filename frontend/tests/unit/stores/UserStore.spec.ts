@@ -236,8 +236,54 @@ describe("stores/UserStore — logOut", () => {
     await new Promise(r => setTimeout(r, 0));
     expect(warnSpy).toHaveBeenCalled();
     expect(String(warnSpy.mock.calls[0]?.[0] ?? "")).toContain(
-      "revoke refresh token failed"
+      "revoke failed"
     );
+
+    warnSpy.mockRestore();
+  });
+
+  it("logOut：console.warn 不泄漏 refresh_token / Authorization Bearer（openrz P1.2）", async () => {
+    // 上轮 P1.4 修复把整个 AxiosError 传给 console.warn，展开后含
+    // e.config.data.refresh_token 与 e.config.headers.Authorization Bearer
+    // access——直接落进浏览器 console 与日志聚合器，token 被持久化。
+    // 本轮断言：warnSpy 抓到的所有参数都不含这两个敏感字符串。
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // 构造形似真实 axios 错误的 payload：带 config.data / config.headers
+    const sensitiveError: any = new Error("Request failed with status code 500");
+    sensitiveError.isAxiosError = true;
+    sensitiveError.config = {
+      url: "/api/v1/auth/logout",
+      method: "post",
+      data: { refresh_token: "SECRET-rt-leak" },
+      headers: { Authorization: "Bearer SECRET-at-leak" }
+    };
+    sensitiveError.response = {
+      status: 500,
+      statusText: "Internal Server Error",
+      data: { detail: "boom" }
+    };
+    vi.spyOn(userApi, "logoutApi").mockReset().mockRejectedValue(
+      sensitiveError
+    );
+
+    const store = useUserStore();
+    store.SET_ACCESS_TOKEN("tok");
+    store.SET_REFRESH_TOKEN("rt-1");
+
+    store.logOut();
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(warnSpy).toHaveBeenCalled();
+    // 序列化所有参数为字符串，检查敏感 token 是否泄漏
+    const allArgs = warnSpy.mock.calls
+      .map(call => call.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" "))
+      .join("\n");
+    expect(allArgs).not.toContain("SECRET-rt-leak");
+    expect(allArgs).not.toContain("SECRET-at-leak");
+    expect(allArgs).not.toContain("refresh_token");
+    expect(allArgs).not.toContain("Authorization");
+    // 但应包含一个不透明的状态码（500），便于运维定位
+    expect(allArgs).toContain("500");
 
     warnSpy.mockRestore();
   });

@@ -172,6 +172,73 @@ describe("utils/auth — setToken / getToken / removeToken", () => {
     expect(got?.userId).toBe("u-1");
     expect(got?.role).toBe("user");
   });
+
+  it("setToken 写入 refreshToken 时 localStorage 不含 refreshToken（openrz P1.1）", () => {
+    // refreshToken 不再落 localStorage（明文 JS 可读、无网络层缓解），
+    // 只走 cookie（Secure + SameSite=Strict）。
+    setToken({
+      accessToken: "at-p11",
+      refreshToken: "rt-p11-secret",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    });
+    const stored = memStore.get(userKey);
+    // 关键断言：localStorage 里不能有 refreshToken
+    expect(stored.refreshToken).toBeUndefined();
+    expect(JSON.stringify(stored)).not.toContain("rt-p11-secret");
+    // 其他字段照常落
+    expect(stored.accessToken).toBe("at-p11");
+    expect(stored.username).toBe("alice");
+    expect(stored.userId).toBe("u-1");
+    expect(stored.role).toBe("user");
+    // cookie 仍含 refreshToken（401 静默续 access 还要从 cookie 拼回）
+    const cookieRaw = Cookies.get(TokenKey);
+    expect(cookieRaw).toBeTruthy();
+    expect(JSON.parse(cookieRaw!).refreshToken).toBe("rt-p11-secret");
+  });
+
+  it("getToken：localStorage 无 refreshToken 时从 cookie 拼回（401 静默续 access 路径）", () => {
+    // 模拟「旧 session 升级后 localStorage 已无 refreshToken，但 cookie 仍存」的场景：
+    // 例如本次升级前留下的 localStorage 数据（无 refreshToken 字段）。
+    memStore.set(userKey, {
+      accessToken: "at-mix",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    });
+    Cookies.set(TokenKey, JSON.stringify({
+      accessToken: "at-mix",
+      refreshToken: "rt-mix",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    }));
+    const got = getToken();
+    expect(got?.accessToken).toBe("at-mix");
+    expect(got?.refreshToken).toBe("rt-mix");
+  });
+
+  it("getToken：localStorage 有 refreshToken 时优先用 localStorage（防御 cookie 被外部改写）", () => {
+    // 如果两条路径都写：localStorage 已有 refreshToken → 直接用，cookie
+    // 即便被篡改也不影响返回值。
+    memStore.set(userKey, {
+      accessToken: "at-d",
+      refreshToken: "rt-local",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    });
+    Cookies.set(TokenKey, JSON.stringify({
+      accessToken: "at-d",
+      refreshToken: "rt-cookie-tampered",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    }));
+    const got = getToken();
+    expect(got?.refreshToken).toBe("rt-local");
+  });
 });
 
 describe("utils/auth — formatToken", () => {

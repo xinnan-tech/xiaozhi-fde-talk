@@ -83,6 +83,11 @@ export const useUserStore = defineStore("pure-user", {
      *
      * catch 至少 console.warn 上报，避免后端撤销失败（429 / 5xx）被静默吃掉，
      * 留下 refresh token 在剩余 TTL（默认 30 天）内仍可换 access 的口子。
+     *
+     * openrz P1.2：console.warn 不传整个 AxiosError。e.config.data.refresh_token
+     * 与 e.config.headers.Authorization 会随对象展开落进浏览器 console 与日志
+     * 聚合器（Sentry/Datadog 等），refresh/access token 直接被持久化。改为只
+     * 打 status / message，避免泄露 token。
      */
     logOut() {
       const refreshToken = this.refreshToken;
@@ -90,8 +95,8 @@ export const useUserStore = defineStore("pure-user", {
         logoutApi({ refresh_token: refreshToken }).catch(e => {
           // eslint-disable-next-line no-console
           console.warn(
-            "[user.logOut] revoke refresh token failed (jti 仍可能在剩余 TTL 内可用):",
-            e
+            "[user.logOut] revoke failed:",
+            e?.response?.status ?? e?.message ?? "unknown"
           );
         });
       }

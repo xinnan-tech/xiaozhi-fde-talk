@@ -94,6 +94,10 @@ ENUM_KEYS: dict[str, set[str]] = {
     },
     # LLM 输出语种：跟 ASR 是独立维度（详见 plan Task 2.5 注释）。
     "llm.output_language": derived_output_language_enum(),
+    # LLM 提供方类型：跟 factory.py:_REGISTRY 对齐；任意脏值落库会让
+    # create_llm() 在 factory.py:54 抛 ValueError，admin 端 PUT 链路上没有
+    # catch 转 422，全站 LLM 调 500。在写入层校验一次性挡掉。
+    "llm.type": {"openai", "stub"},
     # OCR 模型类型：openai 兼容（qwen-vl、gpt-4o）或百度
     "ocr.type": {"openai", "baidu"},
 }
@@ -208,6 +212,41 @@ DEFAULTS: dict[str, str] = {
 }
 
 
+def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
+    """加载层兜底：DB 已有行里若有脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放
+    等历史脏值），按 ENUM / BOOL / NUMERIC 重新校验，命中失败回退到 DEFAULTS[k]
+    并 logger.warning——避免首次 create_llm() 在 factory.py:54 抛 ValueError 把
+    全站 LLM 调打成 500（get_llm() 是 interviews.py / coaching/engine.py 等热路径
+    的必经节点）。老数据无需迁移脚本就能收敛。
+
+    非受控 key（不在 ENUM/BOOL/NUMERIC 表内的）原样保留——它们只走 validate_value
+    "放行"分支，重新校验无意义。
+    """
+    validated_keys = set(ENUM_KEYS) | set(BOOL_KEYS) | set(NUMERIC_KEYS)
+    sanitized: dict[str, str] = {}
+    for k, v in loaded.items():
+        if k in validated_keys:
+            try:
+                validate_value(k, v)
+            except I18nError:
+                if k in DEFAULTS:
+                    logger.warning(
+                        "ConfigStore 加载时发现脏值 %s=%r，已回退到 DEFAULTS=%r",
+                        k, v, DEFAULTS[k],
+                    )
+                    sanitized[k] = DEFAULTS[k]
+                    continue
+                # 拿不到 DEFAULTS：跳过避免后续运行路径炸 500（理论上 ALL_B_KEYS
+                # 与 DEFAULTS key 一一对应，这里是兜底）。
+                logger.warning(
+                    "ConfigStore 加载时发现脏值 %s=%r 且无 DEFAULTS 可回退，跳过该 key",
+                    k, v,
+                )
+                continue
+        sanitized[k] = v
+    return sanitized
+
+
 class ConfigStore:
     """DB 配置 KV 存储 + 内存缓存 + 失效广播单例。"""
 
@@ -224,7 +263,14 @@ class ConfigStore:
         return cls._instance
 
     async def warm(self) -> None:
-        """启动期一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入。"""
+        """启动期一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入。
+
+        加载完成后遍历一次 ENUM_KEYS / BOOL_KEYS / NUMERIC_KEYS，命中校验失败
+        的脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放等历史脏值）回退到 DEFAULTS
+        并 logger.warning——避免首次 create_llm() 在 factory.py:54 抛 ValueError
+        把全站 LLM 调打成 500（get_llm() 是 interviews.py / coaching/engine.py
+        等热路径的必经节点）。老数据无需迁移脚本就能收敛。
+        """
         async with SessionLocal() as session:
             existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
             have = {row.key: row.value for row in existing.scalars().all()}
@@ -241,7 +287,8 @@ class ConfigStore:
     async def _refresh_cache(self) -> None:
         async with SessionLocal() as session:
             existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
-            self._cache = {row.key: row.value for row in existing.scalars().all()}
+            loaded = {row.key: row.value for row in existing.scalars().all()}
+        self._cache = _sanitize_loaded_values(loaded)
 
     async def get(self, key: str) -> Optional[str]:
         if key not in self._cache:

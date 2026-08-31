@@ -99,7 +99,8 @@ class UserRepository:
 
         新旧密码相同直接跳过：不重写 hash、不 bump password_changed_at、不失效
         token 缓存，避免误操作（admin 表单 auto-fill / 复制粘贴旧值）静默踢掉所有
-        在线 session。register 路径下"无既有密码"分支自然不命中本判断，安全。
+        在线 session。该函数仅处理已有用户场景——新建走 user_repo.create，
+        不受此判断影响。
         """
         if self._session_factory is None:
             factory = SessionLocal

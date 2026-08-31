@@ -113,10 +113,11 @@ def test_subscribers_are_weakref(store):
 
 async def test_set_many_skips_empty_sensitive_before_required_check(store, monkeypatch):
     """#138 P1-1: asr.doubao_stream.access_token 同时属于 SENSITIVE_KEYS 与
-    REQUIRED_STRING_KEYS，PUT 空值要走"不动原值"契约而非 400。
+    REQUIRED_STRING_KEYS，PUT 空值要走"不动原值"契约而非 400——前提是缓存里
+    已有非空值（保留旧 token 防 admin 表单"看似保存"实则没改）。
 
     修复前 set_many 顺序：validate_value → SENSITIVE_KEYS skip → 必填串会被拦。
-    修复后顺序：SENSITIVE_KEYS skip → validate_value → 空值跳过保持原值。
+    修复后顺序：缓存非空 → skip；缓存为空 → validate_value 拒绝。
     """
     store._cache = {"asr.doubao_stream.access_token": "old-real-token"}
     notified: list[set[str]] = []
@@ -144,6 +145,30 @@ async def test_set_many_skips_empty_sensitive_before_required_check(store, monke
     session.execute.assert_not_called()
     # 广播触发一次但 changed 为空（set_many 始终调一次 _notify，跳过键不进 changed）
     assert notified == [set()]
+
+
+async def test_set_many_rejects_empty_sensitive_when_cache_already_empty(store, monkeypatch):
+    """#138 P2: 缓存里 access_token 已为空（首部署 / 切换 provider 后），
+    再次 PUT 空值必须走 validate_value 拦下 config.invalid_required_string，
+    否则 admin 提交空表单拿虚假 200，错误要等到 doubao 首握才显形。
+    """
+    from app.core.i18n import Keys
+    from app.core.i18n.errors import I18nError
+
+    store._cache = {"asr.doubao_stream.access_token": ""}
+
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    session.commit = AsyncMock()
+    monkeypatch.setattr("app.core.config_store.SessionLocal", lambda: session)
+
+    with pytest.raises(I18nError) as ei:
+        await store.set_many({"asr.doubao_stream.access_token": ""})
+    assert ei.value.code == Keys.CONFIG_INVALID_REQUIRED_STRING.value
+    assert ei.value.params["name"] == "asr.doubao_stream.access_token"
+    # 缓存值未动
+    assert store._cache["asr.doubao_stream.access_token"] == ""
 
 
 async def test_set_many_rejects_whitespace_required_string(store, monkeypatch):

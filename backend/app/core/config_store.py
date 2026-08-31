@@ -451,9 +451,15 @@ class ConfigStore:
             for key, value in items.items():
                 if key not in ALL_B_KEYS:
                     raise ValueError(f"unknown config key: {key}")
-                # 敏感字段空值跳过：必须早于 validate_value，因为 access_token
-                # 同时属于 REQUIRED_STRING_KEYS，不跳过会被新校验抛 400。
-                if key in SENSITIVE_KEYS and value == "":
+                # 敏感字段空值跳过：仅当缓存里已有非空值时跳过（保留旧 token，
+                # 防 admin 表单"看似保存"实则没改）。access_token 同时属于
+                # REQUIRED_STRING_KEYS，若缓存值已为空必须走 validate_value 拦
+                # 下空提交，否则首握失败时 admin 看不出是"忘了填"还是"服务挂"。
+                if (
+                    key in SENSITIVE_KEYS
+                    and value == ""
+                    and (self._cache.get(key) or "").strip() != ""
+                ):
                     continue
                 validate_value(key, value)
                 now = datetime.now(timezone.utc)
@@ -478,7 +484,11 @@ class ConfigStore:
         # 更新内存 + 广播
         changed: set[str] = set()
         for key, value in items.items():
-            if key in SENSITIVE_KEYS and value == "":
+            if (
+                key in SENSITIVE_KEYS
+                and value == ""
+                and (self._cache.get(key) or "").strip() != ""
+            ):
                 continue
             self._cache[key] = value
             changed.add(key)

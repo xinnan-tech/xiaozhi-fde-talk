@@ -901,7 +901,7 @@ const handleSubmit = async () => {
   if (!formRef.value) return;
 
   if ((form.goal?.length || 0) > 100) {
-    ElMessage.error(t("create.dialog.goal_too_long"));
+    message(t("create.dialog.goal_too_long"), { type: "error" });
     return;
   }
 

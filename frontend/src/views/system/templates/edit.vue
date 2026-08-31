@@ -216,7 +216,7 @@ const save = async () => {
       );
     } else if (structErrors.value.length) {
       const details = structErrors.value
-        .map(e => `${e.path}: ${e.message}`)
+        .map(e => `${e.path}: ${formatStructError(e, t)}`)
         .join("; ");
       ElMessage.warning(
         t("system.template.save_json_struct_invalid", { details })

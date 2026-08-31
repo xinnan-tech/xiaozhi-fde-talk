@@ -370,6 +370,14 @@ async def get_or_generate(
         get_config_store().get_sync("llm.output_language") or "zh_cn"
     ).strip().lower() or "zh_cn"
 
+    # 空 transcript 短路：未结束/未开聊的访谈调进来直接拒出报告，**不调 LLM、也不
+    # 落库**——避免生成 680 字虚构报告并被持久化（#166）。route 层已守状态闸门，
+    # 这里再守内容闸门兜底（直接调 get_or_generate 绕过路由的场景，如 e2e / 异步
+    # 任务，仍能被这层挡住）。
+    if not state.transcript:
+        await _fire_on_ready(on_ready, session_id, "empty")
+        return ("empty", "")
+
     rec = await report_repo.get_by_interview_auto(session_id)
     if not force and _cache_hit(rec, current_sig, language):
         await _fire_on_ready(on_ready, session_id, "ready")

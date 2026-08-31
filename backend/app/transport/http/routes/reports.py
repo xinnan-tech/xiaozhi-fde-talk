@@ -9,6 +9,7 @@ from app.core.config_store import get_config_store
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
+from app.domain.session import SessionStatus
 from app.services.reports.exporter import export as export_report
 from app.services.reports.generator import get_or_generate
 from app.services.sessions.manager import manager
@@ -16,6 +17,16 @@ from app.services.sessions.runtime import registry
 from app.transport.http.dependencies import get_current_user
 
 router = APIRouter(prefix="/interviews")
+
+
+# 报告生成前置闸门：访谈必须已经走到「结束/抽取/完成」之一才能进 LLM 流程。
+# 早期状态（created/setting_up/in_progress/suspended）调 /report 只会让 LLM 拿空
+# transcript 凭空编造一份「报告」并落库——既烧 token 又污染数据（#166）。
+_REPORT_READY_STATUSES = frozenset({
+    SessionStatus.ENDED,
+    SessionStatus.EXTRACTING,
+    SessionStatus.DONE,
+})
 
 
 async def _own_session_or_404(session_id: str, user: CurrentUser):
@@ -41,7 +52,11 @@ async def get_interview_report(
     帧经 runtime 的 WS 通道推给前端；前端据此可主动刷新报告页。无 runtime 则
     on_ready 直接 no-op——GET 同步返回里 status 已带结果。
     """
-    await _own_session_or_404(session_id, user)
+    state = await _own_session_or_404(session_id, user)
+    if state.session.status not in _REPORT_READY_STATUSES:
+        # 未结束就走「报告」接口 = 让 LLM 拿空 transcript 编造——前置拒绝，
+        # 行为与 /export 已有 409 守卫一致（HTTP_REPORT_NOT_READY）。
+        raise I18nError(Keys.HTTP_REPORT_NOT_READY, http_status=409)
     rt = registry.get(session_id)
 
     async def on_ready(status: str) -> None:
@@ -65,7 +80,9 @@ async def export_interview_report(
     - ValueError           → HTTP_REPORT_FORMAT_UNSUPPORTED (http_status=400)
     - 其他 I18nError       → 直接冒泡
     """
-    await _own_session_or_404(session_id, user)
+    state = await _own_session_or_404(session_id, user)
+    if state.session.status not in _REPORT_READY_STATUSES:
+        raise I18nError(Keys.HTTP_REPORT_NOT_READY, http_status=409)
     status_str, md = await get_or_generate(session_id)
     if status_str != "ready" or not md:
         raise I18nError(Keys.HTTP_REPORT_NOT_READY, http_status=409)

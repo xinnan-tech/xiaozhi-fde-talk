@@ -65,7 +65,7 @@ async def reset_password(
 
     但禁止 admin 通过本端点改自己的密码：这条路径不校验旧密码，会让管理员
     会话绕过 `/auth/change-password` 的「需旧密码」防御；改自己密码统一走
-    `/auth/change-password`，与前端「自己一行按钮 disabled」语义一致。
+    `/auth/change-password`。
     """
     if user_id == admin.user_id:
         raise I18nError(Keys.AUTH_ADMIN_RESET_SELF_FORBIDDEN, http_status=403)

@@ -152,10 +152,19 @@ def admin_self_client(_lifespan_app):
 
     测试只关心「admin 改自己」分支，不触碰真实 user 表——通过 dependency_overrides
     注入 CurrentUser.user_id，无需 DB 准备 admin 行。
+
+    必须 yield + finally pop override：`_lifespan_app` 是 scope="module"，
+    不清理会让本文件后续任何同 app 的鉴权测试被 fake user 接管，
+    401 用例（test_reset_password_endpoint_requires_auth 等）变 200。
     """
     holder: dict[str, CurrentUser] = {}
+    # 写时给默认值：避免 _fake_user 抢占调用时 KeyError；契约仍由下方 assert 强校验
+    holder.setdefault("user", None)
 
     async def _fake_user() -> CurrentUser:
+        assert "user" in holder and holder["user"] is not None, (
+            "test forgot to call as_user() before invoking the route"
+        )
         return holder["user"]
 
     _lifespan_app.dependency_overrides[get_current_user] = _fake_user
@@ -174,7 +183,10 @@ def admin_self_client(_lifespan_app):
                 json={"new_password": new_password},
             )
 
-    return _Client(_lifespan_app)
+    try:
+        yield _Client(_lifespan_app)
+    finally:
+        _lifespan_app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_reset_password_rejects_self(admin_self_client):
@@ -201,4 +213,4 @@ def test_reset_password_allows_other_admin(admin_self_client):
     r = admin_self_client.as_user(me).post_reset(other)
     # 端点真实行为：目标用户不在测试 DB 中 → 404 user_not_found（不是 self-block 403）
     assert r.status_code == 404
-    assert r.json().get("code") != "auth.admin_reset_self_forbidden"
+    assert r.json().get("code") == "auth.user_not_found"

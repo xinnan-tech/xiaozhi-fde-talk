@@ -14,6 +14,7 @@ import math
 import weakref
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 
@@ -102,6 +103,13 @@ ENUM_KEYS: dict[str, set[str]] = {
     "ocr.type": {"openai", "baidu"},
 }
 
+# URL key：scheme 必须在白名单 + 主机段必填 + 拒整段前后空白（写入前校验）；空串放行，让 admin PUT "" 清空 ws_url。
+URL_KEYS: dict[str, set[str]] = {
+    "asr.funasr_server.ws_url": {"ws", "wss"},
+    "llm.base_url": {"http", "https"},
+    "ocr.base_url": {"http", "https"},
+}
+
 # bool key 集合：写入前校验，只接受 "true" / "false"。
 # 坏值若放行，运行时 bool(value) 在 truthy/falsy 边界行为诡异（如 "yes"→True），
 # 注册开关注定踩坑。
@@ -137,6 +145,47 @@ def validate_value(key: str, value: str) -> None:
                 field=key,
                 value=value,
                 allowed=" / ".join(sorted(allowed)),
+            )
+        return
+    if key in URL_KEYS:
+        allowed_schemes = URL_KEYS[key]
+        # 空串放行：admin PUT "" 清空 ws_url → runtime 走 funasr_server.py:144
+        # 未配置即 fail-fast 路径；llm.base_url / ocr.base_url 同理。
+        if value == "":
+            return
+        # 前后空白整段拒：runtime 传给 websockets.connect 的是
+        # funasr_server.py:150 self._ws_url.rstrip("/")，不去前后空白，会带空
+        # 格抛 InvalidURI；admin 在写入时拿不到结构化错因，故在写入层拒。
+        if value != value.strip():
+            raise I18nError(
+                Keys.CONFIG_INVALID_ENUM_VALUE,
+                http_status=400,
+                field=key,
+                value=value,
+                allowed=" / ".join(f"{s}://host:port" for s in sorted(allowed_schemes)),
+            )
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            # 未闭合的 '[' / 'ws://[invalid' 等 urlparse 抛 ValueError("Invalid IPv6 URL")，
+            # 不包会沿裸传到 routes/admin_config.py 通用 except 转 422 + field=group——覆盖
+            # 不到本分支新增的 400 + field=key 结构化反馈，且丢失 allowed 字段。
+            raise I18nError(
+                Keys.CONFIG_INVALID_ENUM_VALUE,
+                http_status=400,
+                field=key,
+                value=value,
+                allowed=" / ".join(f"{s}://host:port" for s in sorted(allowed_schemes)),
+            )
+        # parsed.hostname 优先于 parsed.netloc：urlparse("ws://:10095") 返 netloc=":10095" 非空
+        # 但 hostname=None，仅端口无主机段——放行后 websockets.connect 抛 InvalidURI。
+        if parsed.scheme.lower() not in allowed_schemes or not parsed.hostname:
+            raise I18nError(
+                Keys.CONFIG_INVALID_ENUM_VALUE,
+                http_status=400,
+                field=key,
+                value=value,
+                allowed=" / ".join(f"{s}://host:port" for s in sorted(allowed_schemes)),
             )
         return
     typ = NUMERIC_KEYS.get(key)
@@ -213,16 +262,14 @@ DEFAULTS: dict[str, str] = {
 
 
 def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
-    """加载层兜底：DB 已有行里若有脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放
-    等历史脏值），按 ENUM / BOOL / NUMERIC 重新校验，命中失败回退到 DEFAULTS[k]
-    并 logger.warning——避免首次 create_llm() 在 factory.py:54 抛 ValueError 把
-    全站 LLM 调打成 500（get_llm() 是 interviews.py / coaching/engine.py 等热路径
-    的必经节点）。老数据无需迁移脚本就能收敛。
+    """加载层兜底：DB 已有行里若有脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放等历史脏值），
+    按 ENUM/BOOL/NUMERIC/URL 重新校验，命中失败回退到 DEFAULTS[k] 并 logger.warning——
+    避免脏 URL 在 warm 路径绕过写入校验静默进缓存，runtime websockets.connect 才抛 InvalidURI。
 
-    非受控 key（不在 ENUM/BOOL/NUMERIC 表内的）原样保留——它们只走 validate_value
+    非受控 key（不在 ENUM/BOOL/NUMERIC/URL 表内的）原样保留——它们只走 validate_value
     "放行"分支，重新校验无意义。
     """
-    validated_keys = set(ENUM_KEYS) | set(BOOL_KEYS) | set(NUMERIC_KEYS)
+    validated_keys = set(ENUM_KEYS) | set(BOOL_KEYS) | set(NUMERIC_KEYS) | set(URL_KEYS)
     sanitized: dict[str, str] = {}
     for k, v in loaded.items():
         if k in validated_keys:
@@ -277,6 +324,9 @@ class ConfigStore:
             missing = [k for k in ALL_B_KEYS if k not in have]
             for k in missing:
                 v = DEFAULTS[k]
+                # 种入前校验：避免 DEFAULTS 写错（含非法 scheme / 空 netloc /
+                # 全空白）静默落库——首次启动通道与 admin PUT 通道同等对待。
+                validate_value(k, v)
                 session.add(SystemConfig(key=k, value=v))
             if missing:
                 await session.commit()

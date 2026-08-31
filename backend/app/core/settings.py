@@ -5,22 +5,46 @@
 
 JWT 密钥说明：不在此处配置。运行时由 app.core.secret.JWTSecretResolver 从
 system_config 表读取；缺失则自动生成并写回。
+
+运行时数据文件（.env、SQLite DB 等）落在 backend/data/ 下，路径相对本文件解析，
+不依赖进程 CWD——便于 Docker 用宿主卷直接挂载该目录。
 """
 from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# backend/app/core/settings.py → backend/ 是 parents[2]
+BACKEND_ROOT: Path = Path(__file__).resolve().parents[2]
+# 守门：本模块假设布局 backend/{app,migrations,...}/，若被打包成 wheel 装进
+# site-packages/，parents[2] 会落到 site-packages/，data/.env 与 SQLite 都会被
+# 写到错误位置。fail-fast 报清楚，让排查不用翻 alembic / 启动 traceback。
+if not (BACKEND_ROOT / "migrations").is_dir():
+    raise RuntimeError(
+        f"app.core.settings 解析 BACKEND_ROOT={BACKEND_ROOT}，但其中无 "
+        f"migrations/ 目录——文件被错误安装到非项目根路径？"
+    )
+DATA_DIR: Path = BACKEND_ROOT / "data"
+# SQLite 不会自动创建父目录；data/ 一旦被误删（git clean / rm -rf）首次 DB 连接
+# 会抛 unable to open database file，错误出在 engine 层，排查困难。显式 mkdir 兜底。
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+# SQLite 默认 DB 文件绝对路径。SQLite URL 用 4 个斜杠前缀表示绝对路径。
+_DEFAULT_DB_PATH: Path = DATA_DIR / "xiaozhi_fde_talk.db"
+_DEFAULT_DB_URL: str = f"sqlite+aiosqlite:///{_DEFAULT_DB_PATH}"
+
+
 class Settings(BaseSettings):
     """启动期静态配置（环境变量驱动）。"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # 路径相对 backend/ 解析，不依赖进程 CWD；docker 部署时挂 data/ 卷即可。
+        env_file=str(DATA_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -34,7 +58,7 @@ class Settings(BaseSettings):
     log_file: str = ""  # 空=只控制台；设路径则额外写结构化 JSON 文件
 
     # --- 数据库（MVP 用 SQLite，prod 切 MySQL/PG）---
-    db_url: str = "sqlite+aiosqlite:///./xiaozhi_fde_talk.db"
+    db_url: str = _DEFAULT_DB_URL
     db_echo: bool = False
 
     # --- 鉴权（JWT）---

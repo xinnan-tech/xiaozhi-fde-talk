@@ -30,15 +30,19 @@ from app.core.i18n.lang_meta import (
 from app.domain.session import TranscriptSegment
 from app.persistence.repositories.interview import interview_repo
 from app.persistence.repositories.report import report_repo
-from app.services.reports.skill_renderer import render_skills
+from app.services.reports.skill_renderer import _find_markers, render_skills
 from app.services.sessions.state import SessionState
-from app.services.template.loader import get_template
+from app.services.template.loader import resolve_template
 
 logger = logging.getLogger(__name__)
 
 # 骨架里的 {{session.X}}：由后端从 state 预填，再交给 LLM。
 # LLM 不该看到这些占位符（曾因 transcript 里没有 start_time / end_time 而原样留着）。
-_SESSION_PLACEHOLDER_RE = re.compile(r"\{\{session\.([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
+# 单花括号支为骨架未来的 "{session.X}" 形态提前备好——当前 `template.report.doc`
+# 都是双花括号写法，单花括号形态在 L1 预填路径上没有真实触发点（仅给 defensive
+# 测试和 LLM 提前变形兜底）。`_ORPHAN_PLACEHOLDER_RE` 仍在 LLM 输出路径上处理
+# qwen-plus 等模型吞/多一个花括号的畸形产物（issue #122）。
+_SESSION_PLACEHOLDER_RE = re.compile(r"\{\{?session\.([a-zA-Z_][a-zA-Z0-9_]*)\}\}?")
 
 
 def _transcript_signature(transcript: list[TranscriptSegment]) -> str:
@@ -84,7 +88,7 @@ def _prefill_session_placeholders(doc: str, state: SessionState) -> str:
 #    改用**单一英文 base** 跨所有语种——EN base 让 LLM 不再被中文镜像效应拉回去。
 # 2. 两步式：先翻译骨架（heading / bullet label → {lang_native}），再填内容。
 #    示例演示两步流程而非具体语言翻译结果——避免示例语言与目标语种冲突。
-# 3. 占位符规则（`{{ ... }}` 删除、`{{session.X}}` 与 `{{skill: ...}}` 豁免）正面重申
+# 3. 占位符规则（`{{ ... }}` 一律删除、`{{skill: ...}}` 豁免）正面重申
 #    ——这些是**语言中立**的结构规则，不能因 base 语言是英文而弱化。
 # 4. zh_cn/zh_tw 也走同一段 base——MVP 验证 EN base + 中文输出指令产出 CN=790（比中文
 #    base + 中文指令 CN=667 字数还多 18%），证明母语写作质量不降反升。
@@ -97,11 +101,11 @@ _REPORT_SYSTEM = """You are an interview report-writing assistant.
 **Step 2 — Content fill.** Fill the ({lang_native}-translated) skeleton with content drawn from the conversation transcript, in {lang_native}.
 
 ## Key rules (apply during Step 2)
-- Each `{{ ... }}` in the skeleton (excluding `{{session.X}}` and `{{skill: ...}}`) is a **placeholder**:
+- Each `{{ ... }}` in the skeleton (excluding `{{skill: ...}}` invocation points) is a **placeholder**:
   - Replace the entire `{{ ... }}` block with {lang_native} content drawn from the transcript.
   - Delete the `{{` and `}}` wrappers AND any Chinese prompt text inside. The output MUST NOT contain `{{` or `}}`.
   - When the transcript genuinely has no content, write {fallback_phrase}. Do NOT leave an empty bullet or only the placeholder label.
-- `{{session.X}}` is pre-filled by the system — **keep these values verbatim** (do not translate the pre-filled values; they are session metadata already committed by the system).
+- `{{session.X}}` markers are pre-filled by the system with the resolved metadata string. Drop the `{{ }}` wrappers (same as every other placeholder) but keep the resolved value (e.g., datetime, name) in your output — do not translate the resolved metadata string, it is canonical.
 - `{{skill: ...}}` is a skill invocation marker — **keep verbatim** (do not touch the inner `{{ }}`).
 
 ## Grounding rule (mandatory — overrides fluency concerns)
@@ -123,8 +127,8 @@ Process: translate heading `## 背景与目的` to your output language (e.g. `#
 
 ## Output language ({lang_native}, mandatory)
 - Write the ENTIRE output in {lang_native} ({lang_english}, {lang_bcp47}) — including all section headings, bullet labels, and every fill-in for `{{ ... }}` placeholders.
-- The transcript and the session metadata values pre-filled into `{{session.X}}` may be in Chinese. Translate them into {lang_native} when you RESTATE them in the report's prose. (Keep the literal pre-filled `{{session.X}}` markers as the system has resolved them; only translate the metadata when you paraphrase it elsewhere.)
-- Two categories of placeholders are EXEMPT from wrapper deletion — keep them VERBATIM, including their `{{`/`}}` markers: (1) `{{session.X}}` placeholders already pre-filled by the system, and (2) `{{skill: <id>, inputs: <json>}}` invocation points.
+- The transcript and the session metadata values pre-filled into `{{session.X}}` may be in Chinese. Translate them into {lang_native} when you RESTATE them in the report's prose. The system has already resolved these metadata strings — emit the resolved value verbatim, but DROP the `{{ }}` wrappers (same as every other placeholder).
+- Only `{{skill: <id>, inputs: <json>}}` invocation points are EXEMPT from wrapper deletion — keep their entire `{{ ... }}` block VERBATIM, including the inner `{{ }}` markers.
 
 ## Other
 - Preserve the heading hierarchy and section order from the translated skeleton. Do not add or remove sections.
@@ -147,7 +151,7 @@ def _report_system(output_language: str) -> str:
         fallback_phrase=phrases.get(lang, phrases["en"]),
     )
 
-# P3-9: 报告渲染为 HTML 前的白名单。strip=True 移除非白名单标签（含属性）。
+# 报告渲染为 HTML 前的白名单。strip=True 移除非白名单标签（含属性）。
 _ALLOWED_TAGS = [
     "h1", "h2", "h3", "h4", "h5", "h6",
     "p", "br", "hr",
@@ -159,16 +163,36 @@ _ALLOWED_ATTRS = {"a": ["href", "title"], "code": ["class"]}
 
 
 # 兜底：LLM 偶尔会在 `{{ ... }}` 里填内容但忘了删 `{{`/`}}` 包装，整块清除。
-# 保留两类 EXEMPT：`{{skill: ...}}`（技能调用点，系统后处理要识别）+ `{{session.X}}`
-# （会话元数据占位符，与 base skeleton 的 _prefill_session_placeholders 同形态——
-# 如果误以为是 orphan 删掉，会丢项目名/受访者/时间等关键元数据，且前端无法再补回）。
-# 匹配 `{{` 后面既非 `skill:` 也非 `session.` 开头的占位符。
-_ORPHAN_PLACEHOLDER_RE = re.compile(r"\{\{(?!(?:skill:|session\.))[^}]*\}\}", re.DOTALL)
+# 仅保留 `{{skill: ...}}`（技能调用点，_find_markers 要识别）：
+# - `{{ 内容 }}`、`{{session.X}}` 都被吃——LLM 删 `{{`/`}}` 失败时字面量会
+#   以原样落到报告里。
+# - 同时吞单花括号 `{session.X}` 形态：qwen-plus 等模型偶尔把
+#   `{{session.start_time}}` 吞掉一个 `{` 后以 `{session.start}` 形态写出
+#   （issue #122）。`\{\{?session\.…\}\}?` 与 _SESSION_PLACEHOLDER_RE 对称。
+# - 单花括号支仍只匹 `session.X` 形态，避免吃掉 markdown 普通 `{...}` 文本
+#   （如示例代码）。
+# 已知取舍：若 markdown 报告正文恰好写出形如 `{session.X}` 的示例字段名，
+# 也会被一并 strip——按宁可空、不可见字面量策略取舍。
+_ORPHAN_PLACEHOLDER_RE = re.compile(
+    r"\{\{(?!skill:)[^}]*?}}|\{\{?session\.[a-zA-Z_]\w*\}\}?",
+)
 
 
 def _strip_orphan_placeholders(md: str) -> str:
-    """LLM 没填的占位符整块清除。"""
-    matches = list(_ORPHAN_PLACEHOLDER_RE.finditer(md))
+    """LLM 没填的占位符整块清除。
+
+    上下文感知：跳过 `{{skill: ...}}` 标记内部 JSON inputs 中的
+    `{session.X}` 字面量——这些字面量是 skill 执行的真值（如
+    `{"label": "{session.X}"}`），吞掉会让 skill 静默退化成空 inputs。
+    """
+    # 1. 找 skill 标记的 span（其内部 JSON 字面量不能 strip）
+    skill_spans = [(s, e) for s, e, _, _ in _find_markers(md)]
+    # 2. 找 orphan，但排除落在 skill span 内的
+    matches = []
+    for m in _ORPHAN_PLACEHOLDER_RE.finditer(md):
+        if any(s <= m.start() < e for s, e in skill_spans):
+            continue
+        matches.append(m)
     if not matches:
         return md
     logger.warning("LLM 残留 %d 个未填占位符，已自动清除", len(matches))
@@ -299,30 +323,37 @@ _gen_locks: dict[str, asyncio.Lock] = {}
 
 
 def _cache_hit(rec, sig: str, language: str) -> bool:
-    """报告缓存有效：ready + 有内容 + 指纹匹配 + 语种匹配。
+    """报告缓存有效：ready + 有内容 + 指纹匹配 + 语种已标。
 
-    旧行 transcript_signature 为空 → 视为失效；output_language 为空（迁移前老行）
-    同样视为未标 → 失效。管理员改 llm.output_language 后，存量的旧语种报告不会再
-    一直命中——避免「中文报告永远返回」的隐性 bug。
+    旧行 transcript_signature 或 output_language 为空 → 视为失效（一次性补齐）。
+    不再比较语种相等：管理员切 llm.output_language 后，存量报告继续复用旧版本，
+    由用户在前端手动点「重新生成报告」才按新语种重跑——避免无意义 token 浪费
+    （issue #82）。`language` 参数保留只为签名稳定，本函数体不再消费。
+
+    status 必须为 "ready"：失败的报告会留一行 transcript_signature /
+    output_language 都有、但 content_md 为空的「假 ready」记录；之前这行被当
+    成命中直接返 ("ready", "")，把失败伪装成「内容空的成功」（#144）。
     """
-    return bool(
-        rec
-        and rec.status == "ready"
-        and rec.content_md
-        and rec.transcript_signature
-        and rec.transcript_signature == sig
-        and (rec.output_language or "") == language
-    )
+    if not rec or not rec.transcript_signature or not rec.output_language:
+        return False
+    if rec.status != "ready":
+        return False
+    return rec.transcript_signature == sig
 
 
 async def get_or_generate(
     session_id: str,
     on_ready: Optional[Callable[[str], Awaitable[None]]] = None,
+    force: bool = False,
 ) -> tuple[str, str]:
     """返回 (status, content_md)。
 
-    缓存命中：report ready 且 transcript 指纹未变 → 直接返回旧内容。
-    缓存失效：未生成 / 上次失败 / transcript 变了 → 调 LLM 重生 + 落库。
+    缓存命中：report ready + transcript 指纹未变 + output_language 已标 → 返回旧内容。
+    缓存失效：未生成 / 上次失败 / transcript 变了 / 老行空 output_language → 重生 + 落库。
+
+    force=True：跳过缓存命中检查（**两处**都跳，包括锁前 short-circuit），按当前
+    llm.output_language 强制重生成。用于前端「重新生成报告」按钮——管理员切语种后
+    默认沿用旧报告，需要用户显式确认才花 token 重跑（issue #82）。
 
     on_ready：每次报告状态落定（成功 ready / 失败 failed）后调用一次；缓存命中
     也算「状态落定」。回调异常被吞掉、不传播——推送失败不应影响 GET 返回。
@@ -340,7 +371,7 @@ async def get_or_generate(
     ).strip().lower() or "zh_cn"
 
     rec = await report_repo.get_by_interview_auto(session_id)
-    if _cache_hit(rec, current_sig, language):
+    if not force and _cache_hit(rec, current_sig, language):
         await _fire_on_ready(on_ready, session_id, "ready")
         return ("ready", rec.content_md)
 
@@ -348,12 +379,12 @@ async def get_or_generate(
     lock = _gen_locks.setdefault(session_id, asyncio.Lock())
     async with lock:
         rec = await report_repo.get_by_interview_auto(session_id)
-        if _cache_hit(rec, current_sig, language):
+        if not force and _cache_hit(rec, current_sig, language):
             await _fire_on_ready(on_ready, session_id, "ready")
             return ("ready", rec.content_md)
 
         # 3. 加载模板
-        template = get_template(state.session.template_id)
+        template = resolve_template(state.session.template_id, state.session.template_snapshot)
         if template is None:
             raise ValueError(f"template not found: {state.session.template_id}")
 

@@ -10,6 +10,8 @@ import Delete from "~icons/ep/delete";
 import Download from "~icons/ep/download";
 import Aim from "~icons/ep/aim";
 import Calendar from "~icons/ep/calendar";
+import Clock from "~icons/ep/clock";
+import Timer from "~icons/ep/timer";
 import SwitchButton from "~icons/ep/switch-button";
 import User from "~icons/ep/user";
 import VideoPlay from "~icons/ep/video-play";
@@ -27,6 +29,8 @@ import {
   ignoreInterviewItemApi,
   type InterviewDetailItem,
   type InterviewDetailType,
+  resumeInterviewApi,
+  suspendInterviewApi,
   unignoreInterviewItemApi
 } from "@/api/interview";
 import { useAudioRecorder } from "@/composables/useAudioRecorder";
@@ -55,6 +59,31 @@ const startedAtDisplay = computed(() => {
   const startedAt = interviewDetail.value?.started_at;
   return startedAt ? dayjs(startedAt).format("YYYY-MM-DD HH:mm:ss") : "--";
 });
+/** 会话信息条的业务字段：按模板定义（随访谈快照）渲染 label；详情缺字段定义时退回固定键 */
+const sessionMetaFields = computed(() => {
+  const fields = interviewDetail.value?.template_fields;
+  if (fields?.length) {
+    return fields.map(f => ({
+      key: f.key,
+      label: f.label?.trim() || f.key,
+      type: f.type || "text"
+    }));
+  }
+  return [
+    {
+      key: "interviewee",
+      label: t("interview.meta.interviewee"),
+      type: "text"
+    },
+    {
+      key: "start_time",
+      label: t("interview.meta.start_time"),
+      type: "datetime"
+    }
+  ];
+});
+const metaIconOf = (type: string) =>
+  type === "datetime" ? Clock : type === "duration" ? Timer : User;
 const interviewStatusClass = computed(() => {
   const status = interviewDetail.value?.status;
   switch (status) {
@@ -334,7 +363,36 @@ const startInterviewTimer = (reset = true) => {
   }, 1000);
 };
 
+const showMicrophonePermissionGuide = () => {
+  const microphoneError = microphoneErrorState.value;
+  // 只有非安全源需要 flags 指引，普通权限拒绝仍使用通用提示
+  const isInsecureOrigin =
+    microphoneError?.message === "mic_unavailable_insecure_origin";
+
+  if (!isInsecureOrigin) {
+    ElMessage.error(t("interview.runtime.mic_permission"));
+    return;
+  }
+
+  void ElMessageBox.alert(
+    t("interview.runtime.mic_permission_guide", {
+      origin: window.location.origin
+    }),
+    t("interview.runtime.mic_permission_title"),
+    {
+      type: "warning",
+      confirmButtonText: t("interview.runtime.mic_permission_confirm"),
+      customStyle: { maxWidth: "588px" },
+      closeOnClickModal: true
+    }
+  ).catch(() => undefined);
+};
+
 const handleStartInterview = async () => {
+  // 会话已结束时不可重启：等待确认期间后端可能再推 session.ended，
+  // 此处若不拦就把 ended 改回 in_progress，状态机被弹框异步路径撕坏。
+  // 每个 await 之后再各查一次，覆盖 acquireStream / openMicrophone 窗口。
+  if (interviewDetail.value?.status === "ended") return;
   if (isInterviewStarted.value) return;
   isInterviewStarted.value = true;
   const wasSuspended = interviewDetail.value?.status === "suspended";
@@ -343,11 +401,27 @@ const handleStartInterview = async () => {
   // 在点击事件中立即请求权限，避免等待 WebSocket 握手后丢失浏览器用户手势。
   shouldResumeMicrophone.value = true;
   const microphoneStarted = await acquireStream();
+  // 显式标注 string | undefined，避免 TS 沿入口守卫控制流把 ended /
+  // suspended 收窄掉——handleServerMessage 在 await 期间可异步改写 status。
+  const statusAfterAcquire: string | undefined = interviewDetail.value?.status;
+  // ended 是终态；suspended 仅当「入口非 suspended、await 期间被改写」才算异常：
+  // 入口本就是 suspended 的合法 continue 路径要走完重连，否则自废。
+  if (
+    statusAfterAcquire === "ended" ||
+    (statusAfterAcquire === "suspended" && !wasSuspended)
+  ) {
+    // await 期间后端推了 session.ended / 再次 suspended：handleServerMessage
+    // 已清理状态/麦/表（suspended 会另起一个确认框），这里不写回 in_progress。
+    shouldResumeMicrophone.value = false;
+    isInterviewStarted.value = false;
+    stopInterviewTimer();
+    return;
+  }
   if (!microphoneStarted) {
     shouldResumeMicrophone.value = false;
     isInterviewStarted.value = false;
     stopInterviewTimer();
-    ElMessage.error(t("interview.runtime.mic_permission"));
+    showMicrophonePermissionGuide();
     return;
   }
 
@@ -355,17 +429,44 @@ const handleStartInterview = async () => {
     interviewDetail.value.status = "in_progress";
   }
 
+  // 暂停后 WS 层 isReconnectAllowed=false，需手动复位才能再次重连。
+  allowReconnect();
   openWebSocket();
+
+  // suspended 状态恢复：立即调 resume API 更新 DB（不依赖 WS 连接状态）。
+  if (wasSuspended) {
+    try {
+      await resumeInterviewApi(getInterviewSessionId());
+    } catch (e: unknown) {
+      ElMessage.error(extractBackendError(e, t("interview.resume_failed")));
+    }
+  }
 
   // WebSocket 已经连接时直接开始监听；尚未连接时由 onConnected 处理。
   if (isWebSocketConnected.value) {
     const listeningStarted = await openMicrophone();
+    const statusAfterMic: string | undefined = interviewDetail.value?.status;
+    if (
+      statusAfterMic === "ended" ||
+      (statusAfterMic === "suspended" && !wasSuspended)
+    ) {
+      // 麦克风热启等待期间后端推了 ended / 再次 suspended，同上不写回。
+      shouldResumeMicrophone.value = false;
+      isInterviewStarted.value = false;
+      stopInterviewTimer();
+      return;
+    }
     if (listeningStarted) shouldResumeMicrophone.value = false;
   }
 };
 
-const handlePauseInterview = () => {
+const handlePauseInterview = async () => {
   if (!isInterviewStarted.value) return;
+  try {
+    await suspendInterviewApi(getInterviewSessionId());
+  } catch (e: unknown) {
+    ElMessage.error(extractBackendError(e, t("interview.pause_failed")));
+  }
   sendListenState("stop");
   stopRecording();
   isInterviewStarted.value = false;
@@ -583,6 +684,7 @@ const handleTakeoverConflict = async (message: string) => {
 };
 
 let isAsrUnavailableDialogOpen = false;
+let isSuspendConfirmDialogOpen = false;
 
 const handleAsrUnavailable = async (message: string) => {
   if (isAsrUnavailableDialogOpen) return;
@@ -603,6 +705,68 @@ const handleAsrUnavailable = async (message: string) => {
     // 用户选择继续留在当前访谈页面。
   } finally {
     isAsrUnavailableDialogOpen = false;
+  }
+};
+
+// 后端检测到长静默会推 session.suspended：仅更新状态不够明显，弹一个
+// 确认框让用户感知到「音频已暂停」、确认后由前端重启麦克风 + WebSocket
+// 重连回 in_progress。取消则停留在 suspended 状态，控制按钮仍可继续。
+const handleSessionSuspended = async () => {
+  if (isSuspendConfirmDialogOpen) return;
+  isSuspendConfirmDialogOpen = true;
+  try {
+    await ElMessageBox.confirm(
+      t("interview.runtime.suspend_dialog.message"),
+      t("interview.runtime.suspend_dialog.title"),
+      {
+        confirmButtonText: t("interview.runtime.suspend_dialog.confirm"),
+        cancelButtonText: t("interview.runtime.suspend_dialog.cancel"),
+        type: "warning"
+      }
+    );
+    // 弹框等待期间后端可能再推 session.ended：用户点「继续」之前再查一次，
+    // 命中即 toast 告知「会话已结束」，避免 handleStartInterview 入口守卫
+    // 静默吞掉、用户毫无反馈。
+    if (interviewDetail.value?.status === "ended") {
+      ElMessage.warning(
+        t("interview.runtime.suspend_dialog.ended_while_waiting")
+      );
+      return;
+    }
+    await handleStartInterview();
+    // post-await 守卫对 ended 静默 return：handleStartInterview 只回滚
+    // 状态不自 toast。这里再查一次 status，给用户感知到「会话已结束」
+    // 而非被静默吞掉；正常恢复路径下 status 已被 handleStartInterview
+    // 写过 in_progress，不会命中。用 string | undefined 承接避开上面
+    // 入口守卫把 ended 收窄掉导致的 TS2367。
+    const statusAfterResume: string | undefined = interviewDetail.value?.status;
+    if (statusAfterResume === "ended") {
+      ElMessage.warning(
+        t("interview.runtime.suspend_dialog.ended_while_waiting")
+      );
+    }
+  } catch (error) {
+    // Element Plus 用户取消 confirm 时 reject 的值是字符串 'cancel' /
+    // 'close'（distinguishCancelAndClose 默认 false，只会有 'cancel'）。
+    // 其他异常来自 handleStartInterview 内部抛出（除麦权限失败等已被
+    // 内部 toast 的路径外），属于意外，需给一条兜底提示并打日志，
+    // 否则用户点「继续」后毫无反馈、状态卡死。
+    if (error === "cancel" || error === "close") {
+      // 弹框被外部关闭（用户取消或 handleServerMessage 主动 close）时，
+      // 若关闭原因是后端推了 ended，则需要给一条 ended_while_waiting
+      // 兜底提示——handleServerMessage 只 close 弹框不直接 toast，避免
+      // 与 post-await 守护路径双弹。
+      if (interviewDetail.value?.status === "ended") {
+        ElMessage.warning(
+          t("interview.runtime.suspend_dialog.ended_while_waiting")
+        );
+      }
+      return;
+    }
+    console.error("[handleSessionSuspended] resume failed:", error);
+    ElMessage.error(t("interview.runtime.suspend_dialog.resume_failed"));
+  } finally {
+    isSuspendConfirmDialogOpen = false;
   }
 };
 
@@ -664,14 +828,35 @@ const handleServerMessage = (message: InterviewServerMessage) => {
   ) {
     clearIdleWarning();
     isCoachingRecomputing.value = false;
-    if (interviewDetail.value) {
+    // session.suspended 在弹框流程仍在处理时（用户点继续但
+    // handleStartInterview 尚未跑完）跳过 status 覆写与本端 cleanup——
+    // 否则 in-flight 的 handleStartInterview 写回 in_progress 时若被
+    // 中途再推的 suspended 把 status 翻回去，post-await 守卫因
+    // wasSuspended=true 漏命中、函数正常返回，遗留
+    // status=suspended / isInterviewStarted=true 的半开状态，用户再
+    // 点「继续」会被入口守卫静默吞。session.ended 是终态不受此保护，
+    // 永远改写 status 并清理。
+    const skipLocalCleanup =
+      message.type === "session.suspended" && isSuspendConfirmDialogOpen;
+    if (!skipLocalCleanup && interviewDetail.value) {
       interviewDetail.value.status =
         message.type === "session.ended" ? "ended" : "suspended";
+      shouldResumeMicrophone.value = false;
+      stopRecording();
+      isInterviewStarted.value = false;
+      stopInterviewTimer();
     }
-    shouldResumeMicrophone.value = false;
-    stopRecording();
-    isInterviewStarted.value = false;
-    stopInterviewTimer();
+    // ended 落地时如果弹框仍开着（用户在等点「继续」或 handleStartInterview
+    // 在 await 窗口），主动关掉弹框——否则 dialog 文案「暂停」与 status=ended
+    // 撕裂、用户点取消 finally 关弹框全程无 ended 反馈。toast 由
+    // handleSessionSuspended 的 catch / post-await re-check 统一发，避免
+    // 与 post-await 守护路径双弹。
+    if (message.type === "session.ended" && isSuspendConfirmDialogOpen) {
+      ElMessageBox.close();
+    }
+    if (message.type === "session.suspended") {
+      void handleSessionSuspended();
+    }
   }
 };
 
@@ -685,6 +870,7 @@ const websocket = useWebSocket({
     if (!shouldResumeMicrophone.value) return;
     void openMicrophone().then(started => {
       if (started) shouldResumeMicrophone.value = false;
+      else suspendLocalInterview();
     });
   },
   onTakeoverCompleted: () => {
@@ -692,8 +878,8 @@ const websocket = useWebSocket({
   },
   onDisconnected: event => {
     console.warn("[InterviewPage] WebSocket 已断开", event.code, event.reason);
+    shouldResumeMicrophone.value = false;
     if (!isMicrophoneEnabled.value) return;
-    shouldResumeMicrophone.value = true;
     stopRecording();
   },
   onError: message => {
@@ -705,7 +891,8 @@ const {
   state: websocketState,
   open: openWebSocket,
   sendListenState,
-  sendAudioFrame
+  sendAudioFrame,
+  allowReconnect
 } = websocket;
 const isWebSocketConnected = computed(
   () => websocketState.value === "connected"
@@ -713,6 +900,7 @@ const isWebSocketConnected = computed(
 
 const {
   isRecording: isMicrophoneEnabled,
+  error: microphoneErrorState,
   acquireStream,
   startRecording,
   stopRecording
@@ -748,6 +936,34 @@ const openMicrophone = async () => {
   const started = await startRecording();
   if (!started) sendListenState("stop");
   return started;
+};
+
+function suspendLocalInterview() {
+  shouldResumeMicrophone.value = false;
+  stopRecording();
+  isInterviewStarted.value = false;
+  stopInterviewTimer();
+  if (interviewDetail.value?.status === "in_progress") {
+    interviewDetail.value.status = "suspended";
+  }
+}
+
+const resumeInterviewAfterReload = async (detail: InterviewDetailType) => {
+  if (detail.status !== "in_progress") return;
+
+  // 页面刷新会丢失组件内状态，但服务端会话仍处于进行中。恢复本地状态并
+  // 重新握手，握手完成后由 onConnected 发送 listen:start 和启动录音。
+  isInterviewStarted.value = true;
+  startInterviewTimer();
+  shouldResumeMicrophone.value = true;
+  openWebSocket();
+
+  // WebSocket 可能因已有连接而立即可用；否则由 onConnected 接管启动录音。
+  if (isWebSocketConnected.value) {
+    const started = await openMicrophone();
+    if (started) shouldResumeMicrophone.value = false;
+    else suspendLocalInterview();
+  }
 };
 
 const handleIgnoreSuggestion = (itemId: string) => {
@@ -821,7 +1037,10 @@ onBeforeUnmount(() => {
   websocket.close();
 });
 
-const handleBack = () => {
+const handleBack = async () => {
+  if (isInterviewStarted.value) {
+    void handlePauseInterview();
+  }
   if (window.history.length > 1) {
     router.back();
     return;
@@ -1013,6 +1232,7 @@ const getInterviewDetail = async () => {
   transcriptEntries.value = createTranscriptEntries(res.transcript);
   void scrollTranscriptToTop();
   kickFirstBatchIfNeeded(res);
+  await resumeInterviewAfterReload(res);
 };
 
 onMounted(() => {
@@ -1193,16 +1413,22 @@ onMounted(() => {
         <section class="right-panel">
           <div class="session-bar glass-card">
             <div class="session-meta">
-              <div class="session-meta-item session-meta-interviewee">
+              <!-- 业务字段按模板定义（快照）渲染：label/顺序跟模板走 -->
+              <div
+                v-for="f in sessionMetaFields"
+                :key="f.key"
+                class="session-meta-item session-meta-field"
+              >
                 <div class="session-meta-copy">
                   <span class="session-meta-label">
-                    <User class="session-meta-icon" />
-                    <span>{{ $t("interview.meta.interviewee") }}</span>
+                    <component
+                      :is="metaIconOf(f.type)"
+                      class="session-meta-icon"
+                    />
+                    <span>{{ f.label }}</span>
                   </span>
-                  <strong
-                    :title="interviewDetail?.base_info?.interviewee || '--'"
-                  >
-                    {{ interviewDetail?.base_info?.interviewee || "--" }}
+                  <strong :title="interviewDetail?.base_info?.[f.key] || '--'">
+                    {{ interviewDetail?.base_info?.[f.key] || "--" }}
                   </strong>
                 </div>
               </div>
@@ -1961,9 +2187,9 @@ onMounted(() => {
     border-right: 0;
   }
 
-  .session-meta-interviewee {
-    flex: 0 1 7em;
-    max-width: 7em;
+  .session-meta-field {
+    flex: 0 1 auto;
+    max-width: 12em;
   }
 
   .session-meta-time {
@@ -2575,6 +2801,11 @@ onMounted(() => {
   .note-scroll :deep(.el-scrollbar__bar.is-vertical) {
     right: 2px;
   }
+}
+
+:deep(.mic-permission-confirm-box) {
+  max-width: 800px !important;
+  width: 800px !important;
 }
 
 @media (max-width: 1400px) {

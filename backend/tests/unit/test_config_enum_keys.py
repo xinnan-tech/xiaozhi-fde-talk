@@ -18,6 +18,7 @@ def test_enum_keys_exact_set():
         "asr.funasr_server.language",
         "asr.doubao_stream.language",
         "llm.output_language",
+        "llm.type",
         "ocr.type",
     }
 
@@ -34,6 +35,9 @@ def test_enum_keys_values_are_correct_sets():
     # llm.output_language 从 derived_output_language_enum() 派生（10 条头部语种）——
     # 加语种只改 _LANG_META 一处，断言改成"完全等于派生值"以防漂移。
     assert ENUM_KEYS["llm.output_language"] == derived_output_language_enum()
+    # llm.type 跟 factory.py:_REGISTRY 同步——{openai, stub}；漏写会让脏值落库
+    # 后续 create_llm() 抛 ValueError 时全站 LLM 调 500。
+    assert ENUM_KEYS["llm.type"] == {"openai", "stub"}
     # ocr.type 跟 factory.py supported_providers 同步——{openai, baidu}
     assert ENUM_KEYS["ocr.type"] == {"openai", "baidu"}
 
@@ -79,6 +83,29 @@ def test_validate_value_rejects_llm_zh_bare():
     assert ei.value.params["field"] == "llm.output_language"
     assert ei.value.params["value"] == "zh"
     assert ei.value.http_status == 400
+
+
+def test_validate_value_accepts_llm_type_openai():
+    validate_value("llm.type", "openai")  # 不抛
+
+
+def test_validate_value_accepts_llm_type_stub():
+    validate_value("llm.type", "stub")  # 不抛
+
+
+def test_validate_value_rejects_llm_type_garbage():
+    """任意未识别 provider（含 anthropic / google / 完全乱写 / 空串）必须拒。
+
+    写入层校验是为了在落库之前挡住脏值——一旦落库，首次按 type 构造
+    provider 时 factory 抛 ValueError，admin PUT 链路没 catch，全站 500。
+    """
+    for bad in ("anthropic", "google", "totally_fake", ""):
+        with pytest.raises(I18nError) as ei:
+            validate_value("llm.type", bad)
+        assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+        assert ei.value.params["field"] == "llm.type"
+        assert ei.value.params["value"] == bad
+        assert ei.value.http_status == 400
 
 
 def test_validate_value_keys_independent():

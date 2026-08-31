@@ -1,4 +1,4 @@
-"""P2-4 · diagnose_asr 把 _build_test_audio（重采样 + WAV 编码）offload 到工作线程。
+"""· diagnose_asr 把 _build_test_audio（重采样 + WAV 编码）offload 到工作线程。
 
 M4：_build_test_audio 是同步 CPU/IO，原在 diagnose_asr 里同步调用，阻塞事件循环。
 判定：在 _build_test_audio 内捕获 threading.current_thread()，断言非 main thread。

@@ -23,7 +23,23 @@ export function getPluginsList(
     //   infixName: false,
     //   enableProd: true
     // }),
-    svgLoader(),
+    // ?component 内联 svg：禁用 cleanupIds 的 id 最小化——它按文件把 id
+    // 独立改成 a/b/c，多张内联进同一页面后 id 冲突，url(#id) 文档级取首个
+    // 匹配，导致渐变/滤镜互相串用（插画变形、变色）。保留源文件语义 id。
+    svgLoader({
+      svgoConfig: {
+        plugins: [
+          {
+            name: "preset-default",
+            params: {
+              overrides: {
+                cleanupIds: false
+              }
+            }
+          }
+        ]
+      }
+    }),
     Icons({
       compiler: "vue3",
       scale: 1

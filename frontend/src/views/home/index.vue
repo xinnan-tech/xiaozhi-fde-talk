@@ -9,9 +9,11 @@ import { useDialogStoreHook } from "@/store/modules/dialog";
 import { useInterviewStoreHook } from "@/store/modules/interview";
 import ReSegmented from "@/components/ReSegmented";
 import ChangePasswordDialog from "@/components/auth/ChangePasswordDialog.vue";
+import HomeOnboarding from "@/components/home/HomeOnboarding.vue";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import { ElMessage } from "element-plus";
 import { isSupportedLocale, setLocale, type SupportedLocale } from "@/i18n";
+import { SelectOption } from "@/components/base/types";
 import {
   type InterviewItem,
   type InterviewListType,
@@ -64,6 +66,10 @@ const tabOptions = computed(() => [
   { label: t("home.tab.in_progress"), value: "in_progress" },
   { label: t("home.tab.suspended"), value: "suspended" },
   { label: t("home.tab.ended"), value: "ended" }
+]);
+const userOperationOptions = computed(() => [
+  { label: t("auth.change_password"), value: "change_password", icon: keyIcon },
+  { label: t("home.logout"), value: "logout", icon: logoutIcon }
 ]);
 const interviewStatusLabels: Record<string, string> = {
   created: "home.status.created",
@@ -132,6 +138,19 @@ const filteredInterviewList = computed(() => {
     return item.base_info?.title?.toLowerCase().includes(keyword);
   });
 });
+
+/** 空列表引导面板：未登录（列表恒空且不 loading）或加载后列表为空时显示 */
+const showOnboarding = computed(
+  () => !listLoading.value && interviewList.value.length === 0
+);
+
+/** 列表非空但被搜索/筛选过滤后为空：仅轻提示，不显示引导面板 */
+const showFilteredEmpty = computed(
+  () =>
+    !listLoading.value &&
+    interviewList.value.length > 0 &&
+    filteredInterviewList.value.length === 0
+);
 
 const updateSearchKeyword = useDebounceFn((keyword: string) => {
   debouncedSearchKeyword.value = keyword;
@@ -208,7 +227,8 @@ const clickUserAvatar = () => {
 // 头像菜单（登录后）：改密 + 登出
 const changePwdVisible = ref(false);
 
-const handleAvatarCommand = (command: string) => {
+const handleAvatarSelectChange = (option: SelectOption) => {
+  const command = option.value;
   if (command === "change_password") {
     changePwdVisible.value = true;
   } else if (command === "logout") {
@@ -327,57 +347,28 @@ watch(
         >
           <component :is="businessmanIcon" class="w-8 h-8" />
         </div>
-        <el-dropdown
+        <Select
           v-else
-          trigger="hover"
-          placement="bottom-end"
+          :options="userOperationOptions"
           class="user-avatar-dropdown"
-          @command="handleAvatarCommand"
+          @change="handleAvatarSelectChange"
         >
           <div
             class="user-avatar w-10 h-10 rounded-full flex items-center justify-center online"
           >
             <component :is="businessmanIcon" class="w-8 h-8" />
           </div>
-          <template #dropdown>
-            <el-dropdown-menu class="user-menu">
-              <el-dropdown-item command="change_password" :icon="keyIcon">
-                {{ t("auth.change_password") }}
-              </el-dropdown-item>
-              <el-dropdown-item command="logout" :icon="logoutIcon" divided>
-                {{ t("home.logout") }}
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <el-dropdown
-          class="locale-dropdown"
-          trigger="hover"
-          placement="bottom-end"
-          @command="handleLocaleChange"
+        </Select>
+        <Select
+          :model-value="locale"
+          :showSelectedState="true"
+          :options="localeOptions"
+          @update:modelValue="handleLocaleChange"
         >
-          <button
-            type="button"
-            class="locale-trigger"
-            :aria-label="$t('home.switch_language')"
-            :title="$t('home.switch_language')"
-          >
+          <div class="locale-trigger">
             <component :is="languageIcon" class="locale-icon" />
-          </button>
-          <template #dropdown>
-            <el-dropdown-menu class="locale-menu">
-              <el-dropdown-item
-                v-for="item in localeOptions"
-                :key="item.value"
-                :command="item.value"
-                :class="{ 'is-active': locale === item.value }"
-              >
-                <span>{{ item.label }}</span>
-                <span v-if="locale === item.value" class="locale-check">✓</span>
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+          </div>
+        </Select>
       </div>
     </header>
 
@@ -420,7 +411,13 @@ watch(
       <ReSegmented v-model="tabValue" :options="tabOptions" />
     </div>
 
-    <div class="">
+    <HomeOnboarding v-if="showOnboarding" />
+
+    <div v-else-if="showFilteredEmpty" class="filtered-empty">
+      {{ $t("home.guide.empty_filtered") }}
+    </div>
+
+    <div v-else>
       <el-skeleton
         class="interview-list"
         :loading="listLoading"
@@ -587,8 +584,15 @@ watch(
 <style lang="scss" scoped>
 .home {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+
+  /* 可视高度锚点：视口底 -24px = 侧边栏圆角条底线。
+     用视口单位而非 height:100% —— 滚动容器的 view/wrapper 链是
+     flex-basis:0 的循环依赖，百分比链解析不出确定值 */
+  min-height: calc(100vh - 24px);
   max-width: 100%;
-  padding: 30px 16px 24px 16px;
+  padding: 24px 16px 24px 16px;
 
   /* 以内容区实际宽度作为自适应基准，自动兼容侧边栏展开/折叠 */
   container-type: inline-size;
@@ -600,7 +604,7 @@ watch(
     gap: 28px;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px 20px;
+    padding: 8px 16px 14px;
     background: transparent;
   }
 
@@ -738,75 +742,24 @@ watch(
     display: inline-flex;
   }
 
-  :deep(.user-menu) {
-    min-width: 152px;
-    padding: 6px;
-    border-radius: 8px;
-  }
-
-  :deep(.user-menu .el-dropdown-menu__item) {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border-radius: 6px;
-  }
-
-  .locale-dropdown {
-    display: inline-flex;
-    align-items: center;
-  }
-
   .locale-trigger {
     display: flex;
     align-items: center;
     justify-content: center;
     width: 40px;
     height: 40px;
-    padding: 0;
     color: #666;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    outline: none;
-    transition:
-      box-shadow 0.2s,
-      color 0.2s,
-      background-color 0.2s;
 
-    &:hover,
-    &:focus-visible {
-      color: #409eff;
+    &:hover {
+      .locale-icon {
+        color: #409eff;
+      }
     }
   }
 
   .locale-icon {
     width: 22px;
     height: 22px;
-  }
-
-  :deep(.locale-menu) {
-    min-width: 132px;
-    padding: 6px;
-    border-radius: 8px;
-  }
-
-  :deep(.locale-menu .el-dropdown-menu__item) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding-right: 12px;
-    border-radius: 6px;
-  }
-
-  :deep(.locale-menu .el-dropdown-menu__item.is-active) {
-    color: var(--el-color-primary);
-    background-color: var(--el-color-primary-light-9);
-  }
-
-  .locale-check {
-    font-size: 14px;
-    font-weight: 600;
   }
 
   /* 与 .interview-list 使用同一套内容区断点，保持重排一致 */
@@ -877,7 +830,10 @@ watch(
   }
 
   .tab-bar {
-    padding: 20px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 0;
   }
 
   .tab-bar :deep(.pure-segmented) {
@@ -932,6 +888,17 @@ watch(
 
   .tab-bar :deep(.pure-segmented-group) {
     gap: 6px;
+  }
+
+  .filtered-empty {
+    padding: 48px 16px;
+    font-size: 14px;
+    color: #999;
+    text-align: center;
+    background: rgb(255 255 255 / 60%);
+    border: 1px solid rgb(255 255 255 / 65%);
+    border-radius: 16px;
+    box-shadow: 0 0 10px rgb(0 0 0 / 8%);
   }
 
   .interview-list {
@@ -1043,8 +1010,7 @@ watch(
     padding: 6px 12px;
     border-radius: 20px;
     box-shadow: 0 2px 8px rgb(31 35 41 / 6%);
-    backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
+    backdrop-filter: none;
   }
 
   .card-status.status-created {

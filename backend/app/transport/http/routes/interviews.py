@@ -15,6 +15,7 @@ from app.core.i18n.extract_prompts import build_extract_system
 from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
+from app.domain.template import Template
 from app.services.coaching.engine import TERMINAL_SESSION_STATUSES
 from app.services.coaching.first_batch import generate_first_batch
 from app.services.sessions.manager import manager
@@ -55,6 +56,47 @@ def _utc_isoformat(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat()
 
 
+def _is_supported_image_format(image_bytes: bytes) -> bool:
+    """按 magic bytes 嗅探图片格式，仅接受 JPEG / PNG / BMP。
+
+    客户端 OCRRequest 不传文件名（extra=forbid），扩展名校验不适用；
+    引入 PIL 仅做 sniff 太重。百度 OCR 等 provider 对 WEBP / GIF / TIFF /
+    HEIC 等格式支持不一致或拒收，提前在路由层拒掉非白名单字节，避免
+    垃圾数据送上游再回错误。
+    """
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return True
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if image_bytes.startswith(b"BM"):
+        return True
+    return False
+
+
+def _resolve_interviewee(base_info: dict, tpl: Optional[Template]) -> str:
+    """从 base_info 解析受访者展示字段。
+
+    优先取名为 `interviewee` 的键（与前端展示约定一致）；空串 / 纯空白 / 缺
+    失则启发式回落：按模板 `base_fields` 声明顺序选首个 type=text 且值非空的
+    字段。非 text 字段（datetime / duration / select / number / textarea 等）
+    均不参与。这样自定义模板不必死磕"必须叫 interviewee"——任何能识别人物的字段
+    都能上首页卡片。模板缺失时返回空串，保持现有前端 — fallback。
+    """
+    direct = base_info.get("interviewee")
+    if direct and str(direct).strip():
+        return str(direct)
+    if tpl is None:
+        return ""
+    for f in tpl.session.base_fields:
+        if f.type != "text":
+            continue
+        v = base_info.get(f.key)
+        if v is None or (isinstance(v, str) and not v.strip()):
+            continue
+        return str(v)
+    return ""
+
+
 def _session_summary(rec, tpl) -> dict:
     """ORM InterviewRecord + Template → summary dict（含派生计数与展示字段）。
 
@@ -77,11 +119,12 @@ def _session_summary(rec, tpl) -> dict:
         "template_id": rec.template_id,
         "template_version": rec.template_version,
         "template_icon_url": tpl.icon_url if tpl else "",
+        "template_snapshot": rec.template_snapshot,
         "status": rec.status,
         "status_type": _STATUS_TYPE.get(rec.status, "info"),
         "base_info": base_info,
-        "title": base_info.get("project") or t(Keys.HTTP_SESSION_TITLE_DEFAULT, locale=current_locale()),
-        "interviewee": base_info.get("interviewee", ""),
+        "title": base_info.get("title") or t(Keys.HTTP_SESSION_TITLE_DEFAULT, locale=current_locale()),
+        "interviewee": _resolve_interviewee(base_info, tpl),
         "type": tpl.name if tpl else "",
         "recent_time": _utc_isoformat(max(
             filter(None, [rec.created_at, rec.started_at, rec.ended_at])
@@ -105,23 +148,36 @@ async def _summary_from_session_id(session_id: str) -> dict:
     """
     from app.persistence.db import SessionLocal
     from app.persistence.models import InterviewRecord
-    from app.services.template.loader import get_template
+    from app.services.template.loader import resolve_template
     async with SessionLocal() as db:
         rec = await db.get(InterviewRecord, session_id)
         if rec is None:
             raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
-        tpl = get_template(rec.template_id)
+        tpl = resolve_template(rec.template_id, rec.template_snapshot)
         return _session_summary(rec, tpl)
 
 
 def _state_detail(state) -> dict:
+    from app.services.template.loader import resolve_template
     s = state.session
+    # 模板字段定义（快照优先）：运行页据此渲染 base_info 的 label/控件，
+    # 不再写死固定键；模板删了也不怕——快照随访谈存
+    tpl = resolve_template(s.template_id, s.template_snapshot)
+    base_info = s.base_info or {}
     return {
         "id": s.id,
         "template_id": s.template_id,
         "template_version": s.template_version,
+        "template_snapshot": s.template_snapshot,
         "status": s.status.value,
-        "base_info": s.base_info,
+        # 与列表接口对齐：title 顶层字段 = base_info.title，无值时回退到 i18n
+        # 默认文案；这样 list / detail 切换不会出现「字段消失 / 值不一致」
+        "title": base_info.get("title") or t(Keys.HTTP_SESSION_TITLE_DEFAULT, locale=current_locale()),
+        "template_fields": [
+            {"key": f.key, "label": f.label, "type": f.type}
+            for f in tpl.session.base_fields
+        ] if tpl else [],
+        "base_info": base_info,
         "goal": s.goal,
         "first_batch_generated": s.first_batch_generated,
         "consumed_seq": s.consumed_seq,
@@ -282,6 +338,40 @@ async def end_interview(
     return await _summary_from_session_id(session_id)
 
 
+@router.post("/{session_id}/suspend")
+async def suspend_interview(
+    session_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """暂停访谈（用户点「暂停」按钮时调用）。
+
+    与 end 的区别：不做辅导终局重算，不拆 runtime；只把 status 落盘成 suspended，
+    让列表页立即可见暂停状态。WS listen:stop 和 runtime 管线停麦由前端在调用本 API
+    之后自行处理（与 end 按钮 same pattern）。
+    """
+    state = await manager.get(session_id)
+    if state is None or state.session.user_id != user.user_id:
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    await manager.suspend(session_id)
+    return await _summary_from_session_id(session_id)
+
+
+@router.post("/{session_id}/resume")
+async def resume_interview(
+    session_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """继续访谈（用户点「继续」按钮时调用）。
+
+    将 suspended 状态的访谈转回 in_progress。并发限制由 manager.resume() 校验。
+    """
+    state = await manager.get(session_id)
+    if state is None or state.session.user_id != user.user_id:
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    await manager.resume(session_id)
+    return await _summary_from_session_id(session_id)
+
+
 @router.delete("/{session_id}")
 async def delete_interview(
     session_id: str,
@@ -421,10 +511,11 @@ async def recognize_image(
     """接收 base64 编码的图片，用后端视觉模型提取文字。
 
     错误响应统一走 I18nError：
-    - base64 解码失败 → 422 + code=http.ocr.image_base64_invalid
-    - 图片 > 10MB      → 413 + code=http.ocr.image_too_large
-    - OCR 未配置        → 502（adapter 抛 Keys.OCR_NOT_CONFIGURED）
-    - OCR 调用失败      → 502（adapter 抛 Keys.OCR_INVOKE_FAILED）
+    - base64 解码失败   → 422 + code=http.ocr.image_base64_invalid
+    - 图片 > 10MB        → 413 + code=http.ocr.image_too_large
+    - 图片格式不在白名单 → 422 + code=http.ocr.image_format_unsupported
+    - OCR 未配置          → 502（adapter 抛 Keys.OCR_NOT_CONFIGURED）
+    - OCR 调用失败        → 502（adapter 抛 Keys.OCR_INVOKE_FAILED）
     """
     from app.adapters.ocr.factory import get_ocr
     from app.core.i18n.errors import I18nError
@@ -440,6 +531,11 @@ async def recognize_image(
         raise I18nError(
             Keys.HTTP_OCR_IMAGE_TOO_LARGE, http_status=413,
             size_mb=len(image_bytes) / (1024 * 1024),
+        )
+
+    if not _is_supported_image_format(image_bytes):
+        raise I18nError(
+            Keys.HTTP_OCR_IMAGE_FORMAT_UNSUPPORTED, http_status=422,
         )
 
     ocr = get_ocr()

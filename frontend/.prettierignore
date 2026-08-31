@@ -1,0 +1,3 @@
+# 脚本产物（scripts/build-offline-icons.py）：保持脚本输出格式，
+# 否则 lint:prettier 会把整文件重排成几百行 diff
+**/*.generated.ts

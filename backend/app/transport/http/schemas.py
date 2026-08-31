@@ -86,8 +86,7 @@ class ChangePasswordRequest(BaseModel):
     不限 admin role——任何持有效 token 的登录用户都能改自己密码。
     旧密码错误 → 401；新密码强度不通过 → 400（路由层 validate_password_strength）。
     """
-    # extra="forbid" 防止注入 user_id / username 试图指定他人目标（cf70cee 提交加的
-    # schema 当时未 forbid，4f2eb2e 用 query / body 注入测试兜底；此处硬化前瞻）。
+    # extra="forbid" 防止注入 user_id / username 试图指定他人目标。
     model_config = ConfigDict(extra="forbid")
 
     old_password: str = Field(min_length=1, max_length=72)
@@ -115,6 +114,29 @@ class TemplateSummary(BaseModel):
 
 class TemplateListResponse(BaseModel):
     items: list[TemplateSummary]
+
+
+class AdminTemplateSummary(BaseModel):
+    """admin 模板列表项。referenced=被访谈引用（前端删除保护提示）。"""
+    id: str
+    name: str
+    icon_url: str
+    icon_alt: str
+    version: str
+    updated_at: str | None = None
+    referenced: bool
+
+
+class TemplateGenerateRequest(BaseModel):
+    """POST /admin/templates/generate 请求体（AI 一句话生成模板）。
+
+    只生成不落库：返回的 Template 直接进编辑器，落库仍走 POST /admin/templates。
+    """
+    # extra="forbid"：brief 之外的字段（如 id）一律 422，防止借生成端点注入
+    model_config = ConfigDict(extra="forbid")
+
+    # 2000 与 generator._BRIEF_MAX_CHARS 对齐（那里是服务层二次兜底）
+    brief: str = Field(min_length=1, max_length=2000)
 
 
 class InvokeSkillRequest(BaseModel):

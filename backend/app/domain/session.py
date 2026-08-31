@@ -45,6 +45,9 @@ class Session(BaseModel):
     id: str
     template_id: str
     template_version: str = "1"
+    # 创建访谈时的整份模板快照（dict）。编辑模板不影响已创建访谈；
+    # 旧行/旧路径无快照时消费方回退 resolve_template 实时读
+    template_snapshot: Optional[dict[str, Any]] = None
     status: SessionStatus = SessionStatus.CREATED
     user_id: Optional[str] = None
     # 基础信息字段（来自模板 base_fields + setup 抽取）

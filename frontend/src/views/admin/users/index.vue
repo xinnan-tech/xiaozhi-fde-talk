@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { useWindowSize } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
 import { message } from "@/utils/message";
 import {
@@ -25,6 +26,9 @@ const resetDialogVisible = ref(false);
 const resetTarget = ref<AdminUserInfo | null>(null);
 const resetForm = reactive({ new_password: "", confirm: "" });
 const resetting = ref(false);
+const { width: viewportWidth } = useWindowSize();
+const isCompact = computed(() => viewportWidth.value < 640);
+const isUltraCompact = computed(() => viewportWidth.value < 360);
 
 const searchKeyword = ref("");
 
@@ -166,24 +170,27 @@ async function submitReset() {
         <el-table-column
           type="index"
           :label="t('users.col_index')"
-          width="72"
+          :width="isUltraCompact ? 40 : isCompact ? 52 : 72"
           align="center"
         />
         <el-table-column
           prop="username"
           :label="t('users.col_username')"
-          min-width="160"
+          :min-width="isCompact ? 0 : 160"
         >
           <template #default="{ row }">
             <div class="user-cell">
-              <span class="user-avatar">{{ row.username.charAt(0).toUpperCase() }}</span>
+              <span class="user-avatar">{{
+                row.username.charAt(0).toUpperCase()
+              }}</span>
               <span class="user-name">{{ row.username }}</span>
             </div>
           </template>
         </el-table-column>
         <el-table-column
+          v-if="!isUltraCompact"
           :label="t('users.col_role')"
-          width="140"
+          :width="isCompact ? 90 : 140"
           align="center"
         >
           <template #default="{ row }">
@@ -198,31 +205,37 @@ async function submitReset() {
           </template>
         </el-table-column>
         <el-table-column
+          v-if="!isCompact"
           prop="created_at"
           :label="t('users.col_created_at')"
-          width="200"
           align="center"
+          show-overflow-tooltip
         >
           <template #default="{ row }">
-            {{ formatDateTime(row.created_at) }}
+            <span class="datetime-value">
+              {{ formatDateTime(row.created_at) }}
+            </span>
           </template>
         </el-table-column>
         <el-table-column
+          v-if="!isCompact"
           prop="password_changed_at"
           :label="t('users.col_password_changed_at')"
-          width="200"
           align="center"
+          show-overflow-tooltip
         >
           <template #default="{ row }">
             <span v-if="row.password_changed_at" class="datetime-value">
               {{ formatDateTime(row.password_changed_at) }}
             </span>
-            <span v-else class="muted-text">{{ t("users.never_changed") }}</span>
+            <span v-else class="muted-text">{{
+              t("users.never_changed")
+            }}</span>
           </template>
         </el-table-column>
         <el-table-column
           :label="t('users.col_actions')"
-          width="160"
+          :width="isUltraCompact ? 80 : isCompact ? 100 : 160"
           align="center"
           fixed="right"
         >
@@ -278,10 +291,11 @@ async function submitReset() {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="resetDialogVisible = false">
+        <el-button class="cancel-btn" @click="resetDialogVisible = false">
           {{ t("users.cancel_button") }}
         </el-button>
         <el-button
+          class="confirm-btn"
           type="primary"
           :loading="resetting"
           @click="submitReset"
@@ -298,8 +312,11 @@ async function submitReset() {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
   width: 100%;
   padding: 30px 8px 18px 16px;
+  overflow-x: hidden;
 }
 
 .admin-users-page {
@@ -314,6 +331,8 @@ async function submitReset() {
 
   .header-left {
     display: flex;
+    min-width: 0;
+    max-width: 100%;
     flex-direction: column;
     gap: 4px;
   }
@@ -333,6 +352,8 @@ async function submitReset() {
 
   .header-right {
     display: flex;
+    min-width: 0;
+    max-width: 100%;
     flex-wrap: wrap;
     gap: 12px;
     align-items: center;
@@ -357,7 +378,15 @@ async function submitReset() {
     border: 1px solid rgb(255 255 255 / 75%);
     border-radius: 8px;
     box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
-    transition: box-shadow 0.2s, border-color 0.2s;
+    transition:
+      box-shadow 0.2s,
+      border-color 0.2s;
+  }
+
+  @media (max-width: 480px) {
+    .search-input {
+      width: min(220px, calc(100vw - 64px));
+    }
   }
 
   .search-input:focus {
@@ -419,13 +448,22 @@ async function submitReset() {
   }
 
   .table-card {
+    min-width: 0;
+    max-width: 100%;
     padding: 6px 8px 8px;
     margin: 0 8px 0 16px;
+    overflow: hidden;
   }
 
   .users-table {
+    min-width: 0;
     width: 100%;
     font-size: 13px;
+
+    :deep(.el-table__header-wrapper),
+    :deep(.el-table__body-wrapper) {
+      max-width: 100%;
+    }
 
     :deep(.el-table__header-wrapper th) {
       height: 48px;
@@ -434,6 +472,10 @@ async function submitReset() {
       color: #334155;
       background: rgb(241 245 249 / 60%) !important;
       border-bottom: 1px solid rgb(226 232 240 / 80%);
+
+      &.el-table-fixed-column--right {
+        background: #f7f9fb !important;
+      }
     }
 
     :deep(.el-table__header-wrapper th .cell) {
@@ -445,6 +487,10 @@ async function submitReset() {
       padding: 0;
       background: transparent !important;
       border-bottom: 1px solid rgb(226 232 240 / 70%);
+
+      &.el-table-fixed-column--right {
+        background: #fff !important;
+      }
     }
 
     :deep(.el-table__row) {
@@ -453,6 +499,10 @@ async function submitReset() {
 
     :deep(.el-table__row:hover > td) {
       background: rgb(239 246 255 / 55%) !important;
+
+      &.el-table-fixed-column--right {
+        background: #f6faff !important;
+      }
     }
 
     :deep(.el-table__empty-block) {
@@ -467,6 +517,8 @@ async function submitReset() {
 
   .user-cell {
     display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
     gap: 10px;
     align-items: center;
   }
@@ -487,13 +539,18 @@ async function submitReset() {
   }
 
   .user-name {
+    min-width: 0;
+    overflow: hidden;
     font-size: 13px;
     font-weight: 600;
     color: #1a1a1a;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .datetime-value {
-    font-size: 12px;
+    vertical-align: text-top;
+    font-size: 13px;
     color: #475569;
   }
 
@@ -515,9 +572,39 @@ async function submitReset() {
   .row-action.el-button:hover {
     background: rgb(74 144 226 / 18%);
   }
+
+  @media (max-width: 360px) {
+    .user-avatar {
+      display: none;
+    }
+
+    .user-cell {
+      gap: 0;
+    }
+
+    .row-action.el-button {
+      padding: 0 4px;
+      font-size: 11px;
+    }
+  }
 }
 
-.reset-dialog {
+:deep(.reset-dialog) {
+  border-radius: 16px !important;
+
+  .el-dialog__header {
+    padding: 14px 24px 16px;
+  }
+
+  .el-dialog__headerbtn {
+    top: 16px;
+    right: 18px;
+  }
+
+  .el-dialog__body {
+    padding: 0 24px;
+  }
+
   .dialog-subtitle {
     margin: -4px 0 14px;
     font-size: 13px;
@@ -527,6 +614,11 @@ async function submitReset() {
   :deep(.el-form-item__label) {
     font-weight: 500;
     color: #334155;
+  }
+
+  .cancel-btn,
+  .confirm-btn {
+    border-radius: 8px;
   }
 }
 </style>

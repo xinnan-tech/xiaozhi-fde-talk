@@ -85,7 +85,7 @@ async def empty_db(_lifespan_app):
 
     ConfigStore.invalidate 是必要的——`auth.allow_registration` 是内存缓存 KV，
     上次测试 set("true") 不会自动随 DB DELETE 失效；漏掉 invalidate 的话
-    下一次测试的 allow_registration 会读缓存 → 误判为 true。
+    后续测试的 allow_registration 会读缓存 → 误判为 true。
     """
     await _wipe_db()
     get_config_store().invalidate()

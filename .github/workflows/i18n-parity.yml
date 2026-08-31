@@ -1,13 +1,14 @@
 name: i18n-parity
 
-# 多语键值齐平检查：每次改动 locale 文件或 i18n 模块都跑一遍，
-# 防止新增 key 只加在一种语言、忘记同步到其他语种。
-# 触发路径：locale JSON / i18n Python 模块 / 脚本自身 / 本 workflow 文件。
+# 多语键值齐平检查：每次改动 locale 文件、i18n 模块或 backend/app 下
+# 任何 .py 都跑一遍（dead-key 检测走 backend/app 全量 AST），防止新增
+# key 只加在一种语言、忘记同步到其他语种，也防止删引用忘删 enum 条目。
+# 触发路径：backend/app 全量 / locale JSON / 脚本自身 / 本 workflow 文件。
 
 on:
   pull_request:
     paths:
-      - "backend/app/core/i18n/**"
+      - "backend/app/**"
       - "frontend/src/locales/**"
       - "backend/scripts/check_i18n_parity.py"
       - ".github/workflows/i18n-parity.yml"

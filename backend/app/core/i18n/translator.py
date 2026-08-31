@@ -26,6 +26,11 @@ def t(key: str, *, locale: str | None = None, **params: Any) -> str:
     mistyped params raise KeyError; mismatched format specs across locales
     (e.g. `{x!r}` in en-US, plain `{x}` in zh-CN) raise at call time.
     See T01 catalog NOTE for cross-locale format-string consistency rules.
+
+    List-valued params are joined with a locale-appropriate separator
+    (「、」 for zh-CN/zh-TW, ", " for en-US/vi-VN) before substitution. This
+    lets throw sites pass raw collections instead of pre-joining with a
+    hard-coded separator that would leak into non-zh locales.
     """
     target = _resolve_locale(locale)
     catalogs = load_catalogs()
@@ -35,4 +40,11 @@ def t(key: str, *, locale: str | None = None, **params: Any) -> str:
         msg = catalogs["en-US"].get(key)
     if msg is None:
         raise KeyError(key)
-    return msg.format(**params) if params else msg
+    if not params:
+        return msg
+    sep = "、" if target.startswith("zh") else ", "
+    formatted = {
+        k: (sep.join(str(x) for x in v) if isinstance(v, list) else v)
+        for k, v in params.items()
+    }
+    return msg.format(**formatted)

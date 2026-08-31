@@ -24,7 +24,7 @@ from app.services.coaching.contract import validate_llm_output
 from app.services.coaching.facts import FactDatabase
 from app.services.coaching.prompt import build_first_batch, build_system, build_user
 from app.services.sessions.state import SessionState
-from app.services.template.loader import get_template
+from app.services.template.loader import resolve_template
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,20 @@ class CoachingEngine:
         # 生产环境 SessionRuntime.ainit() 会覆盖这些值为 DB 当前值。
         self.state = state
         self._ws_send = send
-        self.template = get_template(state.session.template_id)
+        # 模板缺失（缓存 miss 且 snapshot 为空/损坏）时 resolve_template 返 None，
+        # 下游 build_first_batch(None, ...) / build_system(None, ...) 会 AttributeError，
+        # 报错点离根因很远（LLM 调用栈里），整条辅导管线静默挂掉。
+        # 在构造处显式失败：调用方（runtime / first_batch HTTP 路径）未捕获 →
+        # 500，日志直接指向 template_id，属配置错误应尽早暴露。
+        self.template = resolve_template(
+            state.session.template_id, state.session.template_snapshot,
+        )
+        if self.template is None:
+            raise RuntimeError(
+                f"coaching engine: template not found "
+                f"(template_id={state.session.template_id!r}, snapshot="
+                f"{'present-but-invalid' if state.session.template_snapshot else 'empty'})"
+            )
         self._llm: Optional[LLMProvider] = None  # ainit() 后注入；None 表示未初始化
         self._pause_s: float = 5.0                 # DEFAULTS: coach.pause_s
         self._max_pending_segments: int = 8        # DEFAULTS: coach.max_pending_segments
@@ -79,7 +92,7 @@ class CoachingEngine:
         self._sched_task: asyncio.Task | None = None
         self._tpl_meta = {
             m.id: (m.priority if m.priority is not None else 99, m.desc)
-            for m in (self.template.coaching.must_ask if self.template else [])
+            for m in self.template.coaching.must_ask
         }
         self._bg: set[asyncio.Task] = set()
         self._recompute_lock = asyncio.Lock()

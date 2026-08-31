@@ -26,6 +26,22 @@ class Keys(StrEnum):
     HTTP_SKILL_INVOKE_FAILED = "http.skill.invoke_failed"
     HTTP_OCR_IMAGE_BASE64_INVALID = "http.ocr.image_base64_invalid"
     HTTP_OCR_IMAGE_TOO_LARGE = "http.ocr.image_too_large"
+    HTTP_OCR_IMAGE_FORMAT_UNSUPPORTED = "http.ocr.image_format_unsupported"
+
+    # ---- Templates (admin CRUD) ----
+    TEMPLATE_ID_TAKEN = "template.id_taken"
+    TEMPLATE_REFERENCED = "template.referenced"
+    TEMPLATE_INVALID_ID_FORMAT = "template.invalid.id_format"
+    TEMPLATE_INVALID_VERSION_FORMAT = "template.invalid.version_format"
+    TEMPLATE_INVALID_VERSION_TOO_SMALL = "template.invalid.version_too_small"
+    TEMPLATE_INVALID_VERSION_OVERFLOW = "template.invalid.version_overflow"
+    TEMPLATE_INVALID_DUPLICATE_FIELD = "template.invalid.duplicate_field"
+    TEMPLATE_INVALID_DUPLICATE_MUST_ASK_ID = "template.invalid.duplicate_must_ask_id"
+    TEMPLATE_INVALID_MISSING_REF = "template.invalid.missing_ref"
+    TEMPLATE_INVALID_ID_MISMATCH = "template.invalid.id_mismatch"
+    TEMPLATE_INVALID_BRIEF_EMPTY = "template.invalid.brief_empty"
+    TEMPLATE_INVALID_BRIEF_TOO_LONG = "template.invalid.brief_too_long"
+    TEMPLATE_VERSION_CONFLICT = "template.version_conflict"
 
     # ---- WebSocket frames ----
     WS_INTERNAL = "ws.internal"
@@ -75,12 +91,10 @@ class Keys(StrEnum):
     # ---- OCR adapter ----
     OCR_NOT_CONFIGURED = "ocr.not_configured"
     OCR_INVOKE_FAILED = "ocr.invoke_failed"
-    OCR_BAD_RESPONSE = "ocr.bad_response"
 
     # ---- Diagnostics (LLM) ----
     DIAG_LLM_CONFIG_MISSING = "diag.llm.config_missing"
     DIAG_LLM_CONFIG_MISSING_RAW = "diag.llm.config_missing_raw"
-    DIAG_LLM_UNREACHABLE = "diag.llm.unreachable"
     DIAG_LLM_INVOKE_FAIL = "diag.llm.invoke_fail"
     DIAG_LLM_AUTH_FAIL = "diag.llm.auth_fail"
     DIAG_LLM_RATE_LIMIT = "diag.llm.rate_limit"
@@ -115,7 +129,6 @@ class Keys(StrEnum):
 
     # ---- Startup / settings / secrets ----
     STARTUP_CONFIG_INVALID = "startup.config_invalid"
-    STARTUP_DATABASE_MIGRATION_FAIL = "startup.database_migration_fail"
     SETTINGS_PROD_NO_SQLITE = "settings.prod_no_sqlite"
     SETTINGS_PROD_TYPO_ENV = "settings.prod_typo_env"
     SECRET_RESOLVE_FAILED = "secret.resolve_failed"
@@ -130,6 +143,10 @@ class Keys(StrEnum):
     # ---- Config validation ----
     CONFIG_INVALID_ENUM_VALUE = "config.invalid_enum_value"
     CONFIG_INVALID_BOOL = "config.invalid_bool"
+    # 拆成 int / float 两个 key 避免共占位符被硬塞英文字面量：原 single key
+    # 用 {positive_integer} 让翻译层在 zh-CN / vi-VN 看到夹英文单词（越语版尤其不可读）。
+    CONFIG_INVALID_POSITIVE_INTEGER = "config.invalid_positive_integer"
+    CONFIG_INVALID_POSITIVE_NUMBER = "config.invalid_positive_number"
 
     # ---- Auth (registration / login) ----
     AUTH_USERNAME_INVALID_FORMAT = "auth.username_invalid_format"

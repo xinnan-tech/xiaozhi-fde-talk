@@ -126,12 +126,12 @@ def test_expected_script_covers_head_10():
     )
 
 
-# ── 主脚本规则（同事 6.2 提的本 bug 主场景）───────────────
+# ── 主脚本规则（en/vi/fr/de/es 请求下 LLM 输中文的收紧路径）───────────────
 
 
 def test_main_script_rule_rejects_latin_target_with_pure_cjk_values():
     """en/vi/fr/de/es 请求下，LLM 输纯中文 values（无 Latin 缩写）
-    → 主脚本 = CJK ∉ {LATIN} → 拒。同事 6.2：本 bug 主场景。
+    → 主脚本 = CJK ∉ {LATIN} → 拒。
 
     原宽松规则（any expected script present）会因 schema 字段（"id":"q1" 等
     LATIN）命中即放行 → pivot 漏。新规则：主脚本必须 ∈ expected 才放行。
@@ -178,7 +178,7 @@ def test_main_script_rule_accepts_latin_target_with_latin_values():
     assert detect_language_match_json(payload, "en") is True
 
 
-# ── observed_text：JSON 抽 values 去结构稀释（同事 6.2）───────────
+# ── observed_text：JSON 抽 values 去结构稀释 ───────────
 
 
 def test_observed_text_json_extracts_values():
@@ -213,7 +213,7 @@ def test_observed_text_invalid_json_falls_back_to_strip():
 def test_detect_language_match_json_except_branch_tightens_latin():
     """解析失败 → except 分支（报告 markdown 走这条）也要跑主脚本收紧。
 
-    同事原 bug 场景：en + 全中文 markdown + 一个 'AI' 缩写 → 旧宽松规则命中
+    bug 场景：en + 全中文 markdown + 一个 'AI' 缩写 → 旧宽松规则命中
     'AI' (Latin) 即放行 → pivot 漏触发。修复后 except 分支也对
     expected == {"LATIN"} 跑主脚本收紧，主脚本 = CJK → 拒。
     """
@@ -222,7 +222,7 @@ def test_detect_language_match_json_except_branch_tightens_latin():
     assert detect_language_match(zh_md, "en") is True
     # detect_language_match_json 走 except 分支，主脚本收紧生效 → False
     assert detect_language_match_json(zh_md, "en") is False
-    # zh_cn 期望 {CJK} 不收紧（同事论点：避免 schema 字段 Latin 误拒）
+    # zh_cn 期望 {CJK} 不收紧（避免 schema 字段 Latin 误拒）
     assert detect_language_match_json(zh_md, "zh_cn") is True
 
 

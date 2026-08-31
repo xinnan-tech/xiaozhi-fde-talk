@@ -249,6 +249,7 @@ export function useAsrRecorder() {
     elapsedSeconds,
     stopReason,
     everRecorded,
+    // 暴露底层录音错误，供表单页区分非安全源和普通失败。
     error,
     start,
     stop,

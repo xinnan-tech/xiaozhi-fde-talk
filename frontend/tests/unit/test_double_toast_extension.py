@@ -98,7 +98,7 @@ def test_global_http_interceptor_still_toasts_on_4xx():
     """全局拦截器对 4xx 的 toast 不能动——5 处修复都依赖它兜底。
 
     修 view 层的前提是「全局拦截器仍兜底」。删 view toast 之前
-    必须先确认全局行为没被这次扩展误伤。
+    必须先确认全局行为没被本次扩展误伤。
     """
     interceptor = (ROOT / "src" / "utils" / "http" / "index.ts").read_text(encoding="utf-8")
     assert "extractDetailText(responseBody?.detail)" in interceptor

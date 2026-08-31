@@ -76,35 +76,39 @@ def test_strip_preserves_skill_marker():
     assert "}}" in out
 
 
-def test_strip_preserves_session_marker():
-    """`{{session.X}}` 占位符保留——会话元数据，丢则前端无法补救。
+def test_strip_removes_session_marker():
+    """`{{session.X}}` / `{session.X}` 都该被 strip（issue #122）。
 
-    回归需求：旧正则 `\\{\\{(?!skill:)...)` 会把 `{{session.project}}` 当 orphan 删，
-    造成项目名 / 受访者 / 时间等关键元数据静默丢失。改成同时保护 `session.` 前缀。
+    旧契约是「保留 session 占位符」，前提是 L1 预填一定能把 session 字段填进
+    去——但 qwen-plus 等模型偶尔把 `{{session.start_time}}` 吞掉一个 `{` 后以
+    单花括号形态写出，预填后这种形态不该再出现在 LLM 输出里；万一漏过来，再
+    保留就等于把字面量落到报告。所以 session 不再是 exempt，遇到就 strip——
+    后端兜底策略统一是「宁可空、不可见字面量」。
     """
     md = (
         "# {{session.project}}\n"
         "> 受访者：{{session.interviewee}}\n"
         "{{session.start_time}} — {{session.end_time}}\n"
+        "开始：{session.start}　结束：{session.end}\n"
     )
     out = _strip_orphan_placeholders(md)
-    assert "{{session.project}}" in out
-    assert "{{session.interviewee}}" in out
-    assert "{{session.start_time}}" in out
-    assert "{{session.end_time}}" in out
+    assert "{{" not in out
+    assert "{session" not in out
 
 
-def test_strip_preserves_session_marker_mixed_with_orphan():
-    """混合：session 占位符保留，普通 orphan 清除。"""
+def test_strip_removes_session_marker_mixed_with_orphan():
+    """混合：session 占位符和普通 orphan 都清除；业务文案不被吞。"""
     md = (
         "# {{session.project}}\n"
         "- 客户行业：{{ 客户与行业标签 }}\n"
         "- 受访者：{{session.interviewee}}\n"
     )
     out = _strip_orphan_placeholders(md)
-    assert "{{session.project}}" in out
-    assert "{{session.interviewee}}" in out
+    assert "{{" not in out
     assert "{{ 客户与行业标签 }}" not in out
+    # strip 只针对 orphan 占位符业务中文标签、`{{session.X}}` 周边中文应保留
+    assert "客户行业" in out
+    assert "受访者" in out
 
 
 def test_strip_handles_chinese():

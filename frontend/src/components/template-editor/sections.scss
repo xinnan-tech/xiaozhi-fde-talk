@@ -1,0 +1,53 @@
+/**
+ * 模板编辑器四个 Section 组件的公共样式。
+ *
+ * 这些类名同时出现在 edit.vue 的 scoped 样式（Task 10 简报 Step 3 的整段样式）
+ * 与各 Section 组件内部——scoped 样式不会穿透子组件，因此每个 Section 组件
+ * `@use` 本文件拿到自己的一份带 data-v 的拷贝，类名与取值与 edit.vue 保持一致。
+ */
+.section-grid {
+  display: grid;
+  // 短字段默认两列：避免「产品经理」4 字配 1148px 输入框的极端浪费；
+  // 长字段用 field-row-wide 跨双列
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+
+  &-wide {
+    // 长字段（intro / playbook / report.doc / 多选项组）跨双列
+    grid-column: 1 / -1;
+    grid-template-columns: 100px minmax(0, 1fr);
+    align-items: flex-start;
+  }
+}
+
+.field-label {
+  color: #667085;
+  font-size: 12px;
+}
+
+/* 必填标记：紧跟在 label 文本后的红星（颜色对齐 Element Plus 表单必填星） */
+.required-star {
+  margin-left: 2px;
+  color: #f56c6c;
+}
+
+.field-table {
+  margin-top: 12px;
+
+  &-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 12px 0 8px;
+    color: #344054;
+    font-size: 13px;
+    font-weight: 600;
+  }
+}

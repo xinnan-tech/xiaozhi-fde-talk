@@ -3,10 +3,33 @@ import LayFrame from "../lay-frame/index.vue";
 import LayFooter from "../lay-footer/index.vue";
 import { useGlobal } from "@pureadmin/utils";
 import BackTopIcon from "@/assets/svg/back_top.svg?component";
-import { h, computed, Transition, defineComponent } from "vue";
+import {
+  h,
+  computed,
+  nextTick,
+  ref,
+  Transition,
+  defineComponent,
+  watch
+} from "vue";
+import { useRoute } from "vue-router";
 import { usePermissionStoreHook } from "@/store/modules/permission";
 
 const { $config } = useGlobal<GlobalPropertiesApi>();
+
+const route = useRoute();
+const scrollbarRef = ref();
+
+// 页面滚动发生在这个 el-scrollbar（不是 window），路由切换时它的
+// scrollTop 会原样带到新页面（如 system/config 滚到底部再进模板编辑器，
+// 编辑器就停在半截）。切换 fullPath 后归零，新页面从顶部开始。
+watch(
+  () => route.fullPath,
+  async () => {
+    await nextTick();
+    scrollbarRef.value?.setScrollTop(0);
+  }
+);
 
 const transitions = computed(() => {
   return route => {
@@ -58,6 +81,7 @@ const transitionMain = defineComponent({
         <LayFrame :currComp="Component" :currRoute="route">
           <template #default="{ Comp, fullPath, frameInfo }">
             <el-scrollbar
+              ref="scrollbarRef"
               class="content-scroll"
               :wrap-style="{
                 display: 'flex',
@@ -69,6 +93,7 @@ const transitionMain = defineComponent({
               :view-style="{
                 display: 'flex',
                 flex: 'auto',
+                'min-width': '0',
                 overflow: 'visible',
                 'flex-direction': 'column'
               }"
@@ -99,7 +124,9 @@ const transitionMain = defineComponent({
                 </transitionMain>
               </div>
               <LayFooter v-if="!hideFooter" class="content-footer" />
-              <div v-else class="not-footer h-[18px]" />
+              <!-- 高度归零：内容视口底已与侧边栏 24px inset 对齐，
+                   不再需要额外底部占位（否则内容底线超出侧边栏底线） -->
+              <div v-else class="not-footer h-0" />
             </el-scrollbar>
           </template>
         </LayFrame>
@@ -117,12 +144,16 @@ const transitionMain = defineComponent({
   overflow-x: hidden;
 }
 
+/* 底部留出与侧边栏（big-sidebar-container 的 24px inset）一致的安全区：
+   收窄滚动视口可视高度，内容卡片底边与侧边栏圆角条底线对齐，
+   滚动条也止于同一底线 */
 .content-scroll {
-  height: 100%;
+  height: calc(100% - 24px);
 }
 
 .content-wrapper {
   min-height: 0;
+  min-width: 0;
 }
 
 .content-footer {

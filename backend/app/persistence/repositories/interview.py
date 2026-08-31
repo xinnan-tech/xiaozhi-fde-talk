@@ -22,6 +22,7 @@ def _record_to_session(rec: InterviewRecord) -> Session:
         id=rec.id,
         template_id=rec.template_id,
         template_version=rec.template_version,
+        template_snapshot=rec.template_snapshot,
         status=SessionStatus(rec.status),
         user_id=rec.user_id,
         base_info=rec.base_info or {},
@@ -49,7 +50,7 @@ class InterviewRepository:
     """访谈会话持久化。所有方法接受一个 AsyncSession（由调用方管理事务/生命周期）。"""
 
     def __init__(self) -> None:
-        # P2-13: per-session 写串行锁。manager 定时器与 runtime flush 并发对同一
+        # per-session 写串行锁。manager 定时器与 runtime flush 并发对同一
         # session 落盘（各自独立连接/事务），串行化 DB 写避免 SQLite 'database is
         # locked' 与事务交错。单进程粒度；共享 SessionState 下无 lost update。
         self._save_locks: dict[str, asyncio.Lock] = {}
@@ -117,6 +118,13 @@ class InterviewRepository:
                 )
                 rec.template_id = s.template_id
                 rec.template_version = s.template_version
+                # 快照只写不清：创建时固化的模板快照是「访谈按当时模板执行」的
+                # 依据，一旦被覆成 NULL 就再也回不来（resolve_template 会静默回退
+                # 当前缓存模板，模板被改过的老访谈就串味了）。会话生命周期内
+                # save_state 会被反复调用（状态转换、消息处理、去抖落盘），其中
+                # 部分调用方持有的 SessionState 可能没带快照——故仅在有值时写入。
+                if s.template_snapshot is not None:
+                    rec.template_snapshot = s.template_snapshot
                 if not is_regression:
                     rec.status = s.status.value
                 rec.user_id = s.user_id

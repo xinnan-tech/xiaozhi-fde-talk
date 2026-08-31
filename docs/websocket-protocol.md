@@ -344,7 +344,7 @@ asr 推送频率由服务端 ASR 断句策略决定，客户端无法控制。`f
 | `4404` | `not_found` 访谈不存在或不属于当前用户 | 提示用户，回到列表 |
 | `4406` | `session_ended` 访谈已结束 / 存活窗口已过（REST end 场景关闭前先收 `session.ended` 帧） | 提示用户，新建访谈 |
 | `4408` | `handshake_timeout` 5 s 内未发 hello | 检查客户端实现 |
-| `4409` | `concurrent_limit` 活跃访谈达上限 | 关掉其他访谈 |
+| `4409` | `concurrent_limit` 活跃访谈达上限（服务端「活跃」指 `setting_up` + `in_progress`；`suspended` / `ended` 不计入）| 提示用户先暂停或结束其他进行中的访谈后再来 |
 | `4410` | `frame_too_large` 单帧 > 64 KiB | 检查音频帧大小 |
 | `4411` | `bad_json` 文本帧不是合法 JSON | 检查客户端实现 |
 
@@ -359,13 +359,25 @@ POST /api/v1/interviews/{interview_id}/end
 Authorization: Bearer <jwt>
 ```
 
-服务端立即把状态写盘为 `ended` 并返回 200；runtime 的收尾（coaching 最终重算，LLM 上限 60 s）在后台异步执行，不阻塞响应。
+服务端立即把状态写盘为 `ended` 并返回 200；runtime 的收尾（coaching 最终重算）以单层 `asyncio.wait_for(..., timeout=3 * llm_timeout_s = 135 s)` 兜底（默认 45s × 3），整体超时后 best-effort 落盘上一份清单；在后台异步执行，不阻塞响应。
 
 客户端在 200 之后应：
 
 1. 停麦（`mr.stop()`）。
 2. 主动 `ws.close()` 关闭连接。若不关，后台拆除完成后服务端会兜底推 `session.ended` 并以 4406 关闭。
 3. 禁用「继续访谈 / 暂停麦 / 结束访谈」，启用「查看报告 / 导出」。
+
+### 10.1 暂停 / 恢复（仅 DB 状态变更，不主动关 WS）
+
+```
+POST /api/v1/interviews/{interview_id}/suspend
+POST /api/v1/interviews/{interview_id}/resume
+Authorization: Bearer <jwt>
+```
+
+`/suspend` 与 `/resume` 只写盘 `suspended` ↔ `in_progress`，**服务端不会主动推 `session.suspended` 帧**——关闭码 4403 仍然只由 watchdog 判空闲超时触发。
+
+客户端调用顺序：用户点「暂停访谈」→ 先 `await /suspend` → 再发 WS `listen:stop`。这样列表里的卡片会立即变「已暂停」，WS 连接走正常流程关掉。「恢复」时序对称：先重连 WS（在新连接里 `hello` 完成）→ 再 `await /resume`，避免被 4406 抢占。
 
 ---
 

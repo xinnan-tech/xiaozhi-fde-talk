@@ -1,4 +1,4 @@
-"""P2-1 · liveness_window_s 与 grace_period_s 解耦后的配置对称性。
+"""· liveness_window_s 与 grace_period_s 解耦后的配置对称性。
 
 M6 原意：grace（manager 翻 SUSPENDED）与 liveness（registry 销毁 runtime）是两套
 独立存活窗口（P1-3/P1-4 已拆分定时器、明确归属）。但 grace_period_s 走 config_store

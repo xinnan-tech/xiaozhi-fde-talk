@@ -1,0 +1,57 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="doc-bg-1" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#f0f7ff" />
+                            <stop offset="100%" stop-color="#e0edfc" />
+                        </linearGradient>
+                        <linearGradient id="blue-item-1" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#5599ff" />
+                            <stop offset="100%" stop-color="#1166ff" />
+                        </linearGradient>
+                        <linearGradient id="light-blue-line-1" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#b3d4ff" />
+                            <stop offset="100%" stop-color="#99c2ff" />
+                        </linearGradient>
+                        <linearGradient id="add-btn-1" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#44aaff" />
+                            <stop offset="100%" stop-color="#0066ff" />
+                        </linearGradient>
+                        <filter id="shadow-doc-1" x="-10%" y="-10%" width="130%" height="130%">
+                            <feDropShadow dx="5" dy="15" stdDeviation="10" flood-color="#a0c4ff" flood-opacity="0.3"/>
+                        </filter>
+                        <filter id="shadow-btn-1" x="-20%" y="-20%" width="150%" height="150%">
+                            <feDropShadow dx="2" dy="8" stdDeviation="6" flood-color="#0066ff" flood-opacity="0.4"/>
+                        </filter>
+                        <filter id="inner-shadow-doc-1">
+                            <feOffset dx="-2" dy="-2"/>
+                            <feGaussianBlur stdDeviation="3" result="offset-blur"/>
+                            <feComposite operator="out" in="SourceGraphic" in2="offset-blur" result="inverse"/>
+                            <feFlood flood-color="white" flood-opacity="0.8" result="color"/>
+                            <feComposite operator="in" in="color" in2="inverse" result="shadow"/>
+                            <feComposite operator="over" in="shadow" in2="SourceGraphic"/>
+                        </filter>
+                    </defs>
+
+                    <!-- Main Document Base -->
+                    <rect x="30" y="20" width="120" height="150" rx="15" fill="url(#doc-bg-1)" filter="url(#shadow-doc-1) url(#inner-shadow-doc-1)" />
+
+                    <!-- List Items -->
+                    <g transform="translate(45, 45)">
+                        <!-- Item 1 -->
+                        <rect x="0" y="0" width="16" height="16" rx="6" fill="url(#blue-item-1)" />
+                        <rect x="25" y="4" width="50" height="8" rx="4" fill="url(#light-blue-line-1)" />
+                        <!-- Item 2 -->
+                        <rect x="0" y="30" width="16" height="16" rx="6" fill="url(#blue-item-1)" />
+                        <rect x="25" y="34" width="50" height="8" rx="4" fill="url(#light-blue-line-1)" />
+                        <!-- Item 3 -->
+                        <rect x="0" y="60" width="16" height="16" rx="6" fill="url(#blue-item-1)" />
+                        <rect x="25" y="64" width="50" height="8" rx="4" fill="url(#light-blue-line-1)" />
+                    </g>
+
+                    <!-- Add Button Overlay -->
+                    <g transform="translate(110, 130)" filter="url(#shadow-btn-1)">
+                        <circle cx="25" cy="25" r="25" fill="url(#add-btn-1)" />
+                        <!-- Plus Sign -->
+                        <path d="M22 13 L28 13 L28 22 L37 22 L37 28 L28 28 L28 37 L22 37 L22 28 L13 28 L13 22 L22 22 Z" fill="white" />
+                    </g>
+                </svg>

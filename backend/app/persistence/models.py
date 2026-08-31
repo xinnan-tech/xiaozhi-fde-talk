@@ -14,6 +14,31 @@ class Base(DeclarativeBase):
     pass
 
 
+class TemplateRecord(Base):
+    """访谈模板（原 backend/templates/*.json 文件已废弃，DB 化）。
+
+    content 是真相源（完整 domain.template.Template 结构的 JSON）；name/
+    icon/version 冗余列仅供列表展示，写入时从同一份 pydantic 模型序列化——
+    整存整取，不存在部分更新，冗余列不会漂移。
+    """
+    __tablename__ = "templates"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    icon_url: Mapped[str] = mapped_column(String(512), default="")
+    icon_alt: Mapped[str] = mapped_column(String(32), default="")
+    version: Mapped[str] = mapped_column(String(16), default="1")
+    content: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=None,
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class SystemConfig(Base):
     """系统级配置 KV 存储（JWT 密钥等敏感配置）。
 
@@ -67,6 +92,8 @@ class InterviewRecord(Base):
     skipped_ids: Mapped[list] = mapped_column(JSON, default=list)
     ignored_ids: Mapped[list] = mapped_column(JSON, default=list)
     coverage_index: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 创建访谈时的整份模板快照（编辑模板不影响已创建访谈）；旧行 NULL=回退实时读
+    template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     consumed_seq: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

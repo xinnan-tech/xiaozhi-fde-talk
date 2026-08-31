@@ -33,13 +33,16 @@ export type InterviewItem = {
   icon: Component;
 };
 
+// base_info 是自由字典：键由所选模板的 base_fields 决定（后端 Session.base_info）。
+// 具名键是历史/运行时固定键（end_time 由开始时间+时长算出），仅供旧代码取值方便
 type BaseInfoType = {
-  title: string;
-  project: string;
-  interviewee: string;
-  start_time: string;
-  duration: string;
-  end_time: string;
+  [key: string]: string | undefined;
+  title?: string;
+  project?: string;
+  interviewee?: string;
+  start_time?: string;
+  duration?: string;
+  end_time?: string;
 };
 
 export type TemplateItem = {
@@ -54,11 +57,17 @@ export type TemplateBaseField = {
   key: string;
   label: string;
   type?: string;
+  required?: boolean;
+  default?: string;
+  placeholder?: string;
 };
 
 export type InterviewTemplateDetail = TemplateItem & {
   session?: {
     base_fields?: TemplateBaseField[];
+    // 访谈名称/访谈目标是固定伪字段，默认值挂在 session 上（空串=无）
+    title_default?: string;
+    goal_default?: string;
   };
 };
 
@@ -181,6 +190,8 @@ export type InterviewDetailType = {
     | "ended"
     | "extracting"
     | "done";
+  // 模板字段定义（快照优先）：运行页按它渲染 base_info 的 label/控件
+  template_fields?: TemplateBaseField[];
   base_info: BaseInfoType;
   goal: string;
   first_batch_generated: boolean;
@@ -245,11 +256,33 @@ export const endInterviewApi = (sessionId: string) => {
   );
 };
 
+/** 暂停访谈 */
+export const suspendInterviewApi = (sessionId: string) => {
+  return http.request<unknown>(
+    "post",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/suspend`)
+  );
+};
+
+/** 继续访谈 */
+export const resumeInterviewApi = (sessionId: string) => {
+  return http.request<unknown>(
+    "post",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/resume`)
+  );
+};
+
 /** 获取访谈报告 */
-export const getInterviewReportApi = (sessionId: string) => {
+export const getInterviewReportApi = (
+  sessionId: string,
+  options?: { force?: boolean }
+) => {
+  // force=true 时拼 ?force=true 给后端跳过缓存强制重生（issue #82「重新生成报告」按钮）。
+  // options 缺省 / force=undefined 时不发 query，与历史行为一致。
   return http.request<InterviewReportType>(
     "get",
-    baseUrlApi(`/api/v1/interviews/${sessionId}/report`)
+    baseUrlApi(`/api/v1/interviews/${sessionId}/report`),
+    { params: { force: options?.force } }
   );
 };
 

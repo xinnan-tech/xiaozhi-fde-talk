@@ -21,7 +21,7 @@ GRACE_PERIOD_S = 60   # session.grace_period_s 默认
 
 @pytest.fixture
 async def _ensure_clean_active_count(api):
-    """本测试依赖"测试启动时 active=0"前提——清掉上一轮失败用例残留的
+    """本测试依赖"测试启动时 active=0"前提——清掉历史失败用例残留的
     IN_PROGRESS / SETTING_UP 行，否则 count_active 已顶到 max_concurrent，
     第一个 listen_start 就被 4409 拒。
 

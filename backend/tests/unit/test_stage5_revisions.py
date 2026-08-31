@@ -1,13 +1,13 @@
-"""Stage 5 同事 review 修缮：
+"""Stage 5 prompt 修订回归测试：
 
-- P0 format 注入 crash（goal 含 `{xxx}` 不再 KeyError）
-- P1 first_batch 系统 prompt 含模板 playbook
-- P2 fallback_phrase 并入 LangMeta（单源）
-- P2 assert msg 不再引用已删的 _REPORT_LANG_INSTRUCTION
-- P2 _fill_dangling_labels 默认 en 兜底（不再 zh_cn）
-- P3 空 goal 时主句不撒谎（"The goal has been provided" → "use the must_ask baseline"）
-- P3 user 尾句英文化（不再「请输出…」）
-- P3 _STYLE_RULE_BASE CJK 字符歧义说明（~30 chars for CJK languages）
+- format 注入防护（goal 含 `{xxx}` 不再 KeyError）
+- first_batch 系统 prompt 模板化（playbook 集中维护）
+- fallback_phrase 并入 LangMeta（单源）
+- assert msg 不再引用已删的 _REPORT_LANG_INSTRUCTION
+- _fill_dangling_labels 默认 en 兜底
+- 空 goal 时主句不撒谎（"The goal has been provided" → "use the must_ask baseline"）
+- user 尾句英文化
+- _STYLE_RULE_BASE CJK 字符歧义说明（~30 chars for CJK languages）
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from app.services.sessions.state import SessionState
 from app.services.template.loader import get_template
 
 
-# ── P0：format 注入 crash ──────────────────────────────────────
+# ── format 注入防护 ──────────────────────────────────────
 
 
 def test_build_system_survives_braces_in_goal():
@@ -53,26 +53,34 @@ def test_build_system_survives_braces_in_playbook():
     """模板 playbook 含 `{placeholder}` 也不爆。"""
     from app.domain.template import CoachingBlock, Template
 
-    tpl = Template(id="t1", version="1", name="t", icon_alt="",
-                   coaching=CoachingBlock(
-                       playbook="规则：填 {项目背景}，避免 {敏感词}",
-                       must_ask=[],
-                   ))
+    tpl = Template(
+        id="t1", version="1", name="t", icon_alt="",
+        session={"goal": "", "base_fields": [], "setup": {}},
+        coaching=CoachingBlock(
+            playbook="规则：填 {项目背景}，避免 {敏感词}",
+            must_ask=[],
+        ),
+        report={"doc": ""},
+    )
     system = build_system(tpl, "目标", "zh_cn")
     assert "{项目背景}" in system
 
 
-# ── P1：first_batch 系统 prompt含模板 playbook ─────────────────────
+# ── first_batch 系统 prompt 模板化 ─────────────────────
 
 
 def test_build_first_batch_includes_template_playbook():
     from app.domain.template import CoachingBlock, Template
 
-    tpl = Template(id="t1", version="1", name="t", icon_alt="",
-                   coaching=CoachingBlock(
-                       playbook="独特提问风格：用'能不能'开场，不要'会不会'",
-                       must_ask=[],
-                   ))
+    tpl = Template(
+        id="t1", version="1", name="t", icon_alt="",
+        session={"goal": "", "base_fields": [], "setup": {}},
+        coaching=CoachingBlock(
+            playbook="独特提问风格：用'能不能'开场，不要'会不会'",
+            must_ask=[],
+        ),
+        report={"doc": ""},
+    )
     session = Session(id="s1", template_id="t1", base_info={}, goal="目标")
     system, _ = build_first_batch(tpl, session, "zh_cn")
     assert "独特提问风格" in system
@@ -83,16 +91,20 @@ def test_build_system_includes_template_playbook():
     """回归保护：build_system 一直含 playbook。"""
     from app.domain.template import CoachingBlock, Template
 
-    tpl = Template(id="t1", version="1", name="t", icon_alt="",
-                   coaching=CoachingBlock(
-                       playbook="PLAYBOOK_MARKER_XYZ",
-                       must_ask=[],
-                   ))
+    tpl = Template(
+        id="t1", version="1", name="t", icon_alt="",
+        session={"goal": "", "base_fields": [], "setup": {}},
+        coaching=CoachingBlock(
+            playbook="PLAYBOOK_MARKER_XYZ",
+            must_ask=[],
+        ),
+        report={"doc": ""},
+    )
     system = build_system(tpl, "目标", "zh_cn")
     assert "PLAYBOOK_MARKER_XYZ" in system
 
 
-# ── P2：fallback_phrase 并入 LangMeta（单源）────────────────
+# ── fallback_phrase 并入 LangMeta（单源）────────────────
 
 
 def test_lang_meta_fallback_phrase_unified_source():
@@ -115,7 +127,7 @@ def test_lang_meta_all_ten_have_fallback_phrase():
         )
 
 
-# ── P2：assert msg 不再引用已删 _REPORT_LANG_INSTRUCTION ─────────
+# ── assert msg 不再引用已删 _REPORT_LANG_INSTRUCTION ─────────
 
 
 def test_generator_assert_message_no_dead_reference():
@@ -130,7 +142,7 @@ def test_generator_assert_message_no_dead_reference():
     assert set(gen_mod._FALLBACK_BY_LANG) == set(_LANG_META)
 
 
-# ── P2：_fill_dangling_labels 默认 en 兜底（不再 zh_cn）────────
+# ── _fill_dangling_labels 默认 en 兜底────────
 
 
 def test_fill_dangling_labels_default_uses_en_fallback():
@@ -150,7 +162,7 @@ def test_fill_dangling_labels_zh_cn_explicit_still_works():
     assert "本次访谈未提及" in out
 
 
-# ── P3：空 goal 时主句不撒谎 ────────────────────────────────
+# ── 空 goal 时主句不撒谎 ────────────────────────────────
 
 
 def test_build_system_empty_goal_uses_baseline_clause():
@@ -181,7 +193,7 @@ def test_build_system_with_goal_still_announces_goal():
     assert "The goal has been provided" in system
 
 
-# ── P3：user 尾句英文化（不再「请输出…」）───────────────────
+# ── user 尾句英文化 ────────────────────
 
 
 def test_build_user_tail_is_english():
@@ -201,7 +213,7 @@ def test_build_first_batch_user_tail_is_english():
     assert "Output the opening batch of interview questions now" in user
 
 
-# ── P3：CJK 字符歧义说明 ──────────────────────────────────
+# ── CJK 字符歧义说明 ──────────────────────────────────
 
 
 def test_style_rule_base_clarifies_cjk_word_vs_character():

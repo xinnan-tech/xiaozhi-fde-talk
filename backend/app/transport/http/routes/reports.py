@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.core.config_store import get_config_store
 from app.core.i18n import Keys
@@ -29,9 +29,13 @@ async def _own_session_or_404(session_id: str, user: CurrentUser):
 @router.get("/{session_id}/report")
 async def get_interview_report(
     session_id: str,
+    force: bool = Query(False, description="Force regenerate, bypassing cache"),
     user: CurrentUser = Depends(get_current_user),
 ):
     """获取访谈报告（Markdown）。首次请求时惰性生成 + 落库；之后返回缓存。
+
+    force=true 时跳过缓存——用于前端「重新生成报告」按钮，按当前 llm.output_language
+    强制重跑（issue #82）。默认按当前缓存命中策略：语种切换不再触发无意义重生。
 
     若该会话仍有存活 runtime（在线或寄存），完成后通过 on_ready 把 report.ready
     帧经 runtime 的 WS 通道推给前端；前端据此可主动刷新报告页。无 runtime 则
@@ -44,7 +48,7 @@ async def get_interview_report(
         if rt is not None:
             await rt.push_report_ready(status)
 
-    status_str, md = await get_or_generate(session_id, on_ready=on_ready)
+    status_str, md = await get_or_generate(session_id, on_ready=on_ready, force=force)
     return {"status": status_str, "content_md": md}
 
 

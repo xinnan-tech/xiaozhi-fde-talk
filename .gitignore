@@ -109,7 +109,11 @@ exports/
 *.db-journal
 *.db-wal
 *.db-shm
-backend/data/
+# Backend runtime data dir：.env、SQLite DB、运行时产物。Docker 用宿主卷
+# 映射该目录（详见 backend/data/.gitkeep）。目录保留 .gitkeep 占位，
+# 后续本地启动产生的 .env / *.db 等不纳入版本控制。
+backend/data/*
+!backend/data/.gitkeep
 
 # Logs
 logs/
@@ -176,6 +180,12 @@ tests/**/coverage/
 
 # 本地配置 SQL 脚本，不提交
 backend/update_config.sql
+
+# 后端静态资源目录：早期存过临时测试页（index.html + locales/），
+# 新前端独立开发后这些文件已废弃。目录保留 .gitkeep 占位，
+# 后续 pnpm build 输出可直接落进来部署，但不纳入版本控制。
+backend/static/*
+!backend/static/.gitkeep
 
 # Playwright e2e 登录态缓存（globalSetup 落地的 storageState，含 token，敏感）
 frontend/tests/e2e/.auth/

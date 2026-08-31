@@ -50,7 +50,7 @@ def mount(app: FastAPI) -> None:
         # ENV 设成 "dev" 或 "test"（_validate_prod 只检查 DB_URL + ASR_WS_URL，
         # 不替 ENV 把关），/ws/v1/echo 0 鉴权直接对外可达。
         # 硬保险：除 prod 不挂载外，连接期再判 ws.client.host，必须是 loopback
-        # （127.0.0.1 / ::1）。dev / test 也强制本机——若同事误把 ENV=dev 开放到
+        # （127.0.0.1 / ::1）。dev / test 也强制本机——若 ENV=dev 被开放到
         # 0.0.0.0 仍能挡。客户端能伪造 X-Forwarded-For，但 ws.client.host 是 socket
         # 真实对端，X-Forwarded-* 拿不到（HTTP 层概念）。
         # ─────────────────────────────────────────────────────────────────

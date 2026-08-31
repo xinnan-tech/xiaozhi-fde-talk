@@ -1,4 +1,4 @@
-"""P2-6 · JWT 密钥首次持久化按方言选择原生 insert。
+"""· JWT 密钥首次持久化按方言选择原生 insert。
 
 M8：_save_to_db 当前只用 sqlite_insert + on_conflict_do_nothing，在 PostgreSQL/MySQL
 上编译直接抛错（PG AttributeError / MySQL UnsupportedCompilationError）—— prod 部署

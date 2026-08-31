@@ -73,7 +73,7 @@ async def with_lang_fallback(
     )
     out = await call(system_factory(fallback_lang), user)
     # fallback 后复检：若 fallback 输出仍不匹配 → logger.error（不打 warning，
-    # 避免埋点过载）。观测「pivot 兜底真实有效率」——同事 4 提的可观测性提升。
+    # 避免埋点过载）。观测「pivot 兜底真实有效率」用于评估兜底链路命中频率。
     if not detect_language_match_json(out, fallback_lang):
         logger.error(
             "pivot fallback also mismatched: requested=%s fallback=%s "

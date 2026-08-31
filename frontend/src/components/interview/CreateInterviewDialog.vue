@@ -228,7 +228,7 @@ const resetForm = async () => {
   closeCamera();
   formRef.value?.resetFields();
   Object.assign(form, createDefaultForm());
-  // 兜底值记录随表单一起清空：模板默认值只取代兜底值，不取代用户改动
+  // 兜底值记录随表单一起清空，避免影响下一次模板默认值处理
   for (const key of Object.keys(autoValues)) delete autoValues[key];
   templateHints.value = {};
   form.template_id = interviewTemplates.value[0]?.id ?? "";
@@ -317,16 +317,16 @@ const loadTemplateFields = async (templateId: string) => {
 // 模板字段的兜底初值/默认值与占位提示
 // - 兜底初值按类型：datetime=此刻（访谈多为马上开始）、duration=45、其余空串，
 //   加载模板时只补缺失的键
-// - 模板默认值（default）只取代兜底值或空值，用户改过的不动——预填永远
-//   不覆盖人的输入；访谈名称/访谈目标是固定伪字段，默认值在
-//   session.title_default / goal_default
+// - 接口返回的模板默认值（default）在切换模板时直接替换当前值，空字符串
+//   也表示明确的默认值；datetime/duration 保留当前值，访谈名称/访谈目标是
+//   固定伪字段，默认值在 session.title_default / goal_default
 // - 占位提示：模板配了就替代全局文案；重置时清空回退
 const templateHints = ref<Record<string, string>>({});
 const templateSession = ref<{
   title_default?: string;
   goal_default?: string;
 }>({});
-// 各字段「未经用户手」的兜底值：模板 default 只取代兜底值
+// 记录各字段的兜底值，供模板切换时清理不再使用的字段。
 const autoValues: Record<string, string> = {};
 
 const fallbackForType = (type: string): string => {
@@ -338,6 +338,7 @@ const fallbackForType = (type: string): string => {
 const applyTemplateDefaults = async (templateId: string) => {
   if (!templateId) return;
   const fields = await loadTemplateFields(templateId);
+  console.log(fields);
   const baseInfo = form.base_info as Record<string, string>;
   const hints: Record<string, string> = {};
 
@@ -349,7 +350,7 @@ const applyTemplateDefaults = async (templateId: string) => {
   const validKeys = new Set<string>([
     ...fields.map(f => f.key),
     "title",
-    "end_time",
+    "end_time"
   ]);
   for (const key of Object.keys(baseInfo)) {
     if (!validKeys.has(key)) delete baseInfo[key];
@@ -367,19 +368,22 @@ const applyTemplateDefaults = async (templateId: string) => {
     }
   }
 
-  const titlePreset = templateSession.value.title_default?.trim();
-  if (titlePreset && !baseInfo.title?.trim()) baseInfo.title = titlePreset;
-  const goalPreset = templateSession.value.goal_default?.trim();
-  if (goalPreset && !form.goal.trim()) form.goal = goalPreset;
+  const titlePreset = templateSession.value.title_default;
+  if (titlePreset !== undefined) baseInfo.title = titlePreset.trim();
+  const goalPreset = templateSession.value.goal_default;
+  if (goalPreset !== undefined) form.goal = goalPreset.trim();
 
   for (const field of fields) {
-    const preset = field.default?.trim();
-    if (preset) {
-      const current = baseInfo[field.key] ?? "";
-      // 当前值既非空也非兜底值 = 用户已动过，不覆盖
-      if (current && current !== autoValues[field.key]) continue;
-      const value = normalizeByType(field.type || "text", preset);
-      if (value) baseInfo[field.key] = value;
+    if (
+      field.default !== undefined &&
+      field.type !== "datetime" &&
+      field.type !== "duration"
+    ) {
+      // default 即使是空字符串也要覆盖上一模板的值。
+      baseInfo[field.key] = normalizeByType(
+        field.type || "text",
+        field.default.trim()
+      );
     }
     if (field.placeholder?.trim()) {
       hints[field.key] = field.placeholder.trim();

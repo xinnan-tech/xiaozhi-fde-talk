@@ -51,6 +51,8 @@
   "session.illegal_transition": "Chuyển trạng thái không hợp lệ: {from_state} → {to_state}",
   "session.edit_forbidden": "Phỏng vấn ở trạng thái {state} không thể sửa",
   "session.delete_forbidden": "Phỏng vấn ở trạng thái {state} không thể xóa",
+  "session.base_info_value_too_long": "Giá trị base_info.{key} quá dài ({byte_len} > {max_bytes} byte)",
+  "session.base_info_total_too_large": "Tổng base_info quá lớn ({byte_len} > {max_bytes} byte)",
   "report.format_not_implemented": "Định dạng {fmt!r} chưa được triển khai",
   "llm.not_configured": "LLM chưa được cấu hình (LLM_BASE_URL / LLM_API_KEY / LLM_MODEL)",
   "llm.non_retryable": "Lệnh gọi LLM không thể thử lại: HTTP {status} {body}",

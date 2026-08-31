@@ -1,12 +1,11 @@
-"""覆盖 ws_url / llm.base_url / ocr.base_url 写入校验：scheme 必须在白名单、
-非空 netloc、拒整段前后空白；空串放行（让 admin 清空 ws_url 走 fail-fast）。"""
+"""ws_url / llm.base_url / ocr.base_url 写入校验：scheme 白名单 + 主机段必填 + 拒前后空白，空串放行。"""
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.core.config_store import URL_KEYS, ConfigStore, validate_value
+from app.core.config_store import DEFAULTS, URL_KEYS, ConfigStore, validate_value
 from app.core.i18n.errors import I18nError
 from app.core.i18n.messages import Keys
 
@@ -101,6 +100,35 @@ def test_validate_value_rejects_ws_url_empty_netloc():
     assert ei.value.http_status == 400
 
 
+def test_validate_value_rejects_ws_url_port_only():
+    """仅端口无主机段：urlparse("ws://:10095") 返 netloc=":10095" 非空但 hostname=None，
+    用 parsed.netloc 判空会漏过——必须用 parsed.hostname。"""
+    with pytest.raises(I18nError) as ei:
+        validate_value("asr.funasr_server.ws_url", "ws://:10095")
+    assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+    assert ei.value.params["field"] == "asr.funasr_server.ws_url"
+    assert ei.value.params["value"] == "ws://:10095"
+    assert ei.value.http_status == 400
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "ws://[invalid",  # 未闭合的 IPv6
+        "ws://[",         # 仅一个开括号
+    ],
+)
+def test_validate_value_rejects_unclosed_ipv6(bad):
+    """urlparse 对未闭合的 [ 抛 ValueError("Invalid IPv6 URL")，必须转 I18nError(400)
+    而不是沿裸抛给上层通用 except 转 422。"""
+    with pytest.raises(I18nError) as ei:
+        validate_value("asr.funasr_server.ws_url", bad)
+    assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+    assert ei.value.params["field"] == "asr.funasr_server.ws_url"
+    assert ei.value.params["value"] == bad
+    assert ei.value.http_status == 400
+
+
 def test_validate_value_rejects_ws_url_leading_trailing_whitespace():
     """前后空格整段拒：runtime 传给 websockets.connect 的是
     funasr_server.py:150 self._ws_url.rstrip("/")，不去前后空白，会带空格
@@ -163,3 +191,27 @@ async def test_warm_rejects_bad_default_url(monkeypatch):
     # AsyncSession 上下文退出时被丢弃，AsyncMock 不模拟事务回滚，但仍
     # 验证没有 commit 调用）。
     session.commit.assert_not_called()
+
+
+def test_sanitize_loaded_values_reverts_bad_url():
+    """加载层兜底：DB 已有行里的脏 URL（手动改 DB / 迁移遗漏 / 镜像回放）必须回退
+    到 DEFAULTS——避免 warm 路径绕过写入校验把脏 URL 放进缓存，runtime 调
+    websockets.connect 才抛 InvalidURI。"""
+    from app.core import config_store as cs
+
+    sanitized = cs._sanitize_loaded_values({"asr.funasr_server.ws_url": "not-a-url"})
+    assert sanitized["asr.funasr_server.ws_url"] == DEFAULTS["asr.funasr_server.ws_url"]
+    # llm.base_url / ocr.base_url 同理
+    sanitized = cs._sanitize_loaded_values({"llm.base_url": "ftp://x"})
+    assert sanitized["llm.base_url"] == DEFAULTS["llm.base_url"]
+    sanitized = cs._sanitize_loaded_values({"ocr.base_url": "  https://x  "})
+    assert sanitized["ocr.base_url"] == DEFAULTS["ocr.base_url"]
+
+
+def test_sanitize_loaded_values_keeps_valid_url():
+    """合法 URL（写入前已校验过的）不应被改动——passthrough。"""
+    from app.core import config_store as cs
+
+    loaded = {"asr.funasr_server.ws_url": "wss://asr.example.com/ws"}
+    sanitized = cs._sanitize_loaded_values(loaded)
+    assert sanitized == loaded

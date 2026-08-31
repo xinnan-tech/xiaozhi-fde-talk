@@ -342,7 +342,9 @@ class ConfigStore:
 
         DEFAULTS 中若有空字符串类必填字段（如豆包 appid/access_token 没有合法
         默认），validate_value 会拒——跳过种入并 warn，让 DB 留空由 admin 通过
-        配置页补齐，避免无声写入"无效值"。
+        配置页补齐，避免无声写入"无效值"。其他 key 的脏 DEFAULTS（URL / ENUM /
+        BOOL / NUMERIC 写错）属配置 bug，必须 fail-fast 抛出——首次启动通道与
+        admin PUT 通道同等对待。
 
         加载完成后遍历一次 ENUM_KEYS / BOOL_KEYS / NUMERIC_KEYS，命中校验失败
         的脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放等历史脏值）回退到 DEFAULTS
@@ -359,6 +361,12 @@ class ConfigStore:
                 try:
                     validate_value(k, v)
                 except I18nError:
+                    # 必填字段（豆包 appid/access_token 等）DEFAULTS 自身是 "" 无
+                    # 合法回退目标，跳过种入 + warn 让 admin 在配置页补齐；其他 key
+                    # 的脏 DEFAULTS（如 URL 写错）属配置 bug，必须 fail-fast 抛出
+                    # ——首次启动通道与 admin PUT 通道同等对待。
+                    if k not in REQUIRED_STRING_KEYS:
+                        raise
                     logger.warning(
                         "ConfigStore 跳过种入 %s：DEFAULTS 值 %r 不通过 validate_value，"
                         "需 admin 在配置页补齐后才会落库",

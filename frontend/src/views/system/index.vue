@@ -117,6 +117,10 @@ const selfCheckVisible = ref(false);
 const selfCheckRunning = ref(false);
 const selfCheckTarget = ref<CheckTarget>("all");
 const selfCheckResults = reactive<SelfCheckResult[]>([]);
+/** 已保存但本地未刷新成功的分组 key；这些分组的保存按钮在被点击时
+ * 会拦截 saveConfig 并提示用户刷新页面，避免「保存成功→本地旧值→
+ * 再次保存→覆盖服务端最新值」的连锁问题。 */
+const staleGroups = ref(new Set<string>());
 /** 敏感密码字段 */
 const sensitiveKeys = ["api_key", "access_token", "secret_key"];
 /** 复选框字段 */
@@ -455,13 +459,14 @@ const setConfigCardRef = (key: string, element: unknown) => {
 
 /** 切换配置分组 */
 const selectGroup = async (key: string) => {
+  if (activeGroup.value === key) return;
+
   activeGroup.value = key;
 
   await nextTick();
   const targetCard = configCards.value[key];
   if (targetCard) {
-    // 滚动到卡片offsetTop位置
-    const stickyOffset = 28;
+    const stickyOffset = 4;
     const pageScrollWrap = document.querySelector<HTMLElement>(
       ".content-scroll .el-scrollbar__wrap"
     );
@@ -524,14 +529,74 @@ const saveConfig = async (group: ConfigGroup) => {
     }
   }
 
-  const res = await systemConfigSaveApi<Record<string, ConfigValue>>(
-    group.key,
-    payload as Record<string, ConfigValue>
-  );
+  // 仅把 PUT 调用本身包在 try 中：响应拦截器虽对部分错误路径弹 toast，但
+  // 不覆盖 nginx 502 HTML body / 空 detail 对象 / 4xx 无 detail 等情形，
+  // 此 catch 必须自己给一条错误反馈，禁止静默吞掉——与拦截器偶尔双弹可接受，
+  // 胜过让用户误以为保存成功。
+  let res: Awaited<
+    ReturnType<typeof systemConfigSaveApi<Record<string, ConfigValue>>>
+  >;
+  try {
+    res = await systemConfigSaveApi<Record<string, ConfigValue>>(
+      group.key,
+      payload as Record<string, ConfigValue>
+    );
+  } catch (err) {
+    ElMessage.error(
+      t("system.save_failed", {
+        group: group.title,
+        message: getErrorMessage(err)
+      })
+    );
+    // 不打印整对象：err.config.headers 含 Authorization Bearer JWT，
+    // err.config.data 含 PUT payload（含 api_key 与可能的 ASR 凭证）；
+    // 浏览器控制台截图 / Sentry 等日志聚合会同步把这些一并外发。仅打印
+    // 显式字段，避免把鉴权凭证 / 配置秘密写进日志。
+    const axiosErr = err as {
+      response?: {
+        status?: number;
+        data?: { detail?: unknown; code?: unknown };
+      };
+      message?: string;
+    };
+    console.warn("[system] saveConfig rejected", {
+      status: axiosErr?.response?.status,
+      code: axiosErr?.response?.data?.code,
+      detail: axiosErr?.response?.data?.detail,
+      message: axiosErr?.message
+    });
+    return;
+  }
+
   if (res.ok) {
     ElMessage.success(t("system.save_success"));
-    await initCofig();
-    // auth.allow_registration 改变后，把最新值喂给 permission store 以刷新「用户管理」菜单可见性。
+    // 本地刷新失败不应抹掉"保存成功"反馈，但同时绝不能允许后续编辑在
+    // 本地旧值之上再次保存，把服务端刚确认的字段一起回写覆盖掉——
+    // catch 内必须把该 group 加入 staleGroups，让 save 按钮被点击时
+    // 走强制刷新页面流程。
+    try {
+      await initCofig();
+      staleGroups.value.delete(group.key);
+    } catch {
+      staleGroups.value.add(group.key);
+      try {
+        await ElMessageBox.confirm(
+          t("system.save_refresh_required_msg", { group: group.title }),
+          t("system.save_refresh_required_title"),
+          {
+            type: "warning",
+            confirmButtonText: t("system.save_refresh_button"),
+            cancelButtonText: t("system.save_refresh_later"),
+            closeOnPressEscape: false
+          }
+        );
+        window.location.reload();
+      } catch {
+        /* 选了「稍后」：保持按钮点击时再次弹同一对话框 */
+      }
+    }
+    // auth.allow_registration 改变后，把最新值喂给 permission store 以刷新
+    // 「用户管理」菜单可见性；此 try 仅保护该同步，与 initCofig 完全独立。
     if (group.key === "auth") {
       try {
         const r = await registrationStatusApi();
@@ -548,6 +613,32 @@ const saveConfig = async (group: ConfigGroup) => {
       })
     );
   }
+};
+
+/** 点击「保存」按钮的统一入口：stale 分组必须先走刷新页面流程，
+ * 否则后续 saveConfig 会基于未刷新的本地 state 把刚保存的字段一起回写。
+ * 用 click handler 而不是 :disabled，是为了让用户每次点都能看到对话框提示，
+ * 而不是被静默禁用。 */
+const handleSaveClick = async (group: ConfigGroup) => {
+  if (staleGroups.value.has(group.key)) {
+    try {
+      await ElMessageBox.confirm(
+        t("system.save_refresh_required_msg", { group: group.title }),
+        t("system.save_refresh_required_title"),
+        {
+          type: "warning",
+          confirmButtonText: t("system.save_refresh_button"),
+          cancelButtonText: t("system.save_refresh_later"),
+          closeOnPressEscape: false
+        }
+      );
+      window.location.reload();
+    } catch {
+      /* 选了「稍后」：保持 staleGroups 不变，下次再点仍走同一流程 */
+    }
+    return;
+  }
+  await saveConfig(group);
 };
 
 const openSelfCheck = () => {
@@ -711,6 +802,8 @@ watch(
       return;
     }
     await initCofig();
+    // 页面刷新或登录态变化后，本地状态重新与服务端对齐，清掉旧 stale 标记。
+    if (staleGroups.value.size > 0) staleGroups.value.clear();
   },
   { immediate: true }
 );
@@ -940,7 +1033,7 @@ watch(locale, () => {
                 <el-button
                   type="primary"
                   class="save-button"
-                  @click="saveConfig(group)"
+                  @click="handleSaveClick(group)"
                 >
                   {{
                     t("system.save_group", {
@@ -1088,7 +1181,7 @@ watch(locale, () => {
   width: 100%;
   height: 100%;
   min-height: 0;
-  padding: 30px 8px 0 16px;
+  padding: 0 8px 0 16px;
   overflow: visible;
   container-type: inline-size;
 
@@ -1098,7 +1191,7 @@ watch(locale, () => {
     justify-content: space-between;
     gap: 16px;
     flex-shrink: 0;
-    padding: 8px 16px 20px;
+    padding: 15px 16px 14px;
   }
 
   &-body {
@@ -1306,10 +1399,10 @@ watch(locale, () => {
       align-self: flex-start;
       height: fit-content;
       min-height: 0;
-      margin-bottom: 24px;
+      margin-bottom: 6px;
       padding: 18px 0;
       position: sticky;
-      top: 24px;
+      top: 0;
     }
 
     &-scroll {
@@ -1323,8 +1416,9 @@ watch(locale, () => {
       }
 
       :deep(.el-scrollbar__view) {
+        width: 100%;
+        box-sizing: border-box;
         padding: 0 8px 0 16px;
-        margin-bottom: 24px;
       }
     }
 
@@ -1332,10 +1426,6 @@ watch(locale, () => {
       display: grid;
       flex: 1;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      // 行高取 max(300px, 内容高)：模板管理卡片内容长也不会把同网格其它
-      // 卡片一起撑高（align-items: start 配合，避免 1fr 等高带来的大面积空白）
-      grid-auto-rows: minmax(300px, auto);
-      align-items: start;
       gap: 16px;
       min-width: 0;
       min-height: 100%;

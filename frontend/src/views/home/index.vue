@@ -20,6 +20,7 @@ import {
   getStatisticsApi,
   getInterviewsApi
 } from "@/api/interview";
+import { interviewRouteTarget } from "@/utils/interview";
 
 defineOptions({
   name: "Home"
@@ -180,10 +181,7 @@ const openCreateDialog = () => {
 };
 
 const openInterviewPage = (item: (typeof interviewList.value)[number]) => {
-  router.push({
-    path:
-      item.status !== "ended" ? `/interview/${item.id}` : `/report/${item.id}`
-  });
+  router.push({ path: interviewRouteTarget(item) });
 };
 
 /** 格式化最近时间 */
@@ -586,13 +584,8 @@ watch(
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-
-  /* 可视高度锚点：视口底 -24px = 侧边栏圆角条底线。
-     用视口单位而非 height:100% —— 滚动容器的 view/wrapper 链是
-     flex-basis:0 的循环依赖，百分比链解析不出确定值 */
-  min-height: calc(100vh - 24px);
   max-width: 100%;
-  padding: 24px 16px 24px 16px;
+  padding: 0 16px;
 
   /* 以内容区实际宽度作为自适应基准，自动兼容侧边栏展开/折叠 */
   container-type: inline-size;
@@ -604,7 +597,7 @@ watch(
     gap: 28px;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px 14px;
+    padding: 15px 16px 14px;
     background: transparent;
   }
 

@@ -20,6 +20,9 @@ import JsonMode from "@/components/template-editor/JsonMode.vue";
 import {
   parseJsonSafe,
   validateTemplateStructure,
+  formatSyntaxError,
+  formatStructError,
+  type SyntaxError,
   type StructError
 } from "@/utils/templateValidation";
 
@@ -112,19 +115,12 @@ const applyDoc = (doc: TemplateDoc) => {
 
 const jsonEditor = ref<InstanceType<typeof JsonMode>>();
 const structErrors = ref<StructError[]>([]);
-const syntaxError = ref<{
-  line: number;
-  column: number;
-  message: string;
-} | null>(null);
+const syntaxError = ref<SyntaxError | null>(null);
 
 const jsonErrors = computed(() => {
   const list: string[] = [];
-  if (syntaxError.value) {
-    const { line, column, message } = syntaxError.value;
-    list.push(`第 ${line} 行 第 ${column} 列：${message}`);
-  }
-  for (const e of structErrors.value) list.push(`${e.path}：${e.message}`);
+  if (syntaxError.value) list.push(formatSyntaxError(syntaxError.value, t));
+  for (const e of structErrors.value) list.push(formatStructError(e, t));
   return list;
 });
 
@@ -210,9 +206,22 @@ onMounted(async () => {
 const save = async () => {
   if (saving.value) return;
   // JSON 模式下直接点保存：先过同一道解析+结构闸门（通过则并入表单数据），
-  // 失败不保存——否则 JSON 改动会被旧表单数据悄悄覆盖
+  // 失败不保存——否则 JSON 改动会被旧表单数据悄悄覆盖。
+  // 报错口径按闸门命中的具体阶段区分：解析错给 parse 详情，结构错给字段路径。
   if (mode.value === "json" && !applyJsonToForm()) {
-    ElMessage.warning(t("system.template.json_apply_blocked"));
+    if (syntaxError.value) {
+      const { line, column, message } = syntaxError.value;
+      ElMessage.warning(
+        t("system.template.save_json_parse_failed", { line, column, message })
+      );
+    } else if (structErrors.value.length) {
+      const details = structErrors.value
+        .map(e => `${e.path}: ${formatStructError(e, t)}`)
+        .join("; ");
+      ElMessage.warning(
+        t("system.template.save_json_struct_invalid", { details })
+      );
+    }
     return;
   }
   saving.value = true;

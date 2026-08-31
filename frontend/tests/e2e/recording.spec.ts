@@ -27,12 +27,8 @@ test("recording flow: create → navigate → start → recording status → sto
     .click()
   await expect(dialog).not.toBeVisible({ timeout: 10_000 })
 
-  // 2. create 不会 router.push，需手动进：点 home 列表里那张新卡片（文案匹配 uniqueTitle）
-  const card = page
-    .locator(".interview-card", { hasText: uniqueTitle })
-    .first()
-  await card.waitFor({ state: "visible", timeout: 10_000 })
-  await card.click()
+  // 2. PR #135 后创建自动跳 /interview/:id，直接等 URL 落位即在详情页。
+  //    旧版「点 home 列表里那张新卡片」已不再适用——dialog 关掉时页面已不在 home。
   await page.waitForURL(/\/interview\/[a-zA-Z0-9_-]+$/, { timeout: 15_000 })
 
   // 3. 等详情加载完，「开始访谈」按钮可见。

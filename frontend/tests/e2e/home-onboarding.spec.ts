@@ -63,12 +63,19 @@ test.describe("home onboarding panel", () => {
       .last()
       .click()
     await expect(dialog).not.toBeVisible({ timeout: 10_000 })
+    // PR #135：创建成功后跳 /interview/:id，.interview-card 是 Home 视图元素，
+    // 必须先回 /home 再断言卡片 + 面板状态。.home-header 是 home 视图专属锚点
+    // （sidebar / interview 视图都不渲染），避免误中。
+    await page.waitForURL(/\/interview\/[a-zA-Z0-9_-]+$/, { timeout: 15_000 })
+    await page.goto("/#/home")
+    await page.locator(".home-header").waitFor({ state: "visible", timeout: 10_000 })
     await expect(page.locator(".interview-card").first()).toBeVisible({
       timeout: 10_000
     })
     await expect(panel).not.toBeVisible()
 
     // 4) 搜索无结果：显示 .filtered-empty 轻提示，不显示面板
+    //    此时 page 已在 home 视图（.search-input / .filtered-empty 只在 home 渲染）。
     await page.locator(".search-input").fill("不存在的访谈关键字xyz")
     await expect(page.locator(".filtered-empty")).toBeVisible({
       timeout: 10_000

@@ -190,6 +190,44 @@ async def test_cache_miss_status_failed(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cache_miss_status_failed_with_output_language(monkeypatch):
+    """#144：失败行带 output_language 时也必须重生，不能返 ("ready", "")。
+
+    之前 _cache_hit 只看 transcript_signature + output_language 非空，没看
+    status —— 失败行也满足条件，于是被当成命中直接返 "ready" + 空 content，
+    前端拿到「内容空的成功」以为是服务挂了。修正后 status != "ready" 一律
+    当作 cache miss，触发重生。
+    """
+    # 用 unique session id 避开 _gen_locks 跨测试复用同一把锁导致双重 LLM 调用
+    sid = "s-failed-with-lang"
+    state = _FakeState(transcript=[_seg("s1", "x")])
+    sig = _transcript_signature(state.transcript)
+
+    monkeypatch.setattr(generator, "interview_repo", MagicMock(
+        get_state_auto=AsyncMock(return_value=state),
+    ))
+    monkeypatch.setattr(generator, "report_repo", MagicMock(
+        get_by_interview_auto=AsyncMock(return_value=_FakeRec(
+            status="failed", content_md="", transcript_signature=sig,
+            output_language="zh_cn",
+        )),
+        upsert_auto=AsyncMock(),
+    ))
+    llm = MagicMock()
+    # 含 zh_cn 字符，避免 pivot 误判「requested=zh_cn observed=LATIN」触发 retry
+    llm.chat_text = AsyncMock(return_value="## 新报告\n内容")
+    monkeypatch.setattr(generator, "get_llm", lambda: llm)
+    monkeypatch.setattr(generator, "resolve_template", lambda _id, _snap: MagicMock(report=MagicMock(doc="")))
+    monkeypatch.setattr(generator, "render_skills", AsyncMock(side_effect=lambda m: m))
+
+    status, md = await generator.get_or_generate(sid)
+    # 关键：不能再返 ("ready", "") 假装成功 —— 必须重跑 LLM 拿到新内容
+    assert status == "ready"
+    assert md == "## 新报告\n内容"
+    llm.chat_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_llm_failure_keeps_failed_status(monkeypatch):
     """LLM 抛错 → status=failed, 落库（覆盖 ready 旧值）。
 

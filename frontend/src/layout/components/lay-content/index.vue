@@ -144,11 +144,8 @@ const transitionMain = defineComponent({
   overflow-x: hidden;
 }
 
-/* 底部留出与侧边栏（big-sidebar-container 的 24px inset）一致的安全区：
-   收窄滚动视口可视高度，内容卡片底边与侧边栏圆角条底线对齐，
-   滚动条也止于同一底线 */
 .content-scroll {
-  height: calc(100% - 24px);
+  padding: 24px 0;
 }
 
 .content-wrapper {

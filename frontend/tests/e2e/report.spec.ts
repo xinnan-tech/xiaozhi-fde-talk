@@ -26,12 +26,8 @@ test.describe("report page accessibility", () => {
       .click()
     await expect(dialog).not.toBeVisible({ timeout: 10_000 })
 
-    // 2. 进 interview 页（点 home 列表里的卡片）
-    const card = page
-      .locator(".interview-card", { hasText: uniqueTitle })
-      .first()
-    await card.waitFor({ state: "visible", timeout: 10_000 })
-    await card.click()
+    // 2. PR #135 后创建自动跳 /interview/:id，直接等 URL 落位即在详情页。
+    //    旧版「点 home 列表里的卡片」已不适用——dialog 关掉时页面已不在 home。
     await page.waitForURL(/\/interview\/[a-zA-Z0-9_-]+$/, { timeout: 15_000 })
 
     // 3. 抓 interview id（从 URL）

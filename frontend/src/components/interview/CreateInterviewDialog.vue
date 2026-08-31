@@ -20,6 +20,7 @@ import { AVMedia } from "vue-audio-visual";
 import { useAsrRecorder } from "@/composables/useAsrRecorder";
 import { useCameraCapture, blobToBase64 } from "@/composables/useCameraCapture";
 import { useAbortableRequests } from "@/composables/useAbortableRequests";
+import ImageCropDialog from "./ImageCropDialog.vue";
 import {
   extractInterviewFieldsApi,
   getInterviewsTemplatesApi,
@@ -63,7 +64,8 @@ const clipboardIcon = markRaw(useRenderIcon("tabler:clipboard-text"));
 
 const formRef = ref<FormInstance>();
 const selectedInputMethod = ref("");
-const activePanel = ref<"" | "clipboard" | "voice" | "camera">("");
+type ActivePanel = "" | "clipboard" | "voice" | "camera" | "cropPreview";
+const activePanel = ref<ActivePanel>("");
 const goalError = ref("");
 const interviewTemplates = ref<TemplateItem[]>([]);
 const interviewTemplatesLoading = ref(false);
@@ -77,6 +79,9 @@ const cameraFrozen = ref(false);
 const cameraVideoRef = ref<HTMLVideoElement>();
 const fileInputRef = ref<HTMLInputElement>();
 const frozenImageSrc = ref("");
+const showCropDialog = ref(false);
+const pendingImageBase64 = ref("");
+const cropPreviewSrc = ref("");
 const createDefaultForm = (): CreateInterviewForm => ({
   // base_info 的键由所选模板的 base_fields 决定（applyTemplateDefaults
   // 加载时逐字段初始化兜底值），这里不再预置固定键
@@ -240,6 +245,7 @@ const resetForm = async () => {
   cameraRecognizing.value = false;
   cameraFrozen.value = false;
   frozenImageSrc.value = "";
+  cropPreviewSrc.value = "";
   goalError.value = "";
   await nextTick();
   formRef.value?.clearValidate();
@@ -250,6 +256,7 @@ const closeActivePanel = () => {
   activePanel.value = "";
   cameraFrozen.value = false;
   frozenImageSrc.value = "";
+  cropPreviewSrc.value = "";
   closeCamera();
 };
 
@@ -317,16 +324,21 @@ const loadTemplateFields = async (templateId: string) => {
 // 模板字段的兜底初值/默认值与占位提示
 // - 兜底初值按类型：datetime=此刻（访谈多为马上开始）、duration=45、其余空串，
 //   加载模板时只补缺失的键
-// - 模板默认值（default）只取代兜底值或空值，用户改过的不动——预填永远
-//   不覆盖人的输入；访谈名称/访谈目标是固定伪字段，默认值在
-//   session.title_default / goal_default
+// - 模板默认值（default）只取代未经用户手动的自动值——预填永远不覆盖人
+//   的输入；前后模板同 key 字段若都未经用户手，新 default 仍能继续覆盖
+//   （autoValues 跟踪真实写入的自动值，含已应用的 default）。
+//   datetime/duration 用户通常自行设置，不参与模板 default 覆盖；
+//   访谈名称/访谈目标是固定伪字段，默认值在 session.title_default /
+//   goal_default
 // - 占位提示：模板配了就替代全局文案；重置时清空回退
 const templateHints = ref<Record<string, string>>({});
 const templateSession = ref<{
   title_default?: string;
   goal_default?: string;
 }>({});
-// 各字段「未经用户手」的兜底值：模板 default 只取代兜底值
+// 记录各字段"未经用户手"的兜底值：模板 default 只取代这些值。
+// 同步写入时机：fallback 初始化（缺失键写入 fallback）、模板 default 实际
+// 写入。供模板切换时清理不再使用的字段，以及判断"是否仍是自动值"。
 const autoValues: Record<string, string> = {};
 
 const fallbackForType = (type: string): string => {
@@ -367,19 +379,29 @@ const applyTemplateDefaults = async (templateId: string) => {
     }
   }
 
+  // title_default / goal_default 后端恒为 ""（绝大多数模板没显式配置），
+  // 仅在模板配置了非空默认值、且当前没填时覆盖，避免切模板时把用户已填的
+  // 「访谈名称」「访谈目标」无意义清空。
   const titlePreset = templateSession.value.title_default?.trim();
   if (titlePreset && !baseInfo.title?.trim()) baseInfo.title = titlePreset;
   const goalPreset = templateSession.value.goal_default?.trim();
   if (goalPreset && !form.goal.trim()) form.goal = goalPreset;
 
   for (const field of fields) {
+    // datetime / duration 用户通常自行设置，不参与模板 default 覆盖
+    if (field.type === "datetime" || field.type === "duration") continue;
     const preset = field.default?.trim();
-    if (preset) {
-      const current = baseInfo[field.key] ?? "";
-      // 当前值既非空也非兜底值 = 用户已动过，不覆盖
-      if (current && current !== autoValues[field.key]) continue;
-      const value = normalizeByType(field.type || "text", preset);
-      if (value) baseInfo[field.key] = value;
+    if (!preset) continue;
+    const current = baseInfo[field.key] ?? "";
+    // 当前值既非空也非兜底值 = 用户已动过，不覆盖。
+    // 同 key 字段切模板时若前后 default 不一致，因 autoValues 已同步
+    // 记录上次写入的 default（含本函数下面这步更新），仍能继续匹配上。
+    if (current && current !== autoValues[field.key]) continue;
+    const value = normalizeByType(field.type || "text", preset);
+    if (value) {
+      baseInfo[field.key] = value;
+      // 同步更新 autoValues，让下一轮模板切换仍能识别为"未经用户手"
+      autoValues[field.key] = value;
     }
     if (field.placeholder?.trim()) {
       hints[field.key] = field.placeholder.trim();
@@ -717,14 +739,36 @@ const handleFileChange = async (event: Event) => {
     return;
   }
 
-  // 选择文件后开始识别时才关闭摄像头
+  // 选择文件后打开裁切弹窗，同时关闭摄像头
   closeCamera();
+  try {
+    pendingImageBase64.value = await blobToBase64(file);
+    showCropDialog.value = true;
+  } catch (error) {
+    message(extractBackendError(error, t("create.dialog.upload_failed")), {
+      type: "error"
+    });
+  } finally {
+    // 重置 input 以便下次选择同一文件
+    input.value = "";
+  }
+};
+
+const handleCropConfirm = async (croppedBase64: string) => {
+  showCropDialog.value = false;
+  cropPreviewSrc.value = `data:image/jpeg;base64,${croppedBase64}`;
+  selectedInputMethod.value = "cropPreview";
+  activePanel.value = "cropPreview";
+};
+
+const handleCropSubmit = async () => {
+  if (cameraRecognizing.value || !cropPreviewSrc.value) return;
   cameraRecognizing.value = true;
   try {
-    const imageBase64 = await blobToBase64(file);
-    const response = await ocrInterviewImageApi({
-      image_base64: imageBase64
-    });
+    const imageBase64 = cropPreviewSrc.value.slice(
+      cropPreviewSrc.value.indexOf(",") + 1
+    );
+    const response = await ocrInterviewImageApi({ image_base64: imageBase64 });
     const text = (response.text ?? "").trim();
     if (!text) {
       message(t("create.dialog.ocr_empty"), { type: "warning" });
@@ -743,9 +787,16 @@ const handleFileChange = async (event: Event) => {
     closeActivePanel();
   } finally {
     cameraRecognizing.value = false;
-    // 重置 input 以便下次选择同一文件
-    input.value = "";
+    cropPreviewSrc.value = "";
   }
+};
+
+const handleCropReselect = () => {
+  cropPreviewSrc.value = "";
+  selectedInputMethod.value = "camera";
+  activePanel.value = "camera";
+  cameraFrozen.value = false;
+  void openCamera();
 };
 
 // 服务端触发停止（60s 上限/连接断开）时，与手动停止走同一提取流程；
@@ -754,6 +805,16 @@ watch(asrState, (next, previous) => {
   if (previous !== "stopping" || next !== "idle") return;
   if (voiceExtracting.value || !asrEverRecorded.value) return;
   void extractVoiceTranscript();
+});
+
+// 裁切弹窗关闭时回到拍摄区并重新打开摄像头
+watch(showCropDialog, val => {
+  if (val) return;
+  if (cropPreviewSrc.value) return; // 裁切确认后会走这里，跳过摄像头重置
+  selectedInputMethod.value = "camera";
+  activePanel.value = "camera";
+  cameraFrozen.value = false;
+  void openCamera();
 });
 
 // 摄像头流挂到预览 <video>（面板渲染与取流完成先后不定，post flush 兜底）
@@ -831,6 +892,10 @@ const handleModelValueChange = (value: boolean) => {
   if (!value) {
     cancelRequest("extract");
     cancelAsrRecording();
+    // 关闭对话框时也要释放摄像头，与 handleClose 保持一致
+    cameraFrozen.value = false;
+    frozenImageSrc.value = "";
+    closeCamera();
   }
   emit("update:modelValue", value);
 };
@@ -849,6 +914,12 @@ const handleClose = () => {
 const handleSubmit = async () => {
   if (props.submitting) return;
   if (!formRef.value) return;
+
+  if ((form.goal?.length || 0) > 100) {
+    message(t("create.dialog.goal_too_long"), { type: "error" });
+    return;
+  }
+
   const valid = await formRef.value.validate().catch(() => false);
   if (!valid) {
     // 表单比一屏长（名称/时间/模板/目标），出错的字段常在滚动区外：
@@ -1013,11 +1084,12 @@ watch(
                 v-model="form.goal"
                 type="textarea"
                 :rows="3"
-                maxlength="100"
-                show-word-limit
                 :placeholder="$t('create.dialog.goal_placeholder')"
                 @input="goalError = ''"
               />
+              <div class="goal-count" :class="{ overlimit: (form.goal?.length || 0) > 100 }">
+                {{ form.goal?.length || 0 }} / 100
+              </div>
               <p class="goal-error" :class="{ visible: !!goalError }">
                 {{ goalError || " " }}
               </p>
@@ -1172,6 +1244,33 @@ watch(
               />
             </div>
 
+            <div
+              v-else-if="activePanel === 'cropPreview'"
+              key="cropPreview"
+              class="crop-preview-panel"
+            >
+              <div class="crop-preview-image">
+                <img :src="cropPreviewSrc" alt="crop preview" />
+              </div>
+              <div class="panel-actions">
+                <el-button
+                  type="primary"
+                  :loading="cameraRecognizing"
+                  :disabled="cameraRecognizing"
+                  @click="handleCropSubmit"
+                >
+                  {{ $t("create.dialog.crop_submit") }}
+                </el-button>
+                <el-button
+                  plain
+                  :disabled="cameraRecognizing"
+                  @click="handleCropReselect"
+                >
+                  {{ $t("create.dialog.crop_reselect") }}
+                </el-button>
+              </div>
+            </div>
+
             <div v-else key="methods" class="input-method-list">
               <button
                 v-for="method in inputMethods"
@@ -1219,6 +1318,12 @@ watch(
       >
     </template>
   </el-dialog>
+
+  <ImageCropDialog
+    v-model="showCropDialog"
+    :image-base64="pendingImageBase64"
+    @confirm="handleCropConfirm"
+  />
 </template>
 
 <style lang="scss">
@@ -1427,6 +1532,18 @@ watch(
       }
     }
 
+    .goal-count {
+      align-self: flex-end;
+      margin-top: 4px;
+      font-size: 12px;
+      line-height: 14px;
+      color: #909399;
+
+      &.overlimit {
+        color: #f56c6c;
+      }
+    }
+
     .el-form-item__error {
       position: static !important;
       display: block;
@@ -1566,6 +1683,29 @@ watch(
       }
 
       .frozen-preview {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+    }
+
+    .crop-preview-panel {
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+      width: 100%;
+      height: 216px;
+    }
+
+    .crop-preview-image {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      background: #000;
+      border-radius: 8px;
+
+      img {
         display: block;
         width: 100%;
         height: 100%;

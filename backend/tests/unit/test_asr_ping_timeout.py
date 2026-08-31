@@ -41,3 +41,28 @@ async def test_start_stream_enables_ping():
     assert kwargs.get("ping_timeout") == 10, (
         f"应启用 ping_timeout=10，got {kwargs.get('ping_timeout')!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_start_stream_does_not_pass_proxy_kwarg():
+    """确保 kwargs 不再含 proxy（#136）。"""
+    provider = funasr_mod.FunASRServerProvider()
+    provider._ws_url = "ws://localhost:10096"
+
+    fake_ws = AsyncMock()  # send(init_msg) 成功
+    mock_connect = AsyncMock(return_value=fake_ws)
+
+    with patch.object(funasr_mod.websockets, "connect", new=mock_connect):
+        await provider.start_stream(AsyncMock())
+
+    if provider._recv_task is not None:
+        provider._recv_task.cancel()
+        try:
+            await provider._recv_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+
+    kwargs = mock_connect.call_args.kwargs
+    assert "proxy" not in kwargs, (
+        f"不应向 websockets.connect() 传 proxy kwarg（会 TypeError），got {sorted(kwargs)!r}"
+    )

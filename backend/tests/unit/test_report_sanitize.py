@@ -76,7 +76,7 @@ def test_strip_preserves_skill_marker():
     assert "}}" in out
 
 
-def test_strip_preserves_session_marker():
+def test_strip_removes_session_marker():
     """`{{session.X}}` / `{session.X}` 都该被 strip（issue #122）。
 
     旧契约是「保留 session 占位符」，前提是 L1 预填一定能把 session 字段填进
@@ -96,8 +96,8 @@ def test_strip_preserves_session_marker():
     assert "{session" not in out
 
 
-def test_strip_preserves_session_marker_mixed_with_orphan():
-    """混合：session 占位符和普通 orphan 都清除。"""
+def test_strip_removes_session_marker_mixed_with_orphan():
+    """混合：session 占位符和普通 orphan 都清除；业务文案不被吞。"""
     md = (
         "# {{session.project}}\n"
         "- 客户行业：{{ 客户与行业标签 }}\n"
@@ -106,6 +106,9 @@ def test_strip_preserves_session_marker_mixed_with_orphan():
     out = _strip_orphan_placeholders(md)
     assert "{{" not in out
     assert "{{ 客户与行业标签 }}" not in out
+    # strip 只针对 orphan 占位符业务中文标签、`{{session.X}}` 周边中文应保留
+    assert "客户行业" in out
+    assert "受访者" in out
 
 
 def test_strip_handles_chinese():

@@ -30,7 +30,7 @@ from app.core.i18n.lang_meta import (
 from app.domain.session import TranscriptSegment
 from app.persistence.repositories.interview import interview_repo
 from app.persistence.repositories.report import report_repo
-from app.services.reports.skill_renderer import render_skills
+from app.services.reports.skill_renderer import _find_markers, render_skills
 from app.services.sessions.state import SessionState
 from app.services.template.loader import resolve_template
 
@@ -38,9 +38,10 @@ logger = logging.getLogger(__name__)
 
 # 骨架里的 {{session.X}}：由后端从 state 预填，再交给 LLM。
 # LLM 不该看到这些占位符（曾因 transcript 里没有 start_time / end_time 而原样留着）。
-# 同时兼容单花括号 {session.X}：qwen-plus 等 LLM 在翻译骨架时偶尔把
-# {{session.start_time}} 误输出成 {session.start}（吞了一个 {），骨架里若
-# 已预填为空字符串则 LLM 看到的还是空，仍会按单花括号形态写出。
+# 单花括号支为骨架未来的 "{session.X}" 形态提前备好——当前 `template.report.doc`
+# 都是双花括号写法，单花括号形态在 L1 预填路径上没有真实触发点（仅给 defensive
+# 测试和 LLM 提前变形兜底）。`_ORPHAN_PLACEHOLDER_RE` 仍在 LLM 输出路径上处理
+# qwen-plus 等模型吞/多一个花括号的畸形产物（issue #122）。
 _SESSION_PLACEHOLDER_RE = re.compile(r"\{\{?session\.([a-zA-Z_][a-zA-Z0-9_]*)\}\}?")
 
 
@@ -87,7 +88,7 @@ def _prefill_session_placeholders(doc: str, state: SessionState) -> str:
 #    改用**单一英文 base** 跨所有语种——EN base 让 LLM 不再被中文镜像效应拉回去。
 # 2. 两步式：先翻译骨架（heading / bullet label → {lang_native}），再填内容。
 #    示例演示两步流程而非具体语言翻译结果——避免示例语言与目标语种冲突。
-# 3. 占位符规则（`{{ ... }}` 删除、`{{session.X}}` 与 `{{skill: ...}}` 豁免）正面重申
+# 3. 占位符规则（`{{ ... }}` 一律删除、`{{skill: ...}}` 豁免）正面重申
 #    ——这些是**语言中立**的结构规则，不能因 base 语言是英文而弱化。
 # 4. zh_cn/zh_tw 也走同一段 base——MVP 验证 EN base + 中文输出指令产出 CN=790（比中文
 #    base + 中文指令 CN=667 字数还多 18%），证明母语写作质量不降反升。
@@ -100,11 +101,11 @@ _REPORT_SYSTEM = """You are an interview report-writing assistant.
 **Step 2 — Content fill.** Fill the ({lang_native}-translated) skeleton with content drawn from the conversation transcript, in {lang_native}.
 
 ## Key rules (apply during Step 2)
-- Each `{{ ... }}` in the skeleton (excluding `{{session.X}}` and `{{skill: ...}}`) is a **placeholder**:
+- Each `{{ ... }}` in the skeleton (excluding `{{skill: ...}}` invocation points) is a **placeholder**:
   - Replace the entire `{{ ... }}` block with {lang_native} content drawn from the transcript.
   - Delete the `{{` and `}}` wrappers AND any Chinese prompt text inside. The output MUST NOT contain `{{` or `}}`.
   - When the transcript genuinely has no content, write {fallback_phrase}. Do NOT leave an empty bullet or only the placeholder label.
-- `{{session.X}}` is pre-filled by the system — **keep these values verbatim** (do not translate the pre-filled values; they are session metadata already committed by the system).
+- `{{session.X}}` markers are pre-filled by the system with the resolved metadata string. Drop the `{{ }}` wrappers (same as every other placeholder) but keep the resolved value (e.g., datetime, name) in your output — do not translate the resolved metadata string, it is canonical.
 - `{{skill: ...}}` is a skill invocation marker — **keep verbatim** (do not touch the inner `{{ }}`).
 
 ## Grounding rule (mandatory — overrides fluency concerns)
@@ -126,8 +127,8 @@ Process: translate heading `## 背景与目的` to your output language (e.g. `#
 
 ## Output language ({lang_native}, mandatory)
 - Write the ENTIRE output in {lang_native} ({lang_english}, {lang_bcp47}) — including all section headings, bullet labels, and every fill-in for `{{ ... }}` placeholders.
-- The transcript and the session metadata values pre-filled into `{{session.X}}` may be in Chinese. Translate them into {lang_native} when you RESTATE them in the report's prose. (Keep the literal pre-filled `{{session.X}}` markers as the system has resolved them; only translate the metadata when you paraphrase it elsewhere.)
-- Two categories of placeholders are EXEMPT from wrapper deletion — keep them VERBATIM, including their `{{`/`}}` markers: (1) `{{session.X}}` placeholders already pre-filled by the system, and (2) `{{skill: <id>, inputs: <json>}}` invocation points.
+- The transcript and the session metadata values pre-filled into `{{session.X}}` may be in Chinese. Translate them into {lang_native} when you RESTATE them in the report's prose. The system has already resolved these metadata strings — emit the resolved value verbatim, but DROP the `{{ }}` wrappers (same as every other placeholder).
+- Only `{{skill: <id>, inputs: <json>}}` invocation points are EXEMPT from wrapper deletion — keep their entire `{{ ... }}` block VERBATIM, including the inner `{{ }}` markers.
 
 ## Other
 - Preserve the heading hierarchy and section order from the translated skeleton. Do not add or remove sections.
@@ -162,21 +163,36 @@ _ALLOWED_ATTRS = {"a": ["href", "title"], "code": ["class"]}
 
 
 # 兜底：LLM 偶尔会在 `{{ ... }}` 里填内容但忘了删 `{{`/`}}` 包装，整块清除。
-# 保留 EXEMPT：`{{skill: ...}}`（技能调用点，_find_markers 要识别）。
-# 不再保留 `{{session.X}}`：L1 预填后这两种形态本就不该出现在 LLM 输出里——
-# 同时把 `{session.X}` 也加入 orphan 范围：qwen-plus 等模型偶尔会把
-# `{{session.start_time}}` 吞掉一个 `{` 后以 `{session.start}` 单花括号形态写
-# 出；这种情况只能 strip，否则字面量会以原样落到报告里（issue #122）。
-# 单花括号只匹配 `session.X` 这类合法 session 元数据形态——避免误吞 markdown
-# 里普通 `{...}` 文本（如代码示例）。
+# 仅保留 `{{skill: ...}}`（技能调用点，_find_markers 要识别）：
+# - `{{ 内容 }}`、`{{session.X}}` 都被吃——LLM 删 `{{`/`}}` 失败时字面量会
+#   以原样落到报告里。
+# - 同时吞单花括号 `{session.X}` 形态：qwen-plus 等模型偶尔把
+#   `{{session.start_time}}` 吞掉一个 `{` 后以 `{session.start}` 形态写出
+#   （issue #122）。`\{\{?session\.…\}\}?` 与 _SESSION_PLACEHOLDER_RE 对称。
+# - 单花括号支仍只匹 `session.X` 形态，避免吃掉 markdown 普通 `{...}` 文本
+#   （如示例代码）。
+# 已知取舍：若 markdown 报告正文恰好写出形如 `{session.X}` 的示例字段名，
+# 也会被一并 strip——按宁可空、不可见字面量策略取舍。
 _ORPHAN_PLACEHOLDER_RE = re.compile(
-    r"\{\{(?!skill:)[^}]*?}}|\{session\.[a-zA-Z_][a-zA-Z0-9_]*\}",
+    r"\{\{(?!skill:)[^}]*?}}|\{\{?session\.[a-zA-Z_]\w*\}\}?",
 )
 
 
 def _strip_orphan_placeholders(md: str) -> str:
-    """LLM 没填的占位符整块清除。"""
-    matches = list(_ORPHAN_PLACEHOLDER_RE.finditer(md))
+    """LLM 没填的占位符整块清除。
+
+    上下文感知：跳过 `{{skill: ...}}` 标记内部 JSON inputs 中的
+    `{session.X}` 字面量——这些字面量是 skill 执行的真值（如
+    `{"label": "{session.X}"}`），吞掉会让 skill 静默退化成空 inputs。
+    """
+    # 1. 找 skill 标记的 span（其内部 JSON 字面量不能 strip）
+    skill_spans = [(s, e) for s, e, _, _ in _find_markers(md)]
+    # 2. 找 orphan，但排除落在 skill span 内的
+    matches = []
+    for m in _ORPHAN_PLACEHOLDER_RE.finditer(md):
+        if any(s <= m.start() < e for s, e in skill_spans):
+            continue
+        matches.append(m)
     if not matches:
         return md
     logger.warning("LLM 残留 %d 个未填占位符，已自动清除", len(matches))

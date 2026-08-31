@@ -60,3 +60,21 @@ def test_strip_preserves_plain_curly_text():
     # 不是 session.X 形态 → 不动
     assert "{foo}" in out
     assert "{bar}" in out
+
+
+def test_strip_preserves_session_literal_inside_skill_inputs():
+    """skill 标记内部 JSON inputs 里的 `{session.X}` 字面量不能 strip。
+
+    `{{skill: render, inputs: {"label": "{session.X}"}}}` 经 strip 后必须仍保
+    留 `{session.X}`——否则 skill inputs 静默退化成空，渲染偏离预期。
+    """
+    md = '看图：{{skill: render, inputs: {"label": "{session.X}"}}}'
+    out = _strip_orphan_placeholders(md)
+    # skill 标记整体保留，内部 {session.X} 字面量也保留
+    assert "{{skill: render, inputs:" in out
+    assert "{session.X}" in out
+    # 但 skill 之外的 {session.Y} 仍按孤儿处理
+    md2 = '前面 {{skill: a, inputs: {"k": "{session.X}"}}}  后面 {session.Y}'
+    out2 = _strip_orphan_placeholders(md2)
+    assert "{session.X}" in out2  # 在 skill 内 → 保留
+    assert "{session.Y}" not in out2  # 在 skill 外 → 被 strip

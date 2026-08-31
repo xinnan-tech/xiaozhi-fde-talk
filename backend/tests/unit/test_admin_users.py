@@ -110,6 +110,48 @@ async def test_user_repo_update_password_auto_resets_timestamp():
     assert u1.password_changed_at > old_ts
 
 
+@pytest.mark.asyncio
+async def test_user_repo_update_password_auto_same_password_noop():
+    """新旧密码相同 → update_password_auto 不写 hash、不 bump password_changed_at。
+
+    防御：admin 表单 auto-fill 旧值时，调用方拿到 ok 但 password_changed_at 不应推进，
+    否则会让所有在线 session 被 pwd_ver 不匹配踢下线（issue #168）。
+    """
+    from app.core.security import hash_password_async
+
+    suffix = uuid.uuid4().hex[:8]
+    username = f"repo_noop_{suffix}"
+    user_id = f"u-noop-{suffix}"
+    initial_ts = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    same_plain = "SameP@ssW0rd"
+    same_hash = await hash_password_async(same_plain)
+
+    async with SessionLocal() as s:
+        async with s.begin():
+            s.add(User(
+                id=user_id,
+                username=username,
+                password_hash=same_hash,
+                role="user",
+                password_changed_at=initial_ts,
+            ))
+
+    async with SessionLocal() as s:
+        u0 = await user_repo.get_by_id(s, user_id)
+        old_hash = u0.password_hash
+        old_ts = u0.password_changed_at
+
+    await asyncio.sleep(0.01)
+    ok = await user_repo.update_password_auto(username, same_plain)
+    assert ok is True  # no-op 也按「成功」返，让调用方不报错
+
+    async with SessionLocal() as s:
+        u1 = await user_repo.get_by_id(s, user_id)
+    # hash 不重写、时间戳不推进——证明 no-op 真生效，不会静默踢下线
+    assert u1.password_hash == old_hash
+    assert u1.password_changed_at == old_ts
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Step 5: 重置密码端点的弱密码校验 + 无 token → 401
 # ─────────────────────────────────────────────────────────────────────

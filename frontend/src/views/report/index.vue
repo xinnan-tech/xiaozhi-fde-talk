@@ -463,8 +463,8 @@ onMounted(async () => {
   flex-direction: column;
   gap: 14px;
   width: 100%;
-  height: calc(100vh - 18px);
-  padding: 38px 16px 6px;
+  height: calc(100vh - 48px);
+  padding: 15px 16px 0;
   margin: 0 !important;
   color: #15213a;
   overflow: hidden;

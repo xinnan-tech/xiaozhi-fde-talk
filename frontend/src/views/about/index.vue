@@ -165,7 +165,7 @@ onBeforeMount(async () => {
 .about {
   box-sizing: border-box;
   max-width: 100%;
-  padding: 30px 16px 6px 16px;
+  padding: 0 8px 0 16px;
 
   /* 以内容区实际宽度作为自适应基准，自动兼容侧边栏展开/折叠 */
   container-type: inline-size;
@@ -177,7 +177,7 @@ onBeforeMount(async () => {
     gap: 28px;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px 20px;
+    padding: 15px 16px 14px;
     background: transparent;
   }
 

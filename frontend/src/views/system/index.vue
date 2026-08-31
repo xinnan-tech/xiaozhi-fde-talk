@@ -466,8 +466,7 @@ const selectGroup = async (key: string) => {
   await nextTick();
   const targetCard = configCards.value[key];
   if (targetCard) {
-    // 滚动到卡片offsetTop位置
-    const stickyOffset = 28;
+    const stickyOffset = 4;
     const pageScrollWrap = document.querySelector<HTMLElement>(
       ".content-scroll .el-scrollbar__wrap"
     );
@@ -1182,7 +1181,7 @@ watch(locale, () => {
   width: 100%;
   height: 100%;
   min-height: 0;
-  padding: 30px 8px 0 16px;
+  padding: 0 8px 0 16px;
   overflow: visible;
   container-type: inline-size;
 
@@ -1192,7 +1191,7 @@ watch(locale, () => {
     justify-content: space-between;
     gap: 16px;
     flex-shrink: 0;
-    padding: 8px 16px 20px;
+    padding: 15px 16px 14px;
   }
 
   &-body {
@@ -1400,10 +1399,10 @@ watch(locale, () => {
       align-self: flex-start;
       height: fit-content;
       min-height: 0;
-      margin-bottom: 24px;
+      margin-bottom: 6px;
       padding: 18px 0;
       position: sticky;
-      top: 24px;
+      top: 0;
     }
 
     &-scroll {
@@ -1417,8 +1416,9 @@ watch(locale, () => {
       }
 
       :deep(.el-scrollbar__view) {
+        width: 100%;
+        box-sizing: border-box;
         padding: 0 8px 0 16px;
-        margin-bottom: 24px;
       }
     }
 

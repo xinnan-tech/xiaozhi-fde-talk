@@ -315,7 +315,7 @@ async function submitReset() {
   min-width: 0;
   max-width: 100%;
   width: 100%;
-  padding: 30px 8px 18px 16px;
+  padding: 0 8px 0 16px;
   overflow-x: hidden;
 }
 
@@ -326,7 +326,7 @@ async function submitReset() {
     gap: 16px;
     align-items: flex-end;
     justify-content: space-between;
-    padding: 8px 16px 20px;
+    padding: 15px 16px 14px;
   }
 
   .header-left {

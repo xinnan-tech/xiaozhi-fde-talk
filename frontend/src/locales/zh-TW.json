@@ -160,6 +160,8 @@
   "system.template.err_field_key_duplicate": "重複欄位：{keys}",
   "system.template.err_setup_field_undefined": "引用了未定義欄位：{missing}",
   "system.template.err_must_ask_id_duplicate": "重複 id：{ids}",
+  "system.template.save_json_parse_failed": "儲存失敗：JSON 解析錯誤（第 {line} 行 第 {column} 列）：{message}",
+  "system.template.save_json_struct_invalid": "儲存失敗：JSON 結構校驗未通過：{details}",
   "system.template.save": "儲存",
   "system.template.cancel": "取消",
   "system.template.cancel_confirm": "放棄目前修改？未儲存的變更將遺失。",

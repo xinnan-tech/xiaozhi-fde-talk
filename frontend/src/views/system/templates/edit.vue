@@ -207,13 +207,24 @@ const save = async () => {
   if (saving.value) return;
   // JSON 模式下直接点保存：先过同一道解析+结构闸门（通过则并入表单数据），
   // 失败不保存——否则 JSON 改动会被旧表单数据悄悄覆盖。
+  // 报错口径按闸门命中的具体阶段区分：解析错给 parse 详情，结构错给字段路径；
+  // 老的 json_apply_blocked 仅用于「切回 form 模式」的拦截，与保存动作无关。
   if (mode.value === "json" && !applyJsonToForm()) {
-    const reason = syntaxError.value
-      ? formatSyntaxError(syntaxError.value, t)
-      : formatStructError(structErrors.value[0], t);
-    ElMessage.warning(
-      t("system.template.json_save_blocked", { reason })
-    );
+    if (syntaxError.value) {
+      const { line, column, message } = syntaxError.value;
+      ElMessage.warning(
+        t("system.template.save_json_parse_failed", { line, column, message })
+      );
+    } else if (structErrors.value.length) {
+      const details = structErrors.value
+        .map(e => `${e.path}：${e.message}`)
+        .join("；");
+      ElMessage.warning(
+        t("system.template.save_json_struct_invalid", { details })
+      );
+    } else {
+      ElMessage.warning(t("system.template.json_apply_blocked"));
+    }
     return;
   }
   saving.value = true;

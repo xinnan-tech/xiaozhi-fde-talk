@@ -160,6 +160,8 @@
   "system.template.err_field_key_duplicate": "Trường trùng lặp: {keys}",
   "system.template.err_setup_field_undefined": "Tham chiếu trường chưa định nghĩa: {missing}",
   "system.template.err_must_ask_id_duplicate": "ID trùng lặp: {ids}",
+  "system.template.save_json_parse_failed": "Lưu thất bại: lỗi phân tích JSON tại dòng {line} cột {column}: {message}",
+  "system.template.save_json_struct_invalid": "Lưu thất bại: kiểm tra cấu trúc JSON không đạt: {details}",
   "system.template.save": "Lưu",
   "system.template.cancel": "Hủy",
   "system.template.cancel_confirm": "Bỏ các thay đổi hiện tại? Mọi chỉnh sửa chưa lưu sẽ bị mất.",

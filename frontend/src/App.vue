@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
+import { useRouter } from "vue-router";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import zhTw from "element-plus/es/locale/lang/zh-tw";
 import en from "element-plus/es/locale/lang/en";
@@ -32,6 +33,7 @@ const dialogStore = useDialogStoreHook();
 const interviewStore = useInterviewStoreHook();
 const permissionStore = usePermissionStoreHook();
 const userStore = useUserStoreHook();
+const router = useRouter();
 const { role: userRole } = storeToRefs(userStore);
 const { createInterviewVisible, loginVisible } = storeToRefs(dialogStore);
 const creatingInterview = ref(false);
@@ -41,10 +43,20 @@ const handleCreateInterview = async (form: CreateInterviewForm) => {
 
   creatingInterview.value = true;
   try {
-    await saveInterviewApi(form);
+    // 后端 POST /api/v1/interviews 返的是完整 session 摘要，含 id + status。
+    // 跟 home/index.vue:openInterviewPage 走同一约定：status === 'ended' 去
+    // 报告页，否则去访谈页。新建访谈 status 必然不是 ended，直接进访谈页。
+    const created = (await saveInterviewApi(form)) as { id?: string; status?: string };
     dialogStore.closeCreateInterview();
     ElMessage.success(t("app.interview_create_success"));
     interviewStore.markInterviewCreated();
+    if (created?.id) {
+      const target =
+        created.status === "ended"
+          ? `/report/${created.id}`
+          : `/interview/${created.id}`;
+      void router.push({ path: target });
+    }
   } catch (error: any) {
     const detail = error?.response?.data?.detail;
     ElMessage.error(

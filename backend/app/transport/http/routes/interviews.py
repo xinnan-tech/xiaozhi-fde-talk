@@ -29,6 +29,7 @@ from app.transport.http.schemas import (
     OCRRequest,
     OCRResponse,
     UpdateInterviewRequest,
+    _validate_base_info_size,
 )
 
 logger = logging.getLogger(__name__)
@@ -253,6 +254,12 @@ async def update_interview(
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    # PATCH 是增量合并：UpdateInterviewRequest 已校验 req.base_info 单字段 / 整体上限，
+    # 但合并到 DB 现值后总字节仍可能超 BASE_INFO_TOTAL_MAX_BYTES（先 POST 60KB、
+    # 再 PATCH 10KB 增量，多次 PATCH 可无限放大）。
+    # 在落库前对 merged 兜底跑一遍 _validate_base_info_size，挡住放大器。
+    if req.base_info is not None:
+        _validate_base_info_size({**state.session.base_info, **req.base_info})
     # manager.update 抛 I18nError 子类（SessionIllegalTransitionError / Edit/...），
     # 全局 I18nError handler 会以 409 + 本地化 detail 返回，无需在此 catch。
     await manager.update(session_id, req.base_info, req.goal)

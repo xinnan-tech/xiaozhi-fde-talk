@@ -3,7 +3,7 @@ import "animate.css";
 import { setType } from "./types";
 import { useAppStoreHook } from "@/store/modules/app";
 import { useSettingStoreHook } from "@/store/modules/settings";
-import { ref, reactive, computed, onMounted, onBeforeMount } from "vue";
+import { ref, reactive, computed, onBeforeMount } from "vue";
 import { deviceDetection, useResizeObserver } from "@pureadmin/utils";
 
 import LayContent from "./components/lay-content/index.vue";
@@ -46,14 +46,14 @@ function toggle(device: string, bool: boolean) {
 let isAutoCloseSidebar = true;
 
 useResizeObserver(appWrapperRef, entries => {
+  if (isMobile) return;
   const entry = entries[0];
   const [{ inlineSize: width, blockSize: height }] = entry.borderBoxSize;
   useAppStoreHook().setViewportSize({ width, height });
-  width <= 760 ? setTheme("vertical") : setTheme(useAppStoreHook().layout);
-  /** width app-wrapper类容器宽度
-   * 0 < width <= 990 折叠侧边栏
-   * width > 990 展开侧边栏
-   */
+  setTheme("vertical");
+  // width app-wrapper类容器宽度
+  // 0 < width <= 990 折叠侧边栏
+  // width > 990 展开侧边栏
   if (width > 0 && width <= 990) {
     if (isAutoCloseSidebar) {
       toggle("desktop", false);
@@ -65,12 +65,6 @@ useResizeObserver(appWrapperRef, entries => {
   } else {
     toggle("desktop", false);
     isAutoCloseSidebar = false;
-  }
-});
-
-onMounted(() => {
-  if (isMobile) {
-    toggle("mobile", false);
   }
 });
 

@@ -1,16 +1,20 @@
 import { defineStore } from "pinia";
-import { type appType, store } from "../utils";
+import { type appType, store, deviceDetection } from "../utils";
+
+// 在 store 初始化阶段就根据 UA 决定 device 与 sidebar 初值，
+// 避免 layout 侧 ResizeObserver 首帧异步回调覆盖同步设值
+const isMobileUA = deviceDetection();
 
 export const useAppStore = defineStore("xz-app", {
   state: (): appType => ({
     sidebar: {
-      opened: true,
+      opened: !isMobileUA,
       withoutAnimation: false,
       isClickCollapse: false
     },
     // 当前系统固定使用 vertical 布局
     layout: "vertical",
-    device: "desktop",
+    device: isMobileUA ? "mobile" : "desktop",
     // 浏览器窗口的可视区域大小
     viewportSize: {
       width: document.documentElement.clientWidth,

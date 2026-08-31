@@ -45,12 +45,7 @@ async def test_start_stream_enables_ping():
 
 @pytest.mark.asyncio
 async def test_start_stream_does_not_pass_proxy_kwarg():
-    """self-check 本地 FunASR 必崩 TypeError（#136）的回归测试。
-
-    websockets.connect() 没有 proxy 这个 kwarg —— 那是 httpx / aiohttp 的接口。
-    之前 _is_local 分支塞了 `connect_kwargs["proxy"] = None`，结果首调用就
-    TypeError，连握手都到不了。确保 kwargs 里不再出现 proxy。
-    """
+    """确保 kwargs 不再含 proxy（#136）。"""
     provider = funasr_mod.FunASRServerProvider()
     provider._ws_url = "ws://localhost:10096"
 

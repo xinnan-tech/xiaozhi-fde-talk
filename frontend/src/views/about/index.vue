@@ -24,8 +24,6 @@ const hasBothVersions = computed(
   () => !!backendVersion.value && backendVersion.value !== version
 );
 const year = new Date().getFullYear();
-const productName = t("about.product_name");
-const productSummary = t("about.summary");
 const maintainer = "xinnan-tech";
 const license = "Apache License 2.0";
 const repository = "https://github.com/xinnan-tech/xiaozhi-fde-talk";
@@ -50,13 +48,6 @@ onBeforeMount(async () => {
 
 <template>
   <div class="about">
-    <header class="about-header">
-      <div class="header-left">
-        <h1 class="header-title">{{ productName }}</h1>
-        <p class="header-subtitle">{{ productSummary }}</p>
-      </div>
-    </header>
-
     <img class="banner" :src="bannerSrc" loading="lazy" alt="" />
 
     <div class="status-bar">
@@ -178,36 +169,6 @@ onBeforeMount(async () => {
   /* 以内容区实际宽度作为自适应基准，自动兼容侧边栏展开/折叠 */
   container-type: inline-size;
   overflow-x: hidden;
-
-  .about-header {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 28px;
-    align-items: center;
-    justify-content: space-between;
-    padding: 15px 16px 14px;
-    background: transparent;
-  }
-
-  .header-left {
-    display: flex;
-    flex-shrink: 0;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .header-title {
-    margin: 0;
-    font-size: 28px;
-    font-weight: 600;
-    color: #1a1a1a;
-  }
-
-  .header-subtitle {
-    margin: 0;
-    font-size: 14px;
-    color: #666;
-  }
 
   /* 产品介绍横幅：跟随路由 chunk 懒加载 + loading="lazy" 兜底 */
   .banner {

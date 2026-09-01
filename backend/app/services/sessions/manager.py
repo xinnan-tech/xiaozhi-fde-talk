@@ -213,6 +213,7 @@ class SessionManager:
         if state.session.ended_at is None:
             state.session.ended_at = datetime.now(timezone.utc)
         await interview_repo.save_state_auto(state)
+        registry.sync_session(session_id, state.session)
         log_event("session_ended", session=session_id, user=state.user_id,
                   reason="manual", status="ended")
         return state
@@ -231,6 +232,8 @@ class SessionManager:
             return state
         await self._transition(state, SessionStatus.SUSPENDED)
         await interview_repo.save_state_auto(state)
+        # 对齐寄存 runtime 的旧快照
+        registry.sync_session(session_id, state.session)
         log_event("session_suspended", session=session_id, user=state.user_id,
                   reason="manual", status="suspended")
         return state
@@ -257,6 +260,9 @@ class SessionManager:
             await self._transition(state, SessionStatus.IN_PROGRESS)
         self._active[session_id] = state
         self.touch(session_id)
+        # 同 suspend：对齐寄存 runtime 快照，防旧 suspended 被 resume 后的
+        # 生命周期落盘写回（列表显示滞后一轮）。
+        registry.sync_session(session_id, state.session)
         log_event("session_resumed", session=session_id, user=state.user_id,
                   reason="manual", status="in_progress")
         return state
@@ -381,6 +387,7 @@ class SessionManager:
             state = self._active.get(session_id)
             if state and state.status == SessionStatus.IN_PROGRESS:
                 await self._transition(state, SessionStatus.SUSPENDED)
+                registry.sync_session(session_id, state.session)
                 logger.info("会话已挂起（存活窗口到期）：%s", session_id)
                 # 只清 manager 自己的进程内账目。
                 # 不调 registry.drop / runtime.end()——runtime（ASR/LLM 实例）归

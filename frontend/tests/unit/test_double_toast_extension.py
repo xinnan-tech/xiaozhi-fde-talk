@@ -73,17 +73,19 @@ def test_interview_first_batch_catch_uses_has_response_guard():
     assert "hasResponse" in script
 
 
-def test_interview_end_interview_unchanged():
-    """interview end_interview catch 保留 view 兜底（不修）。
+def test_interview_end_interview_uses_has_response_guard():
+    """interview end_interview catch 也走 hasResponse 守卫。
 
-    网络层断（无 response）时全局拦截器不处理——view catch 是唯一兜底。
-    不能简单套「hasResponse 守卫」删除 view toast。
+    原本按「保留网络兜底」原则不修——但拦截器对 4xx/5xx 已统一 toast 后端
+    detail，view catch 再 extractBackendError 会双 toast。改为只在网络错误时
+    兜底，业务错误交拦截器处理。t("interview.end_failed") 网络兜底文案保留。
     """
     script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
-    # 这条 catch 仍用 extractBackendError(e, t("interview.end_failed"))
-    assert "extractBackendError(e, t(\"interview.end_failed\"))" in script, (
-        "interview end_interview 网络兜底应继续存在"
+    assert "interview.end_failed" in script, (
+        "interview end_interview 网络兜底文案应保留"
     )
+    assert "hasResponse" in script
+    assert "if (!hasResponse)" in script
 
 
 def test_no_extract_backend_error_import_in_report():

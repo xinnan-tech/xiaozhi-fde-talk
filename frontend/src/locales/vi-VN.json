@@ -17,6 +17,7 @@
   "system.reload": "Tải lại",
   "system.save_group": "Lưu {group}",
   "system.save_failed": "Lưu {group} thất bại: {message}",
+  "system.save_failed_network": "Lưu {group} thất bại. Vui lòng kiểm tra kết nối mạng và thử lại.",
   "system.save_refresh_failed": "Đã lưu trên máy chủ, nhưng giao diện chưa được làm mới. Vui lòng mở lại trang sau.",
   "system.save_refresh_required_title": "Giao diện đã lệch so với máy chủ",
   "system.save_refresh_required_msg": "{group} đã được lưu trên máy chủ nhưng giao diện chưa được làm mới. Tiếp tục chỉnh sửa có thể ghi đè giá trị mới nhất trên máy chủ. Vui lòng làm mới trang trước khi tiếp tục.",

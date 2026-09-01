@@ -17,6 +17,7 @@
   "system.reload": "重载",
   "system.save_group": "保存 {group}",
   "system.save_failed": "保存 {group} 配置失败：{message}",
+  "system.save_failed_network": "保存 {group} 配置失败，请检查网络连接",
   "system.save_refresh_failed": "配置已写入，但本地未刷新，请稍后重新打开页面",
   "system.save_refresh_required_title": "本地状态已落后",
   "system.save_refresh_required_msg": "{group} 已保存到服务端，但本地未能刷新。继续编辑可能覆盖服务端最新值，请刷新页面后再操作。",

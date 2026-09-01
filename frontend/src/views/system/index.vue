@@ -547,16 +547,9 @@ const saveConfig = async (group: ConfigGroup) => {
       payload as Record<string, ConfigValue>
     );
   } catch (err) {
-    ElMessage.error(
-      t("system.save_failed", {
-        group: group.title,
-        message: getErrorMessage(err)
-      })
-    );
-    // 不打印整对象：err.config.headers 含 Authorization Bearer JWT，
-    // err.config.data 含 PUT payload（含 api_key 与可能的 ASR 凭证）；
-    // 浏览器控制台截图 / Sentry 等日志聚合会同步把这些一并外发。仅打印
-    // 显式字段，避免把鉴权凭证 / 配置秘密写进日志。
+    // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；
+    // 这里再 ElMessage.error 会形成两条 toast（同源：#62 改密已修）。
+    // 仅当网络错误（无 response）时给兜底——拦截器只处理有 response 的情况。
     const axiosErr = err as {
       response?: {
         status?: number;
@@ -564,6 +557,16 @@ const saveConfig = async (group: ConfigGroup) => {
       };
       message?: string;
     };
+    const hasResponse = axiosErr?.response !== undefined;
+    if (!hasResponse) {
+      ElMessage.error(
+        t("system.save_failed_network", { group: group.title })
+      );
+    }
+    // 不打印整对象：err.config.headers 含 Authorization Bearer JWT，
+    // err.config.data 含 PUT payload（含 api_key 与可能的 ASR 凭证）；
+    // 浏览器控制台截图 / Sentry 等日志聚合会同步把这些一并外发。仅打印
+    // 显式字段，避免把鉴权凭证 / 配置秘密写进日志。
     console.warn("[system] saveConfig rejected", {
       status: axiosErr?.response?.status,
       code: axiosErr?.response?.data?.code,
@@ -786,7 +789,13 @@ const runSelfCheck = async (target: CheckTarget) => {
         result.duration = "-";
       }
     });
-    ElMessage.error(message);
+    // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；
+    // 这里再 ElMessage.error 会形成两条 toast（#62 同源）。
+    // 仅当网络错误（无 response）时给兜底——拦截器只处理有 response 的情况。
+    const hasResponse = (error as { response?: unknown })?.response !== undefined;
+    if (!hasResponse) {
+      ElMessage.error(t("system.diagnostics.request_failed"));
+    }
   } finally {
     selfCheckRunning.value = false;
   }

@@ -360,6 +360,8 @@
   "create.dialog.ocr_failed": "Nhận diện văn bản thất bại, vui lòng thử lại sau",
   "create.dialog.ocr_empty": "Không nhận diện được văn bản, vui lòng chụp lại",
   "create.dialog.back": "Quay lại",
+  "create.dialog.load_defaults": "Tải giá trị mặc định",
+  "create.dialog.clear_form": "Xóa biểu mẫu",
   "interview.back": "Quay lại",
   "interview.default_title": "Phỏng vấn",
   "interview.panel.coaching": "Gợi ý và độ phủ câu hỏi tiếp theo từ AI",

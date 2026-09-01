@@ -360,6 +360,8 @@
   "create.dialog.ocr_failed": "Text recognition failed. Please try again later",
   "create.dialog.ocr_empty": "No text recognized, please retake",
   "create.dialog.back": "Back",
+  "create.dialog.load_defaults": "Load defaults",
+  "create.dialog.clear_form": "Clear form",
   "interview.back": "Back",
   "interview.default_title": "Interview",
   "interview.panel.coaching": "AI follow-up suggestions and coverage",

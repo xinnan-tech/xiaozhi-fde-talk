@@ -360,6 +360,8 @@
   "create.dialog.ocr_failed": "文字识别失败，请稍后再试",
   "create.dialog.ocr_empty": "未识别到文字，请重拍",
   "create.dialog.back": "返回",
+  "create.dialog.load_defaults": "加载默认值",
+  "create.dialog.clear_form": "清空表单",
   "interview.back": "返回",
   "interview.default_title": "访谈",
   "interview.panel.coaching": "AI 追问建议与覆盖",

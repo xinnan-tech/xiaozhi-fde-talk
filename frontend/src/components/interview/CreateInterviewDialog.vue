@@ -260,6 +260,21 @@ const closeActivePanel = () => {
   closeCamera();
 };
 
+// 「清空表单」按钮：保留 template_id，清掉访谈名称、目标、模板 base_info
+// 各字段值、占位提示、自动值记录——清干净后用户再走 OCR/语音转写时，
+// runExtractAndFill 实时读取 form.base_info / form.goal，不会把清空前
+// 的内容混进 currentValues 发给后端 LLM（#174）。
+const clearFormExceptTemplate = () => {
+  const baseInfo = form.base_info as Record<string, string>;
+  for (const key of Object.keys(baseInfo)) delete baseInfo[key];
+  form.goal = "";
+  for (const key of Object.keys(autoValues)) delete autoValues[key];
+  templateHints.value = {};
+  goalError.value = "";
+  // 下次点 OCR/语音转写时，确保清空状态对 el-form 校验可见
+  void nextTick(() => formRef.value?.clearValidate());
+};
+
 const showMicrophonePermissionGuide = () => {
   // flags 指引只适用于 HTTP + 局域网 IP
   if (asrError.value?.message !== "mic_unavailable_insecure_origin") {
@@ -321,6 +336,20 @@ const loadTemplateFields = async (templateId: string) => {
   return templateFields.value;
 };
 
+// 仅加载模板字段定义（base_fields + 模板级 title_default/goal_default 等），
+// 不预填默认值——与 applyTemplateDefaults 拆开。模板切换 / dialog 重开都先
+// 走这里让字段行渲染出来；返回值复用 applyTemplateDefaults 的字段遍历。
+// 默认值是否落库由用户点「加载默认值」显式触发（#174）。
+const ensureTemplateFieldsLoaded = async (
+  templateId: string
+): Promise<TemplateBaseField[]> => {
+  if (!templateId) return [];
+  if (templateFieldsTemplateId.value === templateId && templateFields.value.length) {
+    return templateFields.value;
+  }
+  return loadTemplateFields(templateId);
+};
+
 // 模板字段的兜底初值/默认值与占位提示
 // - 兜底初值按类型：datetime=此刻（访谈多为马上开始）、duration=45、其余空串，
 //   加载模板时只补缺失的键
@@ -349,7 +378,7 @@ const fallbackForType = (type: string): string => {
 
 const applyTemplateDefaults = async (templateId: string) => {
   if (!templateId) return;
-  const fields = await loadTemplateFields(templateId);
+  const fields = await ensureTemplateFieldsLoaded(templateId);
   const baseInfo = form.base_info as Record<string, string>;
   const hints: Record<string, string> = {};
 
@@ -415,12 +444,13 @@ const applyTemplateDefaults = async (templateId: string) => {
   formRef.value?.clearValidate();
 };
 
+// 模板字段按需渲染：dialog 打开 / 用户切换模板都会触发，但只拉字段定义，
+// 不预填默认值——默认值由用户点「加载默认值」显式触发（#174）。
 watch(
   () => form.template_id,
   id => {
     if (!id || !props.modelValue) return;
-    // 拉取失败不阻塞建访谈，占位/默认值退回全局兜底
-    applyTemplateDefaults(id).catch(() => undefined);
+    ensureTemplateFieldsLoaded(id).catch(() => undefined);
   }
 );
 
@@ -840,7 +870,9 @@ const loadInterviewTemplates = async () => {
   // 动态表单的字段会凭空消失。清在设 template_id 之前，观察者必然重拉。
   // 同一模板二次开 dialog 时 form.template_id 不会变化（resetForm 已经
   // 把值设成 cached id，watcher 看到新值==旧值不触发），这里在模版未
-  // 变分支里手动跑一遍 applyTemplateDefaults，让 base_fields 行不变成空白
+  // 变分支里手动跑一遍 ensureTemplateFieldsLoaded，让 base_fields 行不
+  // 变成空白（#174：模板字段渲染依然要，但默认值由用户点「加载默认值」
+  // 显式触发，不再自动跑 applyTemplateDefaults）
   templateFields.value = [];
   templateSession.value = {};
   templateFieldsTemplateId.value = "";
@@ -850,13 +882,9 @@ const loadInterviewTemplates = async () => {
     interviewTemplates.value = response.items;
     const nextTemplateId = response.items[0]?.id ?? "";
     if (form.template_id !== nextTemplateId) {
-      // 模板变了：观察者触发 applyTemplateDefaults
       form.template_id = nextTemplateId;
     } else if (props.modelValue) {
-      // 同一模板二次开：观察者不触发，手动兜底（base_fields 行依赖
-      // templateFields.value，上面已经清空过——否则 e2e 第二次建访谈
-      // 会找不到「项目/对象」等字段）
-      applyTemplateDefaults(nextTemplateId).catch(() => undefined);
+      ensureTemplateFieldsLoaded(nextTemplateId).catch(() => undefined);
     }
   } catch {
     interviewTemplates.value = [];
@@ -1015,6 +1043,29 @@ watch(
               />
             </el-select>
           </el-form-item>
+
+          <!-- 模板字段加载/重置双按钮（#174）：选择模板不自动拉默认值，
+               用户点「加载默认值」才补兜底；点「清空表单」只保留 template_id，
+               把访谈名称、目标、base_info 全清干净，方便重新填写而不混入
+               OCR/语音提取历史 -->
+          <div class="template-actions">
+            <el-button
+              size="small"
+              plain
+              :disabled="!form.template_id || interviewTemplatesLoading"
+              @click="applyTemplateDefaults(form.template_id)"
+            >
+              {{ $t("create.dialog.load_defaults") }}
+            </el-button>
+            <el-button
+              size="small"
+              plain
+              :disabled="!form.template_id"
+              @click="clearFormExceptTemplate"
+            >
+              {{ $t("create.dialog.clear_form") }}
+            </el-button>
+          </div>
 
           <!-- 业务字段按模板 base_fields 渲染（label=显示名，控件跟类型走）：
                text→输入框 datetime→时间选择 duration→档位下拉 -->
@@ -1403,6 +1454,13 @@ watch(
 
     .template-field {
       width: 100%;
+    }
+
+    .template-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: -4px;
     }
 
     .basic-fields-row {

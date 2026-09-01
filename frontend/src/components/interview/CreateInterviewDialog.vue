@@ -1097,10 +1097,10 @@ watch(
                 {{ $t("create.dialog.template") }}
               </span>
             </template>
-            <div class="template-row">
+            <div class="ci-template-row">
               <el-select
                 v-model="form.template_id"
-                class="template-row-select"
+                class="ci-template-row-select"
                 :placeholder="$t('create.dialog.template_placeholder')"
                 :loading="interviewTemplatesLoading"
                 :disabled="interviewTemplatesLoading || defaultsLoading"
@@ -1120,7 +1120,7 @@ watch(
                    title_default / field.default 把清空抵消掉
                    （#175 review P1-2） -->
               <el-button
-                class="template-row-action"
+                class="ci-template-row-action"
                 plain
                 :loading="defaultsLoading"
                 :disabled="!form.template_id || interviewTemplatesLoading || defaultsLoading"
@@ -1129,7 +1129,7 @@ watch(
                 {{ $t("create.dialog.load_defaults") }}
               </el-button>
               <el-button
-                class="template-row-action"
+                class="ci-template-row-action"
                 plain
                 :disabled="!form.template_id || defaultsLoading"
                 @click="clearFormExceptTemplate"
@@ -1530,20 +1530,22 @@ watch(
 
     // 模板下拉与两个动作按钮同一行：下拉撑满剩余宽度，按钮固定 36px
     // 高与 9px 圆角，与 el-select__wrapper 的 min-height / border-radius
-    // 对齐（#183）。
-    .template-row {
+    // 对齐（#183）。类名加 ci- 前缀避开 views/system/index.vue 的同名类
+    // — 该组件 <style lang="scss"> 未 scoped，全局生效会造成模板管理卡片
+    // 横排的 layout 回归。
+    .ci-template-row {
       display: flex;
       align-items: stretch;
       gap: 8px;
       width: 100%;
     }
 
-    .template-row-select {
+    .ci-template-row-select {
       flex: 1 1 auto;
       min-width: 0;
     }
 
-    .template-row-action {
+    .ci-template-row-action {
       flex: 0 0 auto;
       height: 36px;
       padding: 0 14px;
@@ -2126,14 +2128,14 @@ watch(
       }
 
       // 窄屏：模板行改竖排，按钮宽度自适应（#183）
-      .template-row {
+      .ci-template-row {
         flex-wrap: wrap;
 
-        .template-row-select {
+        .ci-template-row-select {
           flex-basis: 100%;
         }
 
-        .template-row-action {
+        .ci-template-row-action {
           flex: 1 1 auto;
         }
       }

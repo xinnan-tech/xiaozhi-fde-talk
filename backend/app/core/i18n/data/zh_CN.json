@@ -7,6 +7,7 @@
   "http.session.unknown_status": "未知状态：{value}",
   "http.report.not_ready": "报告尚未就绪",
   "http.report.format_unsupported": "不支持的导出格式：{fmt}（可选 {supported}）",
+  "http.coaching.item_not_found": "辅导项不存在：{item_id}",
   "http.admin.required": "需要管理员权限",
   "http.admin.config_group_not_found": "配置分组不存在：{group}",
   "http.admin.config_unknown_keys": "不允许的配置项：{unknown}（允许：{allowed}）",

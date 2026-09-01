@@ -19,6 +19,8 @@ class Keys(StrEnum):
     HTTP_UNKNOWN_STATUS = "http.session.unknown_status"
     HTTP_REPORT_NOT_READY = "http.report.not_ready"
     HTTP_REPORT_FORMAT_UNSUPPORTED = "http.report.format_unsupported"
+    # skip / ignore 接口传入的 item_id 不在当前模板的 coaching.must_ask[].id 集合内（#164）
+    HTTP_COACHING_ITEM_NOT_FOUND = "http.coaching.item_not_found"
     HTTP_ADMIN_REQUIRED = "http.admin.required"
     HTTP_ADMIN_CONFIG_GROUP_NOT_FOUND = "http.admin.config_group_not_found"
     HTTP_ADMIN_CONFIG_UNKNOWN_KEYS = "http.admin.config_unknown_keys"

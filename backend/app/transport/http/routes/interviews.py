@@ -20,6 +20,8 @@ from app.services.coaching.engine import TERMINAL_SESSION_STATUSES
 from app.services.coaching.first_batch import generate_first_batch
 from app.services.sessions.manager import manager
 from app.services.sessions.runtime import registry
+from app.services.sessions.state import SessionState
+from app.services.template.loader import resolve_template
 from app.transport.http.dependencies import get_current_user
 from app.transport.http.schemas import (
     CreateInterviewRequest,
@@ -404,7 +406,10 @@ async def ignore_item(
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
-    await manager.set_item_status(session_id, item_id, "ignore")
+    await manager.set_item_status(
+        session_id, item_id, "ignore",
+        valid_ids=_valid_item_ids(state),
+    )
     return {"ok": True}
 
 
@@ -417,6 +422,7 @@ async def unignore_item(
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    # unignore 是 idempotent 的 discard，无需 valid_ids 校验
     await manager.set_item_status(session_id, item_id, "unignore")
     return {"ok": True}
 
@@ -430,7 +436,10 @@ async def skip_item(
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
-    await manager.set_item_status(session_id, item_id, "skip")
+    await manager.set_item_status(
+        session_id, item_id, "skip",
+        valid_ids=_valid_item_ids(state),
+    )
     return {"ok": True}
 
 
@@ -443,8 +452,30 @@ async def unskip_item(
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
+    # unskip 是 idempotent 的 discard，无需 valid_ids 校验
     await manager.set_item_status(session_id, item_id, "unskip")
     return {"ok": True}
+
+
+def _valid_item_ids(state: SessionState) -> Optional[set[str]]:
+    """当前访谈模板的合法 item_id 集合（coaching.must_ask[].id）。
+
+    仅看模板快照（创建访谈时的快照），不走 resolve_template 的回退：访谈
+    创建后模板被改 / 删项不影响访谈自身的合法集合（既保 immutability，也避免
+    admin 删 must_ask 时把活跃访谈标成「错 id」、加项让旧访谈历史里根本没
+    有的 id 被误接受）。快照空 / 损坏 / must_ask 为空时返 None，让 manager
+    跳过校验——与历史行为一致，旧访谈仍可用。
+    """
+    snap = state.session.template_snapshot
+    if not snap:
+        return None
+    try:
+        tpl = Template(**snap)
+    except Exception:  # noqa: BLE001
+        return None
+    if not tpl.coaching.must_ask:
+        return None
+    return {m.id for m in tpl.coaching.must_ask}
 
 
 @router.post("/extract", response_model=ExtractResponse)

@@ -37,7 +37,11 @@ def store():
 
 
 def _patch_session(monkeypatch, captured: dict):
-    """mock SessionLocal + 捕获 upsert 写入的 (key, value)。"""
+    """mock SessionLocal 使 set_many 走 fake session，避免 DB 依赖。
+
+    `captured` 留作扩展位（execute 入参是 SQLAlchemy stmt，目前不解析），
+    测试通过断言 store._cache 副作用来验证过滤行为。
+    """
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=None)
@@ -72,8 +76,8 @@ async def test_set_many_drops_inactive_asr_type_required_fields(store, monkeypat
     assert store._cache["asr.funasr_server.ws_url"] == "wss://192.168.4.36:10096"
     # 非激活类型的旧值不应被空串覆盖——它根本不该进入 upsert 流程
     assert store._cache["asr.doubao_stream.access_token"] == "old-doubao-token"
-    assert "asr.doubao_stream.appid" not in store._cache or \
-        store._cache["asr.doubao_stream.appid"] == ""  # cache 里原本也没这个 key
+    # cache 里原本没这个 key：filter 即便失效把它写回，断言也应失败
+    assert "asr.doubao_stream.appid" not in store._cache
 
 
 @pytest.mark.asyncio

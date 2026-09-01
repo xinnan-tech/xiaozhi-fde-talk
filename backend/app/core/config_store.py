@@ -101,6 +101,11 @@ ENUM_KEYS: dict[str, set[str]] = {
     "llm.type": {"openai", "stub"},
     # OCR 模型类型：openai 兼容（qwen-vl、gpt-4o）或百度
     "ocr.type": {"openai", "baidu"},
+    # ASR 类型：set_many 过滤非激活字段时拼 f"asr.{active_asr_type}." 前缀，
+    # 若 active_asr_type 是空白 / 未知字符串会把所有 asr.* 子字段静默丢弃，
+    # 仍 200 返回「保存成功」——靠 ENUM 校验在写入前挡掉，admin 收到 400 而
+    # 不是丢配置。
+    "asr.type": {"funasr_server", "doubao_stream"},
 }
 
 # URL key：scheme 必须在白名单 + 主机段必填 + 拒整段前后空白（写入前校验）；空串放行，让 admin PUT "" 清空 ws_url。

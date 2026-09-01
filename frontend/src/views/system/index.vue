@@ -507,10 +507,15 @@ const saveConfig = async (group: ConfigGroup) => {
   let payload: Record<string, unknown>;
 
   if (group.key === "asr") {
-    // ASR: 嵌套结构 { type, funasr_server: {...}, doubao_stream: {...} }
-    payload = { type: config.asr?.type };
+    // ASR: 嵌套结构 { type, <active_type>: {...} }——只发当前激活类型的字段，
+    // 避免把非激活类型（比如选了 funasr_server 时）的空必填字段
+    // （doubao_stream.access_token 等）一并提交，否则后端按
+    // REQUIRED_STRING_KEYS 校验会拒整批保存（#177）。
+    const activeType = (config.asr?.type as string) ?? "";
+    payload = { type: activeType };
     const fieldKeys = asrTypeFieldKeys ?? {};
     for (const typeKey of Object.keys(fieldKeys)) {
+      if (typeKey !== activeType) continue;
       const fields: Record<string, unknown> = {};
       for (const fieldKey of fieldKeys[typeKey] ?? []) {
         let val = config.asr?.[typeKey]?.[fieldKey];

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { getPluginsList } from "./build/plugins";
 import { include, exclude } from "./build/optimize";
 import { type UserConfigExport, type ConfigEnv, loadEnv } from "vite";
@@ -22,6 +24,18 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
     VITE_API_URL,
     VITE_WS_BASE_URL
   } = wrapperEnv(env);
+  const certKeyPath = path.resolve(root, "src/certs/localhost-key.pem");
+  const certPath = path.resolve(root, "src/certs/localhost.pem");
+  const hasHttpsCertificate =
+    mode === "development" &&
+    fs.existsSync(certKeyPath) &&
+    fs.existsSync(certPath);
+  const https = hasHttpsCertificate
+    ? {
+        key: fs.readFileSync(certKeyPath),
+        cert: fs.readFileSync(certPath)
+      }
+    : undefined;
 
   return {
     base: VITE_PUBLIC_PATH,
@@ -34,6 +48,7 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       // 端口号
       port: VITE_PORT,
       host: "0.0.0.0",
+      https,
       // 本地跨域代理 https://cn.vitejs.dev/config/server-options.html#server-proxy
       proxy: {
         "/api": {

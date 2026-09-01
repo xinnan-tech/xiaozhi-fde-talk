@@ -112,6 +112,7 @@
   "auth.password_mismatch": "Hai lần nhập mật khẩu không khớp",
   "auth.registration_disabled": "Đăng ký người dùng hiện không khả dụng",
   "auth.user_not_found": "Không tìm thấy người dùng",
+  "auth.admin_reset_self_forbidden": "Quản trị viên không thể đặt lại mật khẩu của chính mình qua endpoint này; hãy dùng luồng đổi mật khẩu",
   "auth.refresh_invalid": "refresh token không hợp lệ",
   "auth.refresh_expired": "refresh token đã hết hạn",
   "auth.refresh_revoked": "refresh token đã bị thu hồi",

@@ -112,6 +112,7 @@
   "auth.password_mismatch": "兩次輸入的密碼不一致",
   "auth.registration_disabled": "目前未開放使用者註冊",
   "auth.user_not_found": "用戶不存在",
+  "auth.admin_reset_self_forbidden": "不能透過管理員工具重設自己的密碼，請改用「修改密碼」",
   "auth.refresh_invalid": "refresh token 無效",
   "auth.refresh_expired": "refresh token 已過期",
   "auth.refresh_revoked": "refresh token 已被撤銷",

@@ -96,18 +96,27 @@ class UserRepository:
 
         返回 True = 已更新；False = 用户不存在。
         用于 admin 改密端点等"调用方未持有 Session"的场景。
+
+        新旧密码相同直接跳过：不重写 hash、不 bump password_changed_at、不失效
+        token 缓存，避免误操作（admin 表单 auto-fill / 复制粘贴旧值）静默踢掉所有
+        在线 session。该函数仅处理已有用户场景——新建走 user_repo.create，
+        不受此判断影响。
         """
         if self._session_factory is None:
             factory = SessionLocal
         else:
             factory = self._session_factory
 
-        from app.core.security import hash_password_async
-        new_hash = await hash_password_async(plain_password)
+        from app.core.security import hash_password_async, verify_password_async
         async with factory() as db:
             row = await self.get_by_username(db, username)
             if row is None:
                 return False
+            # 同密码短路：现有 hash 验一下 plain_password，相等则 no-op 直接返。
+            # 省一次 bcrypt 计算 + 避免踢下线。
+            if await verify_password_async(plain_password, row.password_hash):
+                return True
+            new_hash = await hash_password_async(plain_password)
             row.password_hash = new_hash
             row.password_changed_at = next_pwd_ver_ts()
             await db.commit()

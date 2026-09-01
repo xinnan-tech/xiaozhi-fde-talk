@@ -205,6 +205,24 @@ def test_handle_start_interview_resets_reconnect_before_open():
     )
 
 
+def test_ws_disconnect_keeps_resume_intent_while_interview_is_started():
+    """继续期间的旧 WS 断开不能清掉握手后的 listen:start 意图。
+
+    暂停后旧连接的 disconnect 事件可能晚于用户点击继续到达；如果无条件
+    清 shouldResumeMicrophone，新连接 hello 后会跳过 openMicrophone()。
+    """
+    script = _script_block(INTERVIEW_VUE.read_text(encoding="utf-8"))
+    on_disconnected_idx = script.index("onDisconnected: event => {")
+    body = script[on_disconnected_idx:]
+    body = body[:body.index("\n  },", 1) + len("\n  },")]
+    assert "shouldResumeMicrophone.value = isInterviewStarted.value" in body, (
+        "WebSocket 断开时必须在访谈仍处于启动状态时保留恢复监听意图"
+    )
+    assert "shouldResumeMicrophone.value = false;" not in body, (
+        "不能在 onDisconnected 中无条件清除恢复监听意图"
+    )
+
+
 def test_handle_start_interview_guards_against_ended_status():
     """handleStartInterview 入口必须拦下 status === 'ended' 的情况。
 

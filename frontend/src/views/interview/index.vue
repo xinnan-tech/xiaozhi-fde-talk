@@ -95,9 +95,7 @@ const isTerminalStatus = computed(() => {
 });
 // 接管弹框等待用户确认：旧 WS 会话仍归本端，但新连接在 takeover 前不接管
 // audio。UI 镜像「suspended」避免「暂停」按钮诱导用户点击未真正归属的会话。
-const isTakeoverPending = computed(
-  () => websocketState.value === "pending"
-);
+const isTakeoverPending = computed(() => websocketState.value === "pending");
 // 服务端 status=in_progress 但本端 isInterviewStarted=false（典型场景：
 // 详情页首次加载，服务端认为在录、本端未启 WS+麦）。UI 镜像「suspended」
 // 让控制按钮显示「继续」而非「暂停」，配合 handleControlButtonClick 中
@@ -105,8 +103,7 @@ const isTakeoverPending = computed(
 // 的恢复路径走同一段代码。
 const needsResumeFromInactive = computed(
   () =>
-    interviewDetail.value?.status === "in_progress" &&
-    !isInterviewStarted.value
+    interviewDetail.value?.status === "in_progress" && !isInterviewStarted.value
 );
 // interviewStatusClass 把「接管 pending」与「in_progress 但本端未启动」
 // 统一映射到 status-suspended（橙底），配合 controlButtonText/Icon 的
@@ -929,7 +926,10 @@ const websocket = useWebSocket({
   },
   onDisconnected: event => {
     console.warn("[InterviewPage] WebSocket 已断开", event.code, event.reason);
-    shouldResumeMicrophone.value = false;
+    // 暂停后旧连接的断开事件可能晚于用户点击「继续」到达。恢复期间
+    // 必须保留启动意图，让新连接握手完成后发送 listen:start；仅在本端
+    // 已不处于访谈状态时清掉它（手动暂停、被踢出或结束等路径）。
+    shouldResumeMicrophone.value = isInterviewStarted.value;
     if (!isMicrophoneEnabled.value) return;
     stopRecording();
   },

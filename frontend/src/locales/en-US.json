@@ -361,6 +361,7 @@
   "create.dialog.ocr_empty": "No text recognized, please retake",
   "create.dialog.back": "Back",
   "create.dialog.load_defaults": "Load defaults",
+  "create.dialog.load_defaults_failed": "Failed to load defaults",
   "create.dialog.clear_form": "Clear form",
   "interview.back": "Back",
   "interview.default_title": "Interview",

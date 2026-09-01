@@ -370,6 +370,13 @@ async def get_or_generate(
         get_config_store().get_sync("llm.output_language") or "zh_cn"
     ).strip().lower() or "zh_cn"
 
+    # 空 transcript 短路，避免 LLM 用空对话虚构报告（#166）。判定与 _build_user
+    # 段文本提取口径一致：必须有任一段具有非空可读内容，否则直接拒出。
+    if not any((s.corrected_text.strip() or s.text).strip() for s in state.transcript):
+        # 不调 LLM、不落库、不触发 on_ready——"empty" 状态不广播（runtime.push_report_ready
+        # 仅识别 ready/failed；HTTP 层 GET/POST 在此处一律翻 409 对外暴露二元语义）。
+        return ("empty", "")
+
     rec = await report_repo.get_by_interview_auto(session_id)
     if not force and _cache_hit(rec, current_sig, language):
         await _fire_on_ready(on_ready, session_id, "ready")

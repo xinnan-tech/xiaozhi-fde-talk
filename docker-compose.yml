@@ -16,8 +16,10 @@ services:
     # bash + tail -f，主进程退出码恒 0，docker 看不到真服务状态。显式建
     # healthcheck 让 app depends_on 用 service_healthy 等真 ready，避免
     # cold start 阶段 app 已启但 funasr 模型未下载完连不上导致死循环重启。
+    # 用 bash -c 包一层：CMD-SHELL 默认走 /bin/sh（dash），不支持 bash 专有
+    # 的 /dev/tcp 重定向，直接写会一直 "cannot create /dev/tcp"。
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/10095 && echo -e 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/10095 && echo -e \"GET /health HTTP/1.0\\r\\n\\r\\n\" >&3 || exit 1'"]
       interval: 15s
       timeout: 5s
       retries: 6
@@ -92,9 +94,14 @@ services:
       funasr:
         condition: service_healthy
     healthcheck:
-      # /health 是只读端点，不依赖 DB 写；用于容器健康检查
-      # --no-check-certificate：自签名证书下 wget 不校验证书链
-      test: ["CMD", "wget", "-q", "--spider", "--no-check-certificate", "https://localhost:8848/health"]
+      # /health 是只读端点，不依赖 DB 写；用于容器健康检查。
+      # 镜像只有 python（slim base），没装 wget / curl；用 python urllib 直
+      # 接打本地 HTTPS，自签名证书要关掉校验链，否则会抛 SSLCertVerificationError。
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import ssl, urllib.request; ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE; urllib.request.urlopen('https://localhost:8848/health', context=ctx, timeout=3).read()"
       interval: 30s
       timeout: 5s
       retries: 3

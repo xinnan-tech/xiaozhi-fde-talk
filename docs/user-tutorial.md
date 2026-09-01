@@ -238,47 +238,30 @@ LLM / ASR / OCR 三家都填好后，回到配置页右上角，点 **「运行�
 
 ## 9. 常见问题
 
-**看不到「去注册」链接？**
-→ 系统已经有用户、且注册已关闭。请联系管理员开账号。
+1、**看不到「去注册」链接？**
+> 系统已经有用户、且注册已关闭。请联系管理员开账号。
 
-**自检 LLM 失败？**
-→ 先看密钥是否对，再看 `base_url` 是否正确（很多厂商控制台上的「对话」地址 ≠ API 地址）。
+2、**自检 LLM 失败？**
+> 先看密钥是否对，再看 `base_url` 是否正确（很多厂商控制台上的「对话」地址 ≠ API 地址）。
 
-**自检 ASR 失败？**
-→ 确认 FunASR Docker 容器在跑：`docker compose ps`或者地址写错了。
+3、**自检 ASR 失败？**
+> 确认 FunASR Docker 容器在跑：`docker compose ps`或者地址写错了。
 
-**访谈跑到一半想暂停又不想结束？**
-→ 点「暂停访谈」即可，不要直接关浏览器。直接关浏览器且不在存活窗口（默认 60 秒）内回来，连接会被服务端收尾。
+4、**访谈跑到一半想暂停又不想结束？**
+> 点「暂停访谈」即可，不要直接关浏览器。直接关浏览器且不在存活窗口（默认 60 秒）内回来，连接会被服务端收尾。
 
-**暂停后想「彻底结束」这段访谈？**
-→ 进访谈页点「结束访谈」就行。
+5、**暂停后想「彻底结束」这段访谈？**
+> 进访谈页点「结束访谈」就行。
 
-**密码忘了？**
-→ 让管理员在「用户管理」里点「重置密码」。
+6、**密码忘了？**
+> 让管理员在「用户管理」里点「重置密码」。
 
-**前端默认走 HTTPS，但浏览器会弹「不安全」？**
-→ 仓库自带的是一份演示用的自签证书，仅够让 Vite 启 HTTPS；浏览器不认识这张证书的签发者，所以会提示「不安全」，要点「高级 → 继续前往 localhost」才放行。**这只是浏览器对自签证书的固定提示，不代表连接真的有问题**。
+7、**前端默认走 HTTPS，但浏览器会弹「不安全」？**
+> 仓库自带的是一份演示用的自签证书，仅够让 Vite 启 HTTPS；浏览器不认识这张证书的签发者，所以会提示「不安全」，要点「高级 → 继续前往 localhost」才放行。**这只是浏览器对自签证书的固定提示，不代表连接真的有问题**。
 
-如果想消除这个提示，让浏览器信任本地 HTTPS，用 [mkcert](https://github.com/FiloSottile/mkcert) 把本地 CA 装进系统信任链最省事：
-
-```bash
-brew install mkcert            # macOS
-mkcert -install
-
-# 覆盖仓库自带的演示证书，文件名固定两个，Vite 自动识别
-cd frontend/src/certs
-mkcert localhost
-# mkcert 默认输出 localhost.pem + localhost-key.pem
-```
-
-没有 mkcert 时，用 OpenSSL 也能签一张自签证书（效果一样——浏览器仍会弹「不安全」）：
-
-```bash
-cd frontend/src/certs
-openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 825 \
-  -keyout localhost-key.pem -out localhost.pem \
-  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
-```
+> 如果想消除这个提示，让浏览器信任本地 HTTPS，有两种方法：
+> 1、用 [mkcert](https://github.com/FiloSottile/mkcert) 把本地 CA 装进系统信任链最省事。
+> 2、部署到服务器时，需要用正式的证书。
 
 ---
 

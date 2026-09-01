@@ -87,10 +87,14 @@ pnpm dev
 
 #### 1.4. First Run: Register the First Administrator
 
-1. Open http://localhost:8848 in your browser.
+1. Open [https://localhost:8848](https://localhost:8848) in your browser (if the browser warns "Not Secure", click through to trust the certificate).
 2. Click "Go to register" → enter a username (4–32 letters, digits, underscores, or hyphens), a strong password, and confirm the password.
 3. The first registered user is automatically promoted to super administrator.
 4. After logging in, open System Configuration first to fill in your LLM key (otherwise interview creation will be rejected by the LLM), then click "Run Self Check" in the top-right to verify ASR, LLM, and OCR are all healthy.
 5. Create an interview and try speaking.
 
 Further reading: [User Tutorial](../user-tutorial.md)（Chinese only：register → system configuration → run an interview → export the report）.
+
+Please note:
+
+Because this project needs browser microphone access, when testing over a LAN the browser must use HTTPS. The repo ships with a demo certificate pair at `frontend/src/certs/localhost.pem` + `localhost-key.pem`, so it defaults to HTTPS. If you want to use your own certificate, see [User Tutorial](../user-tutorial.md) "FAQ" for how to generate one.

@@ -86,10 +86,14 @@ pnpm dev
 
 #### 1.4. Lần đầu: đăng ký quản trị viên đầu tiên
 
-1. Mở http://localhost:8848 trên trình duyệt
+1. Mở [https://localhost:8848](https://localhost:8848) trên trình duyệt (nếu trình duyệt cảnh báo "Không an toàn", hãy bấm để tin tưởng chứng chỉ).
 2. Bấm "Đăng ký" → nhập tên đăng nhập (4–32 chữ cái, số, gạch dưới, gạch nối) + mật khẩu mạnh + xác nhận mật khẩu
 3. Người đăng ký đầu tiên sẽ tự động trở thành super administrator
 4. Sau khi đăng nhập, vào "Cấu hình hệ thống" trước để nhập khóa LLM, rồi bấm "Chạy tự kiểm tra" ở góc trên bên phải để xem từng thành phần có chạy ổn không
 5. Tạo một buổi phỏng vấn và thử nói thử
 
 Đọc thêm: [Hướng dẫn sử dụng](../user-tutorial.md)（chỉ có tiếng Trung: đăng ký → cấu hình hệ thống → chạy phỏng vấn → xuất báo cáo）.
+
+Lưu ý:
+
+Vì dự án này cần bật quyền microphone của trình duyệt, khi test qua mạng LAN trình duyệt bắt buộc phải dùng HTTPS. Repo đã có sẵn một cặp chứng chỉ demo tại `frontend/src/certs/localhost.pem` + `localhost-key.pem`, nên mặc định chạy HTTPS. Nếu muốn dùng chứng chỉ riêng, xem [Hướng dẫn sử dụng](../user-tutorial.md) phần "Câu hỏi thường gặp" để biết cách tạo.

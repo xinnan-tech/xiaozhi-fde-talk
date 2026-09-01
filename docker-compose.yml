@@ -31,8 +31,7 @@ services:
       --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx
       --model-dir iic/SenseVoiceSmall-onnx
       --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx
-      --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx
-      --lm-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst
+      --punc-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst
       --itn-dir thuduj12/fst_itn_zh
       --hotword /workspace/models/hotwords.txt > log.txt 2>&1 &
       sleep 1;
@@ -40,46 +39,59 @@ services:
 
   # ================================================================
   # 小智方糖主应用（FastAPI + 前端 SPA 单镜像）
+  # 直接拉 GHCR 上的 server-app 镜像（CI 在 v*.*.* tag 推送时自动构建发布）。
+  # 如需本地编译新镜像，参见 docs/docker-build.md。
+  #
+  # 端口：8848（HTTPS 主服务，语音 WebSocket、REST、SPA 静态托管）
+  #       与 dev 环境 Vite dev server 端口保持一致，浏览器地址栏统一
+  #
+  # 证书：./frontend/src/certs 目录直接挂进容器，跟 Vite dev 用同一份；
+  # 改证书不用重打镜像，本机保存即生效。
+  #
+  # 数据：./backend/data 直接挂进容器，SQLite 文件跟 dev 共用，
+  # 可直接 sqlite3 ./backend/data/xiaozhi_fde_talk.db 进去查。
+  #
   # ENV=dev + SQLite 是当前 compose 默认值；上公网必须改 ENV=prod
   # 并把 DB_URL 换成 MySQL/PostgreSQL，否则 Settings._validate_prod 拒启。
   # ================================================================
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/xinnan-tech/xiaozhi-fde-talk:server-app_latest
     container_name: xiaozhi_app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8848:8848"
     environment:
       - HOST=0.0.0.0
-      - PORT=8000
+      - HTTPS_PORT=8848
+      - SSL_KEYFILE=/app/certs/localhost-key.pem
+      - SSL_CERTFILE=/app/certs/localhost.pem
       - ENV=dev
       - DB_URL=sqlite+aiosqlite:////app/data/xiaozhi_fde_talk.db
       - LOG_LEVEL=INFO
       - SERVE_FRONTEND=true
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
       # 默认单 worker：_revoked_refresh_jtis、RateLimiter._buckets、
       # config_store 缓存等模块级单例在多 worker 间不共享；改密 / logout 后
       # 旧 token 跨 worker 仍能刷 access，限流桶全局计数翻倍。当前实现留
       # 单 worker 默认；后续若换 Redis 共享撤销表与限流，可按 CPU 核数上调。
       - WEB_CONCURRENCY=${WEB_CONCURRENCY:-1}
     volumes:
-      - app_data:/app/data
-      - app_exports:/app/exports
+      # 证书目录：直接挂前端 dev 证书目录
+      # 容器内 /app/certs/{localhost,localhost-key}.pem 来自本机 frontend/src/certs/
+      # 改证书不用重打镜像；生产换证书时改成你自己的证书目录路径
+      - ./frontend/src/certs:/app/certs:ro
+      # SQLite 数据：直接挂本机 backend/data
+      - ./backend/data:/app/data
     depends_on:
       funasr:
         condition: service_healthy
     healthcheck:
       # /health 是只读端点，不依赖 DB 写；用于容器健康检查
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/health"]
+      # --no-check-certificate：自签名证书下 wget 不校验证书链
+      test: ["CMD", "wget", "-q", "--spider", "--no-check-certificate", "https://localhost:8848/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       # 60s 不够模型首冷启下载；funasr 模型拉满可达 90s+，app 启动前需
       # 等 funasr 真 ready（service_healthy 兜底）。app 自己冷启 5s 即可。
       start_period: 30s
-
-volumes:
-  app_data:
-  app_exports:

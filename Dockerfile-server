@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1.7
+# 应用镜像：FROM 基础镜像 + 多阶段编译 Vue + 拷贝后端源码 + 拷贝证书。
+# 运行时启动入口见 backend/app/docker_main_ssl.py（HTTPS 主 + HTTP 301 双 uvicorn）。
+#
+# 何时重打：
+# - 改了后端业务代码 → 重打本镜像（基础镜像不变）。
+# - 改了 frontend 源码 → 重打本镜像（编译阶段会重新跑）。
+# - 改了证书 → 重打本镜像（证书 COPY 进镜像）。
+# - 改了 backend/requirements.txt → 重打基础镜像 Dockerfile-server-base。
+#
+# 构建多平台时基础镜像 tag 由 CI 同步推 linux/amd64 + linux/arm64，避免 FROM 拉错架构。
+
+# ---------- Stage 1：编译 Vue 前端 ----------
+FROM node:22-alpine AS frontend-builder
+
+WORKDIR /web
+
+# 仅先拷锁文件，最大化缓存命中
+COPY frontend/package.json frontend/pnpm-lock.yaml* ./
+# 国内常用镜像源；海外构建可换成 https://registry.npmjs.org/
+RUN corepack enable && corepack prepare pnpm@9 --activate \
+ && pnpm install --frozen-lockfile
+
+COPY frontend/ ./
+RUN pnpm build
+
+# ---------- Stage 2：应用镜像 ----------
+# SERVER_BASE_REGISTRY / SERVER_BASE_TAG 由 CI 或本地 build 注入：
+#   docker build --build-arg SERVER_BASE_REGISTRY=ghcr.io/xinnan-tech \
+#                --build-arg SERVER_BASE_TAG=server-base .
+# 当前硬编码：fork 后用户需要把默认值改成自己的仓库地址。
+ARG SERVER_BASE_REGISTRY=ghcr.io/xinnan-tech
+ARG SERVER_BASE_TAG=server-base
+
+FROM ${SERVER_BASE_REGISTRY}/xiaozhi-fde-talk:${SERVER_BASE_TAG}
+
+# tini：PID 1 信号处理 + 优雅关闭子进程（基础镜像已装，保留 as-is 即可）
+WORKDIR /app
+
+# 拷后端源码（.dockerignore 排除 tests/、__pycache__、*.db、.env 等）
+COPY backend/ ./
+
+# Vue 编译产物：FastAPI 用 SERVE_FRONTEND=true 托管（SPA fallback 已就位）
+COPY --from=frontend-builder /web/dist /app/static
+
+# 自签名证书（演示用）：从仓库前端 dev 证书目录拷过来
+# 保留前端原文件名（localhost.pem / localhost-key.pem），便于 docker-compose
+# 直接 volumes 挂整个 src/certs 目录到 /app/certs，本机改证书立刻生效。
+COPY frontend/src/certs/ /app/certs/
+
+# data：dev 模式 SQLite 用；生产 MySQL/PG 不需要
+RUN mkdir -p /app/data
+
+ENV HOST=0.0.0.0 \
+    HTTPS_PORT=8848 \
+    SSL_KEYFILE=/app/certs/localhost-key.pem \
+    SSL_CERTFILE=/app/certs/localhost.pem \
+    SERVE_FRONTEND=true
+
+EXPOSE 8848
+
+# tini 接管 PID 1 → SIGTERM 能正确传到 worker → 双 uvicorn 走 graceful shutdown
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "-m", "app.docker_main_ssl"]

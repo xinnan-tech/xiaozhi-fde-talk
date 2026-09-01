@@ -28,24 +28,25 @@ from app.core.settings import get_settings
 logger = logging.getLogger(__name__)
 
 
-# dev/test 环境兜底的本地 CORS 来源；prod 不允许任何默认值
-_DEV_CORS_DEFAULT = ["http://localhost:5173", "http://127.0.0.1:5173"]
-
-
 def _resolve_cors_origins(settings) -> list[str]:
-    """解析 CORS_ORIGINS：未配置时 dev/test 兜底默认，prod fail-fast。"""
+    """解析 CORS_ORIGINS：留空 → ["*"]（开发友好），显式设值 → 白名单（生产安全）。
+
+    留空模式自动放行所有 origin，配合下方 allow_credentials=False 走通：
+    鉴权走 Authorization header（JWT，见 transport/http/dependencies.py），
+    不依赖 cookie，跨域 cookie 被浏览器禁掉跟鉴权无关——任意 origin 都能调 API。
+
+    上公网前在 .env / 环境变量里显式列白名单（逗号分隔 origin），自动切回严格模式：
+    allow_credentials 重新启用，未来若改用 cookie 鉴权也能无缝接上。
+    """
     raw = (settings.cors_origins or "").strip()
     origins = [o.strip() for o in raw.split(",") if o.strip()]
     if origins:
         return origins
-    if settings.env in ("dev", "test"):
-        logger.warning(
-            "CORS_ORIGINS 未配置，dev 默认放行 %s。"
-            "上线前请在 .env / 环境变量里显式列白名单。",
-            _DEV_CORS_DEFAULT,
-        )
-        return list(_DEV_CORS_DEFAULT)
-    raise RuntimeError("CORS_ORIGINS 未配置（上公网必填）")
+    logger.warning(
+        "CORS_ORIGINS 未配置，默认放行所有 origin（开发友好）。"
+        "上公网前请在 .env / 环境变量里显式列白名单启用严格模式。"
+    )
+    return ["*"]
 
 
 async def _lifespan_startup(app: FastAPI) -> None:
@@ -187,6 +188,10 @@ def create_app() -> FastAPI:
     from fastapi.middleware.cors import CORSMiddleware
     settings = get_settings()
     origins = _resolve_cors_origins(settings)
+    # CORS_ORIGINS 留空时返回 ["*"]，FastAPI 强制要求 * 模式下 allow_credentials=False
+    # （否则启动报 ValueError）。本项目鉴权走 Authorization header，cookie 不关键，
+    # 留空模式不带 cookie 无影响；显式白名单模式下重新启用 credentials。
+    allow_all = origins == ["*"]
     # 显式方法/请求头白名单：通配 "*" 锁定到 RESTful 标准 + 当前路由实际用到的
     # 自定义头（X-Lang 多语请求；X-Request-ID 由中间件生成回传，便于客户端核对）。
     # expose 同步回写 X-Request-ID，否则浏览器 JS 拿不到该响应头，对账失败。
@@ -195,7 +200,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_credentials=True,
+        allow_credentials=not allow_all,
         allow_methods=_ALLOWED_METHODS,
         allow_headers=_ALLOWED_HEADERS,
         expose_headers=["X-Request-ID"],

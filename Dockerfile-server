@@ -10,6 +10,15 @@
 #
 # 构建多平台时基础镜像 tag 由 CI 同步推 linux/amd64 + linux/arm64，避免 FROM 拉错架构。
 
+# Global ARG：必须在第一个 FROM 之前声明才能被后续 stage 的 FROM 引用。
+# Stage 1 的 FROM 不会用这些变量，但 ARG 必须在文件顶部声明才能保留到 Stage 2。
+# SERVER_BASE_REGISTRY / SERVER_BASE_TAG 由 CI 或本地 build 注入：
+#   docker build --build-arg SERVER_BASE_REGISTRY=ghcr.io/xinnan-tech \
+#                --build-arg SERVER_BASE_TAG=server-base .
+# 当前硬编码：fork 后用户需要把默认值改成自己的仓库地址。
+ARG SERVER_BASE_REGISTRY=ghcr.io/xinnan-tech
+ARG SERVER_BASE_TAG=server-base
+
 # ---------- Stage 1：编译 Vue 前端 ----------
 FROM node:22-alpine AS frontend-builder
 
@@ -25,13 +34,7 @@ COPY frontend/ ./
 RUN pnpm build
 
 # ---------- Stage 2：应用镜像 ----------
-# SERVER_BASE_REGISTRY / SERVER_BASE_TAG 由 CI 或本地 build 注入：
-#   docker build --build-arg SERVER_BASE_REGISTRY=ghcr.io/xinnan-tech \
-#                --build-arg SERVER_BASE_TAG=server-base .
-# 当前硬编码：fork 后用户需要把默认值改成自己的仓库地址。
-ARG SERVER_BASE_REGISTRY=ghcr.io/xinnan-tech
-ARG SERVER_BASE_TAG=server-base
-
+# Stage 2 的 FROM 引用上面顶部声明的 global ARG（build-arg 传进来的值）。
 FROM ${SERVER_BASE_REGISTRY}/xiaozhi-fde-talk:${SERVER_BASE_TAG}
 
 # tini：PID 1 信号处理 + 优雅关闭子进程（基础镜像已装，保留 as-is 即可）

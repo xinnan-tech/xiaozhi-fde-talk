@@ -16,13 +16,20 @@ services:
     # bash + tail -f，主进程退出码恒 0，docker 看不到真服务状态。显式建
     # healthcheck 让 app depends_on 用 service_healthy 等真 ready，避免
     # cold start 阶段 app 已启但 funasr 模型未下载完连不上导致死循环重启。
+    # 用 bash -c 包一层：CMD-SHELL 默认走 /bin/sh（dash），不支持 bash 专有
+    # 的 /dev/tcp 重定向，直接写会一直 "cannot create /dev/tcp"。
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/10095 && echo -e 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/10095 && echo -e \"GET /health HTTP/1.0\\r\\n\\r\\n\" >&3 || exit 1'"]
       interval: 15s
       timeout: 5s
       retries: 6
       start_period: 120s
     # 使用分号隔离命令，确保 cd 和 touch 在主 shell 中按顺序生效
+    # 命令参数跟仓库根 docs/funasr.md 文档里"独立部署"那段的 docker run 行
+    # 完全一致：punc-dir / lm-dir / itn-dir / hotword 全部显式传，避免跟
+    # 镜像里脚本内置默认值有出入。原 compose 把 punc-dir 错写成了 LM 模型
+    # 名 damo/speech_ngram_lm_zh-cn-ai-wesp-fst，漏了 lm-dir，C++ server
+    # 拿 LM 模型当 punc 找 model_quant.onnx，启动即退。
     command: >
       bash -c "cd FunASR/runtime;
       touch log.txt;
@@ -31,7 +38,8 @@ services:
       --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx
       --model-dir iic/SenseVoiceSmall-onnx
       --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx
-      --punc-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst
+      --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx
+      --lm-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst
       --itn-dir thuduj12/fst_itn_zh
       --hotword /workspace/models/hotwords.txt > log.txt 2>&1 &
       sleep 1;
@@ -55,7 +63,18 @@ services:
   # 并把 DB_URL 换成 MySQL/PostgreSQL，否则 Settings._validate_prod 拒启。
   # ================================================================
   app:
+    # 本地编译模式：Dockerfile 在仓库根 Dockerfile-server。改完前端源码/前端
+    # env 文件后跑 `docker compose build app --no-cache` 再 `up -d app` 即生效。
+    # 编译产物会覆盖原 GHCR 镜像名（同 image: 行 tag），保证 funasr 容器
+    # depends_on 的 service_healthy 链路不变。
     image: ghcr.io/xinnan-tech/xiaozhi-fde-talk:server-app_latest
+    build:
+      context: .
+      dockerfile: Dockerfile-server
+      args:
+        # CI 默认值；fork 后改自己的仓库地址。
+        SERVER_BASE_REGISTRY: ghcr.io/xinnan-tech
+        SERVER_BASE_TAG: server-base
     container_name: xiaozhi_app
     restart: unless-stopped
     ports:
@@ -86,9 +105,14 @@ services:
       funasr:
         condition: service_healthy
     healthcheck:
-      # /health 是只读端点，不依赖 DB 写；用于容器健康检查
-      # --no-check-certificate：自签名证书下 wget 不校验证书链
-      test: ["CMD", "wget", "-q", "--spider", "--no-check-certificate", "https://localhost:8848/health"]
+      # /health 是只读端点，不依赖 DB 写；用于容器健康检查。
+      # 镜像只有 python（slim base），没装 wget / curl；用 python urllib 直
+      # 接打本地 HTTPS，自签名证书要关掉校验链，否则会抛 SSLCertVerificationError。
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import ssl, urllib.request; ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE; urllib.request.urlopen('https://localhost:8848/health', context=ctx, timeout=3).read()"
       interval: 30s
       timeout: 5s
       retries: 3

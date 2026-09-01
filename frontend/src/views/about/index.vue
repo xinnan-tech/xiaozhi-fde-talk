@@ -4,10 +4,16 @@ import { useI18n } from "vue-i18n";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
 import packageInfo from "../../../package.json";
 import { getBackendVersion } from "@/api/version";
+import bannerZh from "@/assets/images/banner1.svg?url";
+import bannerEn from "@/assets/images/banner1-en.svg?url";
 
 defineOptions({ name: "About" });
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+// 中文（简/繁）显示 banner1.svg；其他语种显示 banner1-en.svg
+const bannerSrc = computed(() =>
+  locale.value === "zh-CN" || locale.value === "zh-TW" ? bannerZh : bannerEn
+);
 const version = packageInfo.version;
 // 后端版本号：未拉到（请求失败）时为 null；匿名访问时后端返 200 + 空字符串
 // （issue #77），把空串等同 null —— about 页降级为只显示前端版本，不向
@@ -50,6 +56,8 @@ onBeforeMount(async () => {
         <p class="header-subtitle">{{ productSummary }}</p>
       </div>
     </header>
+
+    <img class="banner" :src="bannerSrc" loading="lazy" alt="" />
 
     <div class="status-bar">
       <div class="status-card">
@@ -199,6 +207,19 @@ onBeforeMount(async () => {
     margin: 0;
     font-size: 14px;
     color: #666;
+  }
+
+  /* 产品介绍横幅：跟随路由 chunk 懒加载 + loading="lazy" 兜底 */
+  .banner {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    margin: 4px 0 18px;
+    padding: 0;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgb(0 0 0 / 8%);
   }
 
   /* 顶部状态条：与 home 页 status-bar 完全一致 */

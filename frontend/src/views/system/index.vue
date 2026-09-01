@@ -122,7 +122,7 @@ const selfCheckResults = reactive<SelfCheckResult[]>([]);
  * 再次保存→覆盖服务端最新值」的连锁问题。 */
 const staleGroups = ref(new Set<string>());
 /** 敏感密码字段 */
-const sensitiveKeys = ["api_key", "access_token", "secret_key"];
+const sensitiveKeys = ["api_key", "access_token", "secret_key", "appid"];
 /** 复选框字段 */
 const checkboxKeys = [
   "ws_verify_ssl",

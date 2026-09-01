@@ -102,6 +102,11 @@ ENUM_KEYS: dict[str, set[str]] = {
     "llm.type": {"openai", "stub"},
     # OCR 模型类型：openai 兼容（qwen-vl、gpt-4o）或百度
     "ocr.type": {"openai", "baidu"},
+    # ASR 类型：set_many 过滤非激活字段时拼 f"asr.{active_asr_type}." 前缀，
+    # 若 active_asr_type 是空白 / 未知字符串会把所有 asr.* 子字段静默丢弃，
+    # 仍 200 返回「保存成功」——靠 ENUM 校验在写入前挡掉，admin 收到 400 而
+    # 不是丢配置。
+    "asr.type": {"funasr_server", "doubao_stream"},
 }
 
 # URL key：scheme 必须在白名单 + 主机段必填 + 拒整段前后空白（写入前校验）；空串放行，让 admin PUT "" 清空 ws_url。
@@ -442,10 +447,31 @@ class ConfigStore:
 
         用方言级 upsert（INSERT ... ON CONFLICT DO UPDATE）取代 get-then-add：
         后者并发写同一缺失 key 会双读 None 双 add，commit 撞 PK 冲突。
+
+        ASR 按 type 隔离存储：admin 切换 asr.type 时前端 payload 会把旧
+        类型的空字段一并提交——这些空字段不该被写入，也不该触发
+        REQUIRED_STRING_KEYS 校验（#177）。运行路径只读激活类型的字
+        段，非激活类型的空值留着也只是脏数据。items 里带 asr.type 就
+        以 items 为准（admin 正在切换），否则用 cache 兜底。
         """
         from sqlalchemy.dialects.mysql import insert as mysql_insert
         from sqlalchemy.dialects.postgresql import insert as pg_insert
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        if "asr.type" in items or "asr.type" in self._cache:
+            active_asr_type = (
+                items.get("asr.type") or self._cache.get("asr.type") or ""
+            )
+            if active_asr_type:
+                items = {
+                    k: v
+                    for k, v in items.items()
+                    if (
+                        not k.startswith("asr.")
+                        or k == "asr.type"
+                        or k.startswith(f"asr.{active_asr_type}.")
+                    )
+                }
 
         async with SessionLocal() as session:
             dialect = session.bind.dialect.name if session.bind else "sqlite"

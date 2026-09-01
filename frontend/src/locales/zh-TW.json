@@ -17,6 +17,7 @@
   "system.reload": "重新載入",
   "system.save_group": "儲存 {group}",
   "system.save_failed": "儲存 {group} 設定失敗：{message}",
+  "system.save_failed_network": "儲存 {group} 設定失敗，請檢查網路連線",
   "system.save_refresh_failed": "設定已寫入，但本地未刷新，請稍後重新打開頁面",
   "system.save_refresh_required_title": "本機狀態已落後",
   "system.save_refresh_required_msg": "{group} 已儲存到伺服器，但本機未能刷新。繼續編輯可能覆寫伺服器最新值，請刷新頁面後再操作。",

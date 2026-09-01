@@ -661,9 +661,11 @@ const extractClipboardText = async () => {
     closeActivePanel();
   } catch (error) {
     if (!isCanceled(error)) {
-      message(extractBackendError(error, t("create.dialog.clipboard_failed")), {
-        type: "error"
-      });
+      // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+      const hasResponse = (error as { response?: unknown })?.response !== undefined;
+      if (!hasResponse) {
+        message(t("create.dialog.clipboard_failed"), { type: "error" });
+      }
     }
   } finally {
     clipboardExtracting.value = false;
@@ -714,9 +716,11 @@ const extractVoiceTranscript = async () => {
     closeActivePanel();
   } catch (error) {
     if (!isCanceled(error)) {
-      message(extractBackendError(error, t("create.dialog.voice_failed")), {
-        type: "error"
-      });
+      // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+      const hasResponse = (error as { response?: unknown })?.response !== undefined;
+      if (!hasResponse) {
+        message(t("create.dialog.voice_failed"), { type: "error" });
+      }
     }
     // 提取失败同样退回入口列表，面板不留不可操作的僵尸态
     closeActivePanel();
@@ -770,9 +774,11 @@ const submitRecognition = async () => {
     if (filled === null) return;
     closeActivePanel();
   } catch (error) {
-    message(extractBackendError(error, t("create.dialog.ocr_failed")), {
-      type: "error"
-    });
+    // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+    const hasResponse = (error as { response?: unknown })?.response !== undefined;
+    if (!hasResponse) {
+      message(t("create.dialog.ocr_failed"), { type: "error" });
+    }
     // 识别失败时保留定格画面，用户可点击"重拍"或再次点击"提交识别"重试
   } finally {
     // 成功 closeActivePanel / 空文本 early return / catch 三支都必须重置，
@@ -870,9 +876,11 @@ const handleCropSubmit = async () => {
     await runExtractAndFill(text);
     closeActivePanel();
   } catch (error) {
-    message(extractBackendError(error, t("create.dialog.upload_failed")), {
-      type: "error"
-    });
+    // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+    const hasResponse = (error as { response?: unknown })?.response !== undefined;
+    if (!hasResponse) {
+      message(t("create.dialog.upload_failed"), { type: "error" });
+    }
     // 识别异常也退出 panel，让用户决定重试还是换路径。
     closeActivePanel();
   } finally {

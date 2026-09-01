@@ -13,10 +13,16 @@ from app.core.i18n.messages import Keys
 
 
 def test_enum_keys_exact_set():
-    """ENUM_KEYS 必须是这组 key；新增枚举（如未来 ocr.model）必须同步更新本断言。"""
+    """ENUM_KEYS 必须是这组 key；新增枚举（如未来 ocr.model）必须同步更新本断言。
+
+    asr.type 加入的原因：set_many 过滤非激活 ASR 字段时拼 f"asr.{type}."
+    前缀，type 字符串必须在白名单内——靠 ENUM 校验兜住（含空白 / 未知
+    provider）以免 filter 静默丢配置后 admin 收到 200「保存成功」（#178 评审）。
+    """
     assert set(ENUM_KEYS.keys()) == {
         "asr.funasr_server.language",
         "asr.doubao_stream.language",
+        "asr.type",
         "llm.output_language",
         "llm.type",
         "ocr.type",
@@ -72,6 +78,9 @@ def test_enum_keys_values_are_correct_sets():
     assert ENUM_KEYS["llm.type"] == {"openai", "stub"}
     # ocr.type 跟 factory.py supported_providers 同步——{openai, baidu}
     assert ENUM_KEYS["ocr.type"] == {"openai", "baidu"}
+    # asr.type 跟 asr.* 子 key 命名一致（funasr_server / doubao_stream）——
+    # 加新 provider 需同时扩这里 + ALL_B_KEYS + DEFAULTS。
+    assert ENUM_KEYS["asr.type"] == {"funasr_server", "doubao_stream"}
 
 
 def test_validate_value_accepts_funasr_zh():

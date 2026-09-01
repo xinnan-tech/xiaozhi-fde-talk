@@ -61,10 +61,13 @@ const handleCreateInterview = async (form: CreateInterviewForm) => {
       .push({ path: interviewRouteTarget(created) })
       .catch(() => ElMessage.error(t("app.interview_create_failed")));
   } catch (error: any) {
-    const detail = error?.response?.data?.detail;
-    ElMessage.error(
-      typeof detail === "string" ? detail : t("app.interview_create_failed")
-    );
+    // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；
+    // 这里再 ElMessage.error 会形成两条 toast（#62 同源）。
+    // 仅当网络错误（无 response）时给兜底——拦截器只处理有 response 的情况。
+    const hasResponse = error?.response !== undefined;
+    if (!hasResponse) {
+      ElMessage.error(t("app.interview_create_failed"));
+    }
   } finally {
     creatingInterview.value = false;
   }

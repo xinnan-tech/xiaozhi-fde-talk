@@ -1,0 +1,76 @@
+name: Docker Image CI
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 只在 v 开头的 tag 推送时触发，例如 v1.0.0
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Build Base Image"]
+    types:
+      - completed
+
+jobs:
+  release:
+    name: Release Docker images
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Check Disk Space
+        run: |
+          df -h
+          docker system df
+
+      - name: Clean up Docker resources
+        run: |
+          docker system prune -af
+          docker builder prune -af
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          if [[ "$GITHUB_REF" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "VERSION=${BASH_REMATCH[1]}" >> $GITHUB_ENV
+            echo "IS_VERSION=true" >> $GITHUB_ENV
+          else
+            echo "VERSION=latest" >> $GITHUB_ENV
+            echo "IS_VERSION=false" >> $GITHUB_ENV
+          fi
+
+      # 应用镜像：多阶段编译 Vue + Python 源码 + 证书
+      # tag 规则：
+      #   v1.2.3 推送 → server-app_1.2.3 + server-app_latest
+      #   其他       → server-app_latest
+      - name: Build and push server-app
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile-server
+          push: true
+          tags: |
+            ${{ env.IS_VERSION == 'true' && format('ghcr.io/{0}:server-app_{1},ghcr.io/{0}:server-app_latest', github.repository, env.VERSION) || format('ghcr.io/{0}:server-app_latest', github.repository) }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILDKIT_PROGRESS=plain
+            SERVER_BASE_REGISTRY=ghcr.io/${{ github.repository_owner }}
+            SERVER_BASE_TAG=server-base

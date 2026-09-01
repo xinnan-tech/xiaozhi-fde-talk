@@ -165,7 +165,7 @@ onBeforeMount(async () => {
 .about {
   box-sizing: border-box;
   max-width: 100%;
-  padding: 0 8px 0 16px;
+  padding: 0 16px;
 
   /* 以内容区实际宽度作为自适应基准，自动兼容侧边栏展开/折叠 */
   container-type: inline-size;

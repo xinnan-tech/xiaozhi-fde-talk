@@ -296,9 +296,13 @@ watch(interviewCreated, async created => {
 });
 
 // pause / resume / end 成功后通知首页拉新
-watch(interviewStatusChanged, async changed => {
-  if (changed > 0) await refreshAfterCreateDebounced();
-}, { immediate: true });
+watch(
+  interviewStatusChanged,
+  async changed => {
+    if (changed > 0) await refreshAfterCreateDebounced();
+  },
+  { immediate: true }
+);
 
 watch(
   isLoggedIn,
@@ -598,10 +602,6 @@ watch(
   flex-direction: column;
   max-width: 100%;
   padding: 0 16px;
-
-  /* 以内容区实际宽度作为自适应基准，自动兼容侧边栏展开/折叠 */
-  container-type: inline-size;
-  overflow-x: hidden;
 
   .home-header {
     display: flex;

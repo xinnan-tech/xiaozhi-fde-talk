@@ -315,7 +315,7 @@ async function submitReset() {
   min-width: 0;
   max-width: 100%;
   width: 100%;
-  padding: 0 8px 0 16px;
+  padding: 0 16px;
   overflow-x: hidden;
 }
 
@@ -451,7 +451,6 @@ async function submitReset() {
     min-width: 0;
     max-width: 100%;
     padding: 6px 8px 8px;
-    margin: 0 8px 0 16px;
     overflow: hidden;
   }
 

@@ -261,16 +261,11 @@ const closeActivePanel = () => {
   closeCamera();
 };
 
-// 「清空表单」按钮：保留 template_id，清掉访谈名称、目标、模板 base_info
-// 各字段值、提示文案、自动值记录。
-//
-// 起飞中的 extract 请求（OCR / 语音 / 粘贴共用 "extract" 信号）必须主动
-// 取消：否则清空后请求响应回来，runExtractAndFill 仍会经
-// Object.entries(response.values ?? {}) 回填 base_info，「清空」等于
-// 失效（#175 review P2-1）。
-//
-// 仅保证「下一次 fresh OCR / 语音」时不再携带历史（runExtractAndFill
-// 实时读表单拼 currentValues）。
+// 「清空表单」保留 template_id，清掉访谈名称/目标/base_info 各字段
+// 值、提示文案、自动值记录。起飞中的 extract（OCR/语音/粘贴共用
+// "extract" 信号）必须 cancel，否则响应回来会回填 base_info 把清空抵
+// 消（#175 review P2-1）；契约收口到「下一次 fresh OCR / 语音」
+// 不再携带历史。
 const clearFormExceptTemplate = () => {
   cancelRequest("extract");
   const baseInfo = form.base_info as Record<string, string>;
@@ -332,12 +327,23 @@ const selectInputMethod = async (methodKey: string) => {
   }
 };
 
+// 模板字段版本号：loadTemplateFields 每次进入 +1，过期请求按此判定是否
+// 仍 mutate 全局（弱网下 T1→T2→T3 连续切换时响应可能乱序到达）。
+let templateFieldsVersion = 0;
+
 const loadTemplateFields = async (templateId: string) => {
   if (!templateId || templateFieldsTemplateId.value === templateId) {
     return templateFields.value;
   }
 
+  // 版本号：弱网下 T1→T2→T3 连续切换时，三轮 getInterviewTemplateDetailApi
+  // 响应可能乱序回来；过期请求放弃 mutate 全局，让最新轮次胜出（#175 review
+  // P1-1）。
+  const version = ++templateFieldsVersion;
   const template = await getInterviewTemplateDetailApi(templateId);
+  if (version !== templateFieldsVersion) {
+    return template.session?.base_fields ?? [];
+  }
   templateFields.value = template.session?.base_fields ?? [];
   templateSession.value = template.session ?? {};
   templateFieldsTemplateId.value = templateId;
@@ -462,16 +468,23 @@ const applyTemplateDefaults = async (templateId: string) => {
 // 不能让用户无感知），并把 applyTemplateDefaults 期间「清空表单」按钮
 // 也禁用——避免加载悬空期内清空，applyTemplateDefaults 恢复后用兜底值
 // / title_default / goal_default / field.default 把清空整体抵消
-// （#175 review P1-2）。
+// （#175 review P1-2）。入口先拍 id 快照并用快照调用 applyTemplateDefaults，
+// catch/finally 内 assert 当前 template_id 未变（el-select 已禁用，但
+// 作为竞争条件兜底），不一致则丢弃错误 message，避免用 T1 的 fields 把
+// 已切到 T2 的 form 抹掉（#175 review P1-1）。
 const loadDefaultsManually = async () => {
-  if (!form.template_id || defaultsLoading.value) return;
+  const id = form.template_id;
+  if (!id || defaultsLoading.value) return;
   defaultsLoading.value = true;
   try {
-    await applyTemplateDefaults(form.template_id);
+    await applyTemplateDefaults(id);
   } catch (error) {
-    message(extractBackendError(error, t("create.dialog.load_defaults_failed")), {
-      type: "error"
-    });
+    if (form.template_id === id) {
+      message(
+        extractBackendError(error, t("create.dialog.load_defaults_failed")),
+        { type: "error" }
+      );
+    }
   } finally {
     defaultsLoading.value = false;
   }
@@ -480,13 +493,23 @@ const loadDefaultsManually = async () => {
 // 模板字段按需渲染：dialog 打开 / 用户切换模板都会触发，但只拉字段定义，
 // 不预填默认值——默认值由用户点「加载默认值」显式触发（#174）。
 // 切模板时同步清掉旧域孤儿键（#175 review P1-1），避免旧字段随提交
-// 落库；用户没显式改过的输入因为不属于新模板也跟着清（预期行为）。
+// 落库。pruneOrphanKeys 用 validKeys = new Set([fields..., "title",
+// "end_time"])，不属于新模板的键无论用户是否改过都 delete（设计如此）。
+// watch 触发是连续的（连切 T1→T2→T3），ensureTemplateFieldsLoaded 内
+// 部以版本号拒绝陈旧响应的 mutate 覆盖，但 pruneOrphanKeys 的应用仍需
+// 触发时刻的 id guard：晚到的 then 不再处理已切换的模板，避免用过期
+// fields 把新模板字段当孤儿清掉（#175 review P1-1）。
+let pendingTemplateId = "";
 watch(
   () => form.template_id,
   id => {
     if (!id || !props.modelValue) return;
+    pendingTemplateId = id;
     ensureTemplateFieldsLoaded(id)
-      .then(pruneOrphanKeys)
+      .then(() => {
+        if (pendingTemplateId !== id) return;
+        pruneOrphanKeys(templateFields.value);
+      })
       .catch(() => undefined);
   }
 );
@@ -966,6 +989,12 @@ const handleModelValueChange = (value: boolean) => {
 };
 
 const handleClose = () => {
+  // 「加载默认值」悬空期内关弹窗会让 applyTemplateDefaults 仍在飞的 await
+  // mutate 已 unmount 的 reactive 代理（destroy-on-close），触发 Vue proxy
+  // 销毁类 warning 并浪费一次 getInterviewTemplateDetailApi（#175 review
+  // P2-1）。footer 取消按钮已 :disabled 兜底，这里双保险：用户硬走 X / esc /
+  // mask 也不让关。loading 完成后 dialog 由用户重试关闭。
+  if (defaultsLoading.value) return;
   cameraFrozen.value = false;
   frozenImageSrc.value = "";
   closeCamera();
@@ -1070,7 +1099,7 @@ watch(
               v-model="form.template_id"
               :placeholder="$t('create.dialog.template_placeholder')"
               :loading="interviewTemplatesLoading"
-              :disabled="interviewTemplatesLoading"
+              :disabled="interviewTemplatesLoading || defaultsLoading"
             >
               <el-option
                 v-for="template in interviewTemplates"
@@ -1396,7 +1425,7 @@ watch(
       <el-button
         style="border-radius: 8px"
         plain
-        :disabled="submitting"
+        :disabled="submitting || defaultsLoading"
         @click="handleClose"
         >{{ $t("create.dialog.cancel") }}</el-button
       >

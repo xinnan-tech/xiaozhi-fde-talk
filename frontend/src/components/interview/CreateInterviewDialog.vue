@@ -1095,7 +1095,9 @@ watch(
           </div>
 
           <!-- 访谈模板提到访谈名称之后：先告诉系统这条访谈是什么，
-               下面的 base_fields 才会按所选模板渲染对应的字段 -->
+               下面的 base_fields 才会按所选模板渲染对应的字段。
+               下拉与「加载默认值」「清空表单」两个按钮同一行排列（#183），
+               按按钮的高度/圆角与下拉框对齐：height=36px、border-radius=9px。 -->
           <el-form-item prop="template_id" class="template-field">
             <template #label>
               <span class="form-label-content">
@@ -1103,46 +1105,47 @@ watch(
                 {{ $t("create.dialog.template") }}
               </span>
             </template>
-            <el-select
-              v-model="form.template_id"
-              :placeholder="$t('create.dialog.template_placeholder')"
-              :loading="interviewTemplatesLoading"
-              :disabled="interviewTemplatesLoading || defaultsLoading"
-            >
-              <el-option
-                v-for="template in interviewTemplates"
-                :key="template.id"
-                :label="template.name"
-                :value="template.id"
-              />
-            </el-select>
+            <div class="ci-template-row">
+              <el-select
+                v-model="form.template_id"
+                class="ci-template-row-select"
+                :placeholder="$t('create.dialog.template_placeholder')"
+                :loading="interviewTemplatesLoading"
+                :disabled="interviewTemplatesLoading || defaultsLoading"
+              >
+                <el-option
+                  v-for="template in interviewTemplates"
+                  :key="template.id"
+                  :label="template.name"
+                  :value="template.id"
+                />
+              </el-select>
+              <!-- 模板字段加载/重置双按钮（#174）：选择模板不自动拉默认值，
+                   用户点「加载默认值」才补兜底；点「清空表单」只保留
+                   template_id，把访谈名称、目标、base_info 全清干净，
+                   方便重新填写而不混入 OCR/语音提取历史。加载悬空期
+                   「清空表单」一并禁用，避免加载完成后用兜底 /
+                   title_default / field.default 把清空抵消掉
+                   （#175 review P1-2） -->
+              <el-button
+                class="ci-template-row-action"
+                plain
+                :loading="defaultsLoading"
+                :disabled="!form.template_id || interviewTemplatesLoading || defaultsLoading"
+                @click="loadDefaultsManually"
+              >
+                {{ $t("create.dialog.load_defaults") }}
+              </el-button>
+              <el-button
+                class="ci-template-row-action"
+                plain
+                :disabled="!form.template_id || defaultsLoading"
+                @click="clearFormExceptTemplate"
+              >
+                {{ $t("create.dialog.clear_form") }}
+              </el-button>
+            </div>
           </el-form-item>
-
-          <!-- 模板字段加载/重置双按钮（#174）：选择模板不自动拉默认值，
-               用户点「加载默认值」才补兜底；点「清空表单」只保留 template_id，
-               把访谈名称、目标、base_info 全清干净，方便重新填写而不混入
-               OCR/语音提取历史。加载悬空期「清空表单」一并禁用，避免加载
-               完成后用兜底 / title_default / field.default 把清空抵消掉
-               （#175 review P1-2） -->
-          <div class="template-actions">
-            <el-button
-              size="small"
-              plain
-              :loading="defaultsLoading"
-              :disabled="!form.template_id || interviewTemplatesLoading || defaultsLoading"
-              @click="loadDefaultsManually"
-            >
-              {{ $t("create.dialog.load_defaults") }}
-            </el-button>
-            <el-button
-              size="small"
-              plain
-              :disabled="!form.template_id || defaultsLoading"
-              @click="clearFormExceptTemplate"
-            >
-              {{ $t("create.dialog.clear_form") }}
-            </el-button>
-          </div>
 
           <!-- 业务字段按模板 base_fields 渲染（label=显示名，控件跟类型走）：
                text→输入框 datetime→时间选择 duration→档位下拉 -->
@@ -1533,10 +1536,29 @@ watch(
       width: 100%;
     }
 
-    .template-actions {
+    // 模板下拉与两个动作按钮同一行：下拉撑满剩余宽度，按钮固定 36px
+    // 高与 9px 圆角，与 el-select__wrapper 的 min-height / border-radius
+    // 对齐（#183）。类名加 ci- 前缀避开 views/system/index.vue 的同名类
+    // — 该组件 <style lang="scss"> 未 scoped，全局生效会造成模板管理卡片
+    // 横排的 layout 回归。
+    .ci-template-row {
       display: flex;
-      flex-wrap: wrap;
+      align-items: stretch;
       gap: 8px;
+      width: 100%;
+    }
+
+    .ci-template-row-select {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .ci-template-row-action {
+      flex: 0 0 auto;
+      height: 36px;
+      padding: 0 14px;
+      font-size: 13px;
+      border-radius: 9px;
     }
 
     .basic-fields-row {
@@ -2111,6 +2133,19 @@ watch(
 
       .input-method:first-child {
         grid-row: auto;
+      }
+
+      // 窄屏：模板行改竖排，按钮宽度自适应（#183）
+      .ci-template-row {
+        flex-wrap: wrap;
+
+        .ci-template-row-select {
+          flex-basis: 100%;
+        }
+
+        .ci-template-row-action {
+          flex: 1 1 auto;
+        }
       }
 
       .goal-field {

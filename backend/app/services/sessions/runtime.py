@@ -555,9 +555,13 @@ class RuntimeRegistry:
                 logger.info("会话运行时复用（重连取回）：session=%s state=%s",
                             session_id, runtime._fsm.state.value)
                 return runtime
-        # 已在线（并发 bind 同一 session）：复用现有，不新建
+        # 已在线（并发 bind 同一 session）：复用现有，不新建。
+        # 同样刷会话级字段：hello 侧 state 可能是 manager 从 DB 新载入的对象
+        # （_active 被 REST suspend/resume 换血过）。不刷会留下旧 status 快照，
+        # 导致随后的生命周期落盘把旧值写回 DB（#91）。
         existing = self._active.get(session_id)
         if existing is not None and not existing._fsm.is_terminated:
+            self._refresh_session_fields(existing, state.session)
             return existing
         if existing is not None:
             logger.warning("在线运行时已终止，替换为新实例：session=%s", session_id)
@@ -654,6 +658,25 @@ class RuntimeRegistry:
             return active
         entry = self._parked.get(session_id)
         return entry[0] if entry else None
+
+    def sync_session(self, session_id: str, session: Session) -> None:
+        """把最新会话级字段（status/timestamps 等）刷进寄存 runtime 的旧快照。
+
+        REST suspend/resume/end 经 manager 转换的 SessionState（_active 或
+        DB 新载入）与寄存 runtime 持有的旧快照可能不是同一对象；不刷的话，
+        runtime 随后的生命周期落盘（listen_stop / unbind 的强制全量写）会把
+        旧 status 盖回 DB：暂停落盘 suspended 后被写回 in_progress，
+        列表页状态错。manager._transition 在落盘前调用本方法对齐两侧快照
+        （先 sync 后 save，杜绝「DB 新、快照旧」的 TOCTOU 窗口）。
+        """
+        rt = self.get(session_id)
+        if rt is None:
+            return
+        before = rt.state.session.status.value
+        self._refresh_session_fields(rt, session)
+        if before != session.status.value:
+            logger.debug("寄存运行时快照已同步：session=%s status %s→%s",
+                         session_id, before, session.status.value)
 
     def get_active(self, session_id: str) -> Optional[SessionRuntime]:
         """仅查 _active（在线 bound runtime）。"""

@@ -19,11 +19,11 @@ services:
     # 用 bash -c 包一层：CMD-SHELL 默认走 /bin/sh（dash），不支持 bash 专有
     # 的 /dev/tcp 重定向，直接写会一直 "cannot create /dev/tcp"。
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/10095 && echo -e \"GET /health HTTP/1.0\\r\\n\\r\\n\" >&3 || exit 1'"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/10095 && exec 3<&- || exit 1'"]
       interval: 15s
       timeout: 5s
       retries: 6
-      start_period: 120s
+      start_period: 300s
     # 使用分号隔离命令，确保 cd 和 touch 在主 shell 中按顺序生效
     # 命令参数跟仓库根 docs/funasr.md 文档里"独立部署"那段的 docker run 行
     # 完全一致：punc-dir / lm-dir / itn-dir / hotword 全部显式传，避免跟
@@ -101,9 +101,6 @@ services:
       - ./frontend/src/certs:/app/certs:ro
       # SQLite 数据：直接挂本机 backend/data
       - ./backend/data:/app/data
-    depends_on:
-      funasr:
-        condition: service_healthy
     healthcheck:
       # /health 是只读端点，不依赖 DB 写；用于容器健康检查。
       # 镜像只有 python（slim base），没装 wget / curl；用 python urllib 直

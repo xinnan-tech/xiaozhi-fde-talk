@@ -69,6 +69,8 @@ class Keys(StrEnum):
     SESSION_ILLEGAL_TRANSITION = "session.illegal_transition"
     SESSION_EDIT_FORBIDDEN = "session.edit_forbidden"
     SESSION_DELETE_FORBIDDEN = "session.delete_forbidden"
+    SESSION_BASE_INFO_VALUE_TOO_LONG = "session.base_info_value_too_long"
+    SESSION_BASE_INFO_TOTAL_TOO_LARGE = "session.base_info_total_too_large"
 
     # ---- Reports ----
     REPORT_FORMAT_NOT_IMPLEMENTED = "report.format_not_implemented"

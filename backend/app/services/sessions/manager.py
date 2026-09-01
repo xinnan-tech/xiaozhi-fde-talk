@@ -40,6 +40,12 @@ from app.services.sessions.log_events import log_event
 from app.services.sessions.runtime import registry
 from app.services.sessions.state import SessionState
 from app.services.template.loader import get_template, resolve_template
+# TOCTOU 兜底：manager.update 必须对「本函数 GET 的最新快照 + PATCH 增量」merged 再跑
+# 字节上限校验。route 层的 _validate_base_info_size 是基于它自己 GET 快照的 fast-fail，
+# 与 manager.update 内部的 GET 不在同一临界区，并发 PATCH 可在两者之间先 commit。
+# 故此处必须基于本函数的最新 GET 再校验一次（不依赖 route 层的过期快照）。
+# 函数本身是纯校验，与 DB/HTTP 解耦，从 schemas 引出是合理的（routes 也从这里引）。
+from app.transport.http.schemas import _validate_base_info_size
 
 logger = logging.getLogger(__name__)
 
@@ -259,19 +265,36 @@ class SessionManager:
         base_info: Optional[dict],
         goal: Optional[str],
     ) -> SessionState:
-        """编辑基础信息/目标。仅未开始(created)或暂停(suspended)态可编辑。"""
+        """编辑基础信息/目标。仅未开始(created)或暂停(suspended)态可编辑。
+
+        TOCTOU 兜底：本函数内对「本函数 GET 的最新快照 + PATCH 增量」merged 再跑
+        一次字节上限校验，挡住 route 层 GET 与本函数 GET 之间的并发 PATCH 累计
+        放大——见 openrz 第二轮评审 #171。route 层的 _validate_base_info_size 是
+        fast-fail（基于 route GET 快照；多数单请求场景足够），本层是最终一致性
+        兜底（基于本函数 GET 快照）。两层都过则 merged 必然 ≤ 64KB 才落库。
+        """
         state = await self.get(session_id)
         if state is None:
             raise KeyError(session_id)
         if state.status not in (SessionStatus.CREATED, SessionStatus.SUSPENDED):
             raise SessionEditForbiddenError(state=state.status.value)
-        merged = {**state.session.base_info, **base_info} if base_info is not None else None
-        if ((goal is not None and goal != state.session.goal)
-                or (merged is not None and merged != state.session.base_info)):
+
+        merged: Optional[dict] = None
+        if base_info is not None:
+            merged = {**state.session.base_info, **base_info}
+            # 本函数 GET 是最新快照（与 route 层 GET 之间可能已有并发 PATCH commit）。
+            # 串行 PATCH 累计若不在此处校验，merged 可绕过 BASE_INFO_TOTAL_MAX_BYTES
+            # ——校验抛 I18nError(Keys.SESSION_BASE_INFO_TOTAL_TOO_LARGE, 422)，
+            # 全局 I18nError handler 转 422 + 本地化 detail。
+            _validate_base_info_size(merged)
+
+        base_info_changed = merged is not None and merged != state.session.base_info
+        goal_changed = goal is not None and goal != state.session.goal
+        if base_info_changed or goal_changed:
             # 目标/背景实际变更，旧首评作废：transcript 为空时下次进入会重新生成
             state.session.first_batch_generated = False
-        if base_info is not None:
-            state.session.base_info = {**state.session.base_info, **base_info}
+        if merged is not None:
+            state.session.base_info = merged
         if goal is not None:
             state.session.goal = goal
         await interview_repo.save_state_auto(state)

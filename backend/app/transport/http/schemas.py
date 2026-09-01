@@ -1,9 +1,58 @@
 """HTTP 请求/响应 DTO。"""
 from __future__ import annotations
 
+import json
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+# base_info 单字段 / 整体字节上限。base_info 是 JSON 列，没有 per-field 索引，
+# 大字段会让 list / detail / export 全量查询被单条记录拖慢。值按 UTF-8 字节计，
+# 不按字符——防有人故意用 4-byte emoji 把字段撑爆。
+BASE_INFO_VALUE_MAX_BYTES = 4 * 1024  # 4 KB / 字段
+BASE_INFO_TOTAL_MAX_BYTES = 64 * 1024  # 64 KB / base_info 整体
+
+
+def _validate_base_info_size(base_info: dict) -> None:
+    """base_info 整体 / 单字段字节上限校验。
+
+    整体按 ``json.dumps(base_info, ensure_ascii=False, default=str)`` 后的 UTF-8
+    字节数计——含 key、``{}`` / ``,`` / 引号等结构开销，与 DB 实际落库体积一致。
+    单字段按 value 序列化字节 + 对应 key 字节合计判（key 字节不能漏算，否则
+    可用长 key + 小 value 绕过单字段上限）。
+
+    ``default=str`` 让 ``datetime`` / ``Decimal`` / ``set`` 等非 JSON 原生类型
+    走字符串兜底，避免裸 ``TypeError`` 上抛为 500。
+    """
+    from app.core.i18n import Keys
+    from app.core.i18n.errors import I18nError
+
+    total_bytes = len(
+        json.dumps(base_info, ensure_ascii=False, default=str).encode("utf-8")
+    )
+    if total_bytes > BASE_INFO_TOTAL_MAX_BYTES:
+        raise I18nError(
+            Keys.SESSION_BASE_INFO_TOTAL_TOO_LARGE,
+            http_status=422,
+            byte_len=total_bytes,
+            max_bytes=BASE_INFO_TOTAL_MAX_BYTES,
+        )
+
+    for key, value in base_info.items():
+        key_bytes = len(key.encode("utf-8"))
+        value_bytes = len(
+            json.dumps(value, ensure_ascii=False, default=str).encode("utf-8")
+        )
+        field_bytes = key_bytes + value_bytes
+        if field_bytes > BASE_INFO_VALUE_MAX_BYTES:
+            raise I18nError(
+                Keys.SESSION_BASE_INFO_VALUE_TOO_LONG,
+                http_status=422,
+                key=key,
+                byte_len=field_bytes,
+                max_bytes=BASE_INFO_VALUE_MAX_BYTES,
+            )
 
 
 class LoginRequest(BaseModel):
@@ -156,6 +205,11 @@ class CreateInterviewRequest(BaseModel):
     base_info: dict = {}
     goal: Optional[str] = None
 
+    @model_validator(mode="after")
+    def _check_base_info_size(self) -> "CreateInterviewRequest":
+        _validate_base_info_size(self.base_info)
+        return self
+
 
 class UpdateInterviewRequest(BaseModel):
     # extra="forbid" 防止 user_id / status 等被注入改他人访谈或跳状态机。
@@ -163,6 +217,12 @@ class UpdateInterviewRequest(BaseModel):
 
     base_info: Optional[dict] = None
     goal: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _check_base_info_size(self) -> "UpdateInterviewRequest":
+        if self.base_info is not None:
+            _validate_base_info_size(self.base_info)
+        return self
 
 
 class InterviewStatisticsResponse(BaseModel):

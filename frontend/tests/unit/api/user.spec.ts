@@ -26,6 +26,8 @@ vi.mock("@/api/utils", () => ({
 import {
   loginApi,
   registerApi,
+  refreshApi,
+  logoutApi,
   changePasswordApi,
   registrationStatusApi
 } from "@/api/user";
@@ -112,5 +114,31 @@ describe("api/user — registrationStatusApi", () => {
     expect(method).toBe("get");
     expect(url).toBe("/api/v1/auth/registration-status");
     expect(param).toBeUndefined();
+  });
+});
+
+describe("api/user — refreshApi", () => {
+  beforeEach(() => requestMock.mockClear());
+  afterEach(() => requestMock.mockReset());
+
+  it("refreshApi({refresh_token}) → POST /api/v1/auth/refresh", async () => {
+    await refreshApi({ refresh_token: "rt-1" });
+    const [method, url, param] = requestMock.mock.calls[0];
+    expect(method).toBe("post");
+    expect(url).toBe("/api/v1/auth/refresh");
+    expect(param).toEqual({ data: { refresh_token: "rt-1" } });
+  });
+});
+
+describe("api/user — logoutApi", () => {
+  beforeEach(() => requestMock.mockClear());
+  afterEach(() => requestMock.mockReset());
+
+  it("logoutApi({refresh_token}) → POST /api/v1/auth/logout", async () => {
+    await logoutApi({ refresh_token: "rt-1" });
+    const [method, url, param] = requestMock.mock.calls[0];
+    expect(method).toBe("post");
+    expect(url).toBe("/api/v1/auth/logout");
+    expect(param).toEqual({ data: { refresh_token: "rt-1" } });
   });
 });

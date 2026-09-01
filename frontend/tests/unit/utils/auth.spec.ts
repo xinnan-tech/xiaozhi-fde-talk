@@ -121,6 +121,31 @@ describe("utils/auth — setToken / getToken / removeToken", () => {
     expect(Cookies.get(TokenKey)).toBeUndefined();
   });
 
+  it("setToken 写 Cookie 时挂 Secure + SameSite=Strict（缓解 XSS 一次性偷 refresh）", () => {
+    // document.cookie 不暴露 Secure / SameSite 这些属性（它们只在 Set-Cookie 头里），
+    // 所以直接 spyOn Cookies.set 抓 options 参数来断言。
+    const spy = vi.spyOn(Cookies, "set");
+    try {
+      setToken({
+        accessToken: "tok-sec",
+        refreshToken: "rt-sec",
+        username: "alice",
+        userId: "u-1",
+        role: "user"
+      });
+      expect(spy).toHaveBeenCalledWith(
+        TokenKey,
+        expect.any(String),
+        expect.objectContaining({
+          secure: true,
+          sameSite: "Strict"
+        })
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("setToken：role / userId 缺省时存原值（undefined，不强行给默认值）", () => {
     // 源码：storageLocal().setItem(userKey, { accessToken, username, userId, role })，
     // 没有 userId/role 时直接是 undefined；默认 "" / "user" 只作用于 store 的 SET_USER_ID / SET_ROLE，
@@ -129,6 +154,90 @@ describe("utils/auth — setToken / getToken / removeToken", () => {
     const stored = memStore.get(userKey);
     expect(stored.userId).toBeUndefined();
     expect(stored.role).toBeUndefined();
+    expect(stored.refreshToken).toBeUndefined();
+  });
+
+  it("setToken 写入 refreshToken + getToken 完整 round-trip", () => {
+    // 401 静默续 access 的前提：refreshToken 跟 accessToken 一起落盘，重启浏览器后还能取到。
+    setToken({
+      accessToken: "at-1",
+      refreshToken: "rt-1",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    });
+    const got = getToken();
+    expect(got?.accessToken).toBe("at-1");
+    expect(got?.refreshToken).toBe("rt-1");
+    expect(got?.userId).toBe("u-1");
+    expect(got?.role).toBe("user");
+  });
+
+  it("setToken 写入 refreshToken 时 localStorage 不含 refreshToken（openrz P1.1）", () => {
+    // refreshToken 不再落 localStorage（明文 JS 可读、无网络层缓解），
+    // 只走 cookie（Secure + SameSite=Strict）。
+    setToken({
+      accessToken: "at-p11",
+      refreshToken: "rt-p11-secret",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    });
+    const stored = memStore.get(userKey);
+    // 关键断言：localStorage 里不能有 refreshToken
+    expect(stored.refreshToken).toBeUndefined();
+    expect(JSON.stringify(stored)).not.toContain("rt-p11-secret");
+    // 其他字段照常落
+    expect(stored.accessToken).toBe("at-p11");
+    expect(stored.username).toBe("alice");
+    expect(stored.userId).toBe("u-1");
+    expect(stored.role).toBe("user");
+    // cookie 仍含 refreshToken（401 静默续 access 还要从 cookie 拼回）
+    const cookieRaw = Cookies.get(TokenKey);
+    expect(cookieRaw).toBeTruthy();
+    expect(JSON.parse(cookieRaw!).refreshToken).toBe("rt-p11-secret");
+  });
+
+  it("getToken：localStorage 无 refreshToken 时从 cookie 拼回（401 静默续 access 路径）", () => {
+    // 模拟「旧 session 升级后 localStorage 已无 refreshToken，但 cookie 仍存」的场景：
+    // 例如本次升级前留下的 localStorage 数据（无 refreshToken 字段）。
+    memStore.set(userKey, {
+      accessToken: "at-mix",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    });
+    Cookies.set(TokenKey, JSON.stringify({
+      accessToken: "at-mix",
+      refreshToken: "rt-mix",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    }));
+    const got = getToken();
+    expect(got?.accessToken).toBe("at-mix");
+    expect(got?.refreshToken).toBe("rt-mix");
+  });
+
+  it("getToken：localStorage 有 refreshToken 时优先用 localStorage（防御 cookie 被外部改写）", () => {
+    // 如果两条路径都写：localStorage 已有 refreshToken → 直接用，cookie
+    // 即便被篡改也不影响返回值。
+    memStore.set(userKey, {
+      accessToken: "at-d",
+      refreshToken: "rt-local",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    });
+    Cookies.set(TokenKey, JSON.stringify({
+      accessToken: "at-d",
+      refreshToken: "rt-cookie-tampered",
+      username: "alice",
+      userId: "u-1",
+      role: "user"
+    }));
+    const got = getToken();
+    expect(got?.refreshToken).toBe("rt-local");
   });
 });
 

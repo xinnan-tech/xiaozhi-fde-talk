@@ -54,12 +54,14 @@ describe("stores/UserStore — loginByUsername", () => {
   it("按 result.access_token 写入 state", async () => {
     vi.spyOn(userApi, "loginApi").mockReset().mockResolvedValue({
       access_token: "tok-1",
+      refresh_token: "rt-1",
       token_type: "bearer",
       user: { id: "u-1", username: "alice", role: "admin" }
     });
     const store = useUserStore();
     await store.loginByUsername({ username: "alice", password: "x" });
     expect(store.accessToken).toBe("tok-1");
+    expect(store.refreshToken).toBe("rt-1");
     expect(store.username).toBe("alice");
     expect(store.userId).toBe("u-1");
     expect(store.role).toBe("admin");
@@ -68,12 +70,14 @@ describe("stores/UserStore — loginByUsername", () => {
   it("login: result.access_token 缺失时 state 保持空", async () => {
     vi.spyOn(userApi, "loginApi").mockReset().mockResolvedValue({
       access_token: "",
+      refresh_token: "rt-x",
       token_type: "bearer",
       user: { id: "u-1", username: "alice", role: "admin" }
     } as any);
     const store = useUserStore();
     await store.loginByUsername({ username: "alice", password: "x" });
     expect(store.accessToken).toBe("");
+    expect(store.refreshToken).toBe("");
     expect(store.username).toBe("");
     expect(store.userId).toBe("");
     expect(store.role).toBe("user");
@@ -89,6 +93,7 @@ describe("stores/UserStore — registerByUsername", () => {
   it("注册成功：写 result.user.username（不是 data.username）到 state", async () => {
     vi.spyOn(userApi, "registerApi").mockReset().mockResolvedValue({
       access_token: "tok-r",
+      refresh_token: "rt-r",
       token_type: "bearer",
       user: { id: "u-9", username: "canonical-name", role: "user" }
     });
@@ -99,6 +104,7 @@ describe("stores/UserStore — registerByUsername", () => {
       confirm_password: "pw"
     });
     expect(store.accessToken).toBe("tok-r");
+    expect(store.refreshToken).toBe("rt-r");
     expect(store.username).toBe("canonical-name");
     expect(store.userId).toBe("u-9");
     expect(store.role).toBe("user");
@@ -107,6 +113,7 @@ describe("stores/UserStore — registerByUsername", () => {
   it("register: result.access_token 缺失时 state 保持空", async () => {
     vi.spyOn(userApi, "registerApi").mockReset().mockResolvedValue({
       access_token: "",
+      refresh_token: "rt-r",
       token_type: "bearer",
       user: { id: "u-9", username: "canonical-name", role: "user" }
     } as any);
@@ -117,6 +124,7 @@ describe("stores/UserStore — registerByUsername", () => {
       confirm_password: "pw"
     });
     expect(store.accessToken).toBe("");
+    expect(store.refreshToken).toBe("");
     expect(store.username).toBe("");
     expect(store.userId).toBe("");
   });
@@ -125,6 +133,7 @@ describe("stores/UserStore — registerByUsername", () => {
 describe("stores/UserStore — logOut", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    vi.restoreAllMocks();
   });
 
   it("清空 state 并调 router.push('/home')", async () => {
@@ -142,5 +151,140 @@ describe("stores/UserStore — logOut", () => {
     expect(store.userId).toBe("");
     expect(store.role).toBe("user");
     expect(routerMod.router.push as any).toHaveBeenCalledWith("/home");
+  });
+
+  it("logOut 同步清状态：调用后立刻可读空 state（不等 logoutApi）", async () => {
+    // P1.3: logOut 改成同步 fire-and-forget。原因是：
+    // - await logoutApi 在 60s 超时内页面卡在原路由；
+    // - 关页面后 refresh_token 没被清，下次开页面用户仍是登录态——「登出没生效」。
+    // 这里用 vi.mock 把 logoutApi 全替换掉，避免 axios 在 happy-dom 下打到
+    // http://localhost:3000（dev server），打出 ECONNREFUSED 噪音。
+    const logoutApiMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.doMock("@/api/user", async () => {
+      const actual = await vi.importActual<typeof import("@/api/user")>(
+        "@/api/user"
+      );
+      return { ...actual, logoutApi: logoutApiMock };
+    });
+    try {
+      const routerMod = await import("@/router");
+      // 清掉之前 import 的 store 模块（拿到新的 mocked logoutApi 绑定）。
+      vi.resetModules();
+      const { useUserStore: useStoreFresh } = await import(
+        "@/store/modules/user"
+      );
+      const store = useStoreFresh();
+      store.SET_ACCESS_TOKEN("tok");
+      store.SET_REFRESH_TOKEN("rt-1");
+      store.SET_USERNAME("alice");
+      store.SET_USER_ID("u-1");
+      store.SET_ROLE("user");
+
+      store.logOut();
+
+      // 调完立即可读：状态、router、removeToken 都不能等 logoutApi。
+      expect(store.accessToken).toBe("");
+      expect(store.refreshToken).toBe("");
+      expect(store.username).toBe("");
+      expect(store.userId).toBe("");
+      expect(store.role).toBe("user");
+      expect(routerMod.router.push as any).toHaveBeenCalledWith("/home");
+      expect(logoutApiMock).toHaveBeenCalledWith({ refresh_token: "rt-1" });
+    } finally {
+      vi.doUnmock("@/api/user");
+      vi.resetModules();
+    }
+  });
+
+  it("logOut：refreshToken 存在时 fire-and-forget 调 logoutApi（不等结果）", async () => {
+    // 验证 logoutApi 被 fire-and-forget 调用（不 await logOut）。
+    vi.spyOn(userApi, "logoutApi").mockReset().mockResolvedValue({
+      ok: true
+    } as any);
+    const store = useUserStore();
+    store.SET_ACCESS_TOKEN("tok");
+    store.SET_REFRESH_TOKEN("rt-1");
+
+    store.logOut();
+
+    // logoutApi 应已被发起（同步路径），但 logOut 自身已返回。
+    expect(userApi.logoutApi).toHaveBeenCalledWith({ refresh_token: "rt-1" });
+    // 等一个 microtask 让 promise 链把状态清掉（虽然同步路径已清），
+    // 主要是确认 fire-and-forget 不抛错。
+    await Promise.resolve();
+    expect(store.accessToken).toBe("");
+    expect(store.refreshToken).toBe("");
+  });
+
+  it("logOut：logoutApi reject 时本地状态仍被清空（fire-and-forget + console.warn）", async () => {
+    // P1.4: 后端撤销失败不应阻塞前端清状态，且要上报方便追踪。
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(userApi, "logoutApi").mockReset().mockRejectedValue(
+      new Error("boom")
+    );
+    const store = useUserStore();
+    store.SET_ACCESS_TOKEN("tok");
+    store.SET_REFRESH_TOKEN("rt-1");
+
+    store.logOut();
+
+    // 同步路径：状态立即清空、不等 logoutApi 的 reject。
+    expect(store.accessToken).toBe("");
+    expect(store.refreshToken).toBe("");
+
+    // 等 reject 的 .catch 跑完，warn 应被打到 console。
+    await new Promise(r => setTimeout(r, 0));
+    expect(warnSpy).toHaveBeenCalled();
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? "")).toContain(
+      "revoke failed"
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("logOut：console.warn 不泄漏 refresh_token / Authorization Bearer（openrz P1.2）", async () => {
+    // 上轮 P1.4 修复把整个 AxiosError 传给 console.warn，展开后含
+    // e.config.data.refresh_token 与 e.config.headers.Authorization Bearer
+    // access——直接落进浏览器 console 与日志聚合器，token 被持久化。
+    // 本轮断言：warnSpy 抓到的所有参数都不含这两个敏感字符串。
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // 构造形似真实 axios 错误的 payload：带 config.data / config.headers
+    const sensitiveError: any = new Error("Request failed with status code 500");
+    sensitiveError.isAxiosError = true;
+    sensitiveError.config = {
+      url: "/api/v1/auth/logout",
+      method: "post",
+      data: { refresh_token: "SECRET-rt-leak" },
+      headers: { Authorization: "Bearer SECRET-at-leak" }
+    };
+    sensitiveError.response = {
+      status: 500,
+      statusText: "Internal Server Error",
+      data: { detail: "boom" }
+    };
+    vi.spyOn(userApi, "logoutApi").mockReset().mockRejectedValue(
+      sensitiveError
+    );
+
+    const store = useUserStore();
+    store.SET_ACCESS_TOKEN("tok");
+    store.SET_REFRESH_TOKEN("rt-1");
+
+    store.logOut();
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(warnSpy).toHaveBeenCalled();
+    // 序列化所有参数为字符串，检查敏感 token 是否泄漏
+    const allArgs = warnSpy.mock.calls
+      .map(call => call.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" "))
+      .join("\n");
+    expect(allArgs).not.toContain("SECRET-rt-leak");
+    expect(allArgs).not.toContain("SECRET-at-leak");
+    expect(allArgs).not.toContain("refresh_token");
+    expect(allArgs).not.toContain("Authorization");
+    // 但应包含一个不透明的状态码（500），便于运维定位
+    expect(allArgs).toContain("500");
+
+    warnSpy.mockRestore();
   });
 });

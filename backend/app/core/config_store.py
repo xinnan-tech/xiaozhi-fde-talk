@@ -259,9 +259,9 @@ DEFAULTS: dict[str, str] = {
     "coach.max_pending_segments": "8",
     "coach.min_interval_s": "10.0",
     "coach.llm_timeout_s": "45.0",
-    "auth.jwt_expire_minutes": "1440",
+    "auth.jwt_expire_minutes": "10080",
     "auth.allow_registration": "false",
-    "auth.refresh_token_expire_days": "7",
+    "auth.refresh_token_expire_days": "30",
     "session.grace_period_s": "60.0",
     "session.idle_timeout_s": "1800.0",
     "session.idle_check_interval_s": "30.0",
@@ -556,9 +556,9 @@ async def get_coach_config() -> dict[str, float | int]:
 async def get_auth_runtime_config() -> dict[str, object]:
     s = get_config_store()
     return {
-        "jwt_expire_minutes": int(await s.get("auth.jwt_expire_minutes") or "1440"),
+        "jwt_expire_minutes": int(await s.get("auth.jwt_expire_minutes") or "10080"),
         "allow_registration": (await s.get("auth.allow_registration") or "false") == "true",
-        "refresh_token_expire_days": int(await s.get("auth.refresh_token_expire_days") or "7"),
+        "refresh_token_expire_days": int(await s.get("auth.refresh_token_expire_days") or "30"),
     }
 
 

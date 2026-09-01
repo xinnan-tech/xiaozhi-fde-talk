@@ -23,6 +23,11 @@ services:
       retries: 6
       start_period: 120s
     # 使用分号隔离命令，确保 cd 和 touch 在主 shell 中按顺序生效
+    # 命令参数跟仓库根 docs/funasr.md 文档里"独立部署"那段的 docker run 行
+    # 完全一致：punc-dir / lm-dir / itn-dir / hotword 全部显式传，避免跟
+    # 镜像里脚本内置默认值有出入。原 compose 把 punc-dir 错写成了 LM 模型
+    # 名 damo/speech_ngram_lm_zh-cn-ai-wesp-fst，漏了 lm-dir，C++ server
+    # 拿 LM 模型当 punc 找 model_quant.onnx，启动即退。
     command: >
       bash -c "cd FunASR/runtime;
       touch log.txt;
@@ -31,7 +36,8 @@ services:
       --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx
       --model-dir iic/SenseVoiceSmall-onnx
       --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx
-      --punc-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst
+      --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx
+      --lm-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst
       --itn-dir thuduj12/fst_itn_zh
       --hotword /workspace/models/hotwords.txt > log.txt 2>&1 &
       sleep 1;

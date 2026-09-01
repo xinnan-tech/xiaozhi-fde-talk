@@ -87,6 +87,13 @@ const metaIconOf = (type: string) =>
   type === "datetime" ? Clock : type === "duration" ? Timer : User;
 const interviewStatusClass = computed(() => {
   const status = interviewDetail.value?.status;
+  if (
+    websocketState.value === "pending" ||
+    (status === "in_progress" && !isInterviewStarted.value)
+  ) {
+    return "status-suspended";
+  }
+
   switch (status) {
     case "in_progress":
       return "status-in_progress";
@@ -105,9 +112,15 @@ const interviewStatusClass = computed(() => {
 });
 
 const controlButtonText = computed(() => {
+  if (websocketState.value === "pending") {
+    return t("interview.action.continue");
+  }
+
   switch (interviewDetail.value?.status) {
     case "in_progress":
-      return t("interview.action.pause");
+      return isInterviewStarted.value
+        ? t("interview.action.pause")
+        : t("interview.action.continue");
     case "suspended":
       return t("interview.action.continue");
     case "ended":
@@ -120,9 +133,13 @@ const controlButtonText = computed(() => {
 });
 
 const controlButtonIcon = computed(() => {
+  if (websocketState.value === "pending") {
+    return VideoPlay;
+  }
+
   switch (interviewDetail.value?.status) {
     case "in_progress":
-      return VideoPause;
+      return isInterviewStarted.value ? VideoPause : VideoPlay;
     case "suspended":
       return VideoPlay;
     case "ended":
@@ -138,13 +155,17 @@ const isControlButtonDisabled = computed(() => {
   const status = interviewDetail.value?.status;
   return (
     !status ||
+    websocketState.value === "pending" ||
     status === "ended" ||
     status === "extracting" ||
     status === "done"
   );
 });
 const isInterviewInProgress = computed(
-  () => interviewDetail.value?.status === "in_progress"
+  () =>
+    interviewDetail.value?.status === "in_progress" &&
+    isInterviewStarted.value &&
+    websocketState.value !== "pending"
 );
 const activeMode = ref("transcript");
 const activeModeIndex = ref(2);
@@ -494,7 +515,11 @@ const handlePauseInterview = async () => {
 
 const handleControlButtonClick = () => {
   const status = interviewDetail.value?.status;
-  if (status === "created" || status === "suspended") {
+  if (
+    status === "created" ||
+    status === "suspended" ||
+    (status === "in_progress" && !isInterviewStarted.value)
+  ) {
     void handleStartInterview();
   } else if (status === "in_progress") {
     handlePauseInterview();

@@ -85,24 +85,48 @@ const sessionMetaFields = computed(() => {
 });
 const metaIconOf = (type: string) =>
   type === "datetime" ? Clock : type === "duration" ? Timer : User;
-const interviewStatusClass = computed(() => {
+// 终态：ended/extracting/done。视觉上必须优先于 pending / 未启动分支——
+// 若后端已推 ended 但 takeover 弹框尚未关闭、按钮仍渲染为 status-suspended
+// （橙底「继续」），与 isControlButtonDisabled 把按钮置灰之间会产生
+// 「橙色可点视觉 + 灰 disabled」的撕裂，用户会想再点开弹框。
+const isTerminalStatus = computed(() => {
   const status = interviewDetail.value?.status;
-  if (
-    websocketState.value === "pending" ||
-    (status === "in_progress" && !isInterviewStarted.value)
-  ) {
+  return status === "ended" || status === "extracting" || status === "done";
+});
+// 接管弹框等待用户确认：旧 WS 会话仍归本端，但新连接在 takeover 前不接管
+// audio。UI 镜像「suspended」避免「暂停」按钮诱导用户点击未真正归属的会话。
+const isTakeoverPending = computed(
+  () => websocketState.value === "pending"
+);
+// 服务端 status=in_progress 但本端 isInterviewStarted=false（典型场景：
+// 详情页首次加载，服务端认为在录、本端未启 WS+麦）。UI 镜像「suspended」
+// 让控制按钮显示「继续」而非「暂停」，配合 handleControlButtonClick 中
+// 的 in_progress+!started 分支走 handleStartInterview，与 status=suspended
+// 的恢复路径走同一段代码。
+const needsResumeFromInactive = computed(
+  () =>
+    interviewDetail.value?.status === "in_progress" &&
+    !isInterviewStarted.value
+);
+// interviewStatusClass 把「接管 pending」与「in_progress 但本端未启动」
+// 统一映射到 status-suspended（橙底），配合 controlButtonText/Icon 的
+// 「继续访谈 + VideoPlay」语义：点击触发 handleStartInterview 而非
+// handlePauseInterview。任何新分支接入该视觉契约前，需同步检查
+// controlButtonText / controlButtonIcon / isControlButtonDisabled /
+// isInterviewInProgress 是否仍与该 click 语义自洽——这五个 computed
+// 共同承担按钮的视觉 + 文案 + 图标 + 可用性 + REC 角标契约，缺一会
+// 引发「颜色说继续 / 文案说暂停」之类的不一致。
+const interviewStatusClass = computed(() => {
+  if (isTerminalStatus.value) return "status-ended";
+  if (isTakeoverPending.value || needsResumeFromInactive.value) {
     return "status-suspended";
   }
 
-  switch (status) {
+  switch (interviewDetail.value?.status) {
     case "in_progress":
       return "status-in_progress";
     case "suspended":
       return "status-suspended";
-    case "ended":
-    case "extracting":
-    case "done":
-      return "status-ended";
     case "created":
     case "setting_up":
       return "status-created";
@@ -112,9 +136,8 @@ const interviewStatusClass = computed(() => {
 });
 
 const controlButtonText = computed(() => {
-  if (websocketState.value === "pending") {
-    return t("interview.action.continue");
-  }
+  if (isTerminalStatus.value) return t("interview.status.ended");
+  if (isTakeoverPending.value) return t("interview.action.continue");
 
   switch (interviewDetail.value?.status) {
     case "in_progress":
@@ -123,49 +146,36 @@ const controlButtonText = computed(() => {
         : t("interview.action.continue");
     case "suspended":
       return t("interview.action.continue");
-    case "ended":
-    case "extracting":
-    case "done":
-      return t("interview.status.ended");
     default:
       return t("interview.action.start");
   }
 });
 
 const controlButtonIcon = computed(() => {
-  if (websocketState.value === "pending") {
-    return VideoPlay;
-  }
+  if (isTerminalStatus.value) return CircleCheck;
+  if (isTakeoverPending.value) return VideoPlay;
 
   switch (interviewDetail.value?.status) {
     case "in_progress":
       return isInterviewStarted.value ? VideoPause : VideoPlay;
     case "suspended":
       return VideoPlay;
-    case "ended":
-    case "extracting":
-    case "done":
-      return CircleCheck;
     default:
       return VideoPlay;
   }
 });
 
-const isControlButtonDisabled = computed(() => {
-  const status = interviewDetail.value?.status;
-  return (
-    !status ||
-    websocketState.value === "pending" ||
-    status === "ended" ||
-    status === "extracting" ||
-    status === "done"
-  );
-});
+const isControlButtonDisabled = computed(
+  () =>
+    !interviewDetail.value?.status ||
+    isTakeoverPending.value ||
+    isTerminalStatus.value
+);
 const isInterviewInProgress = computed(
   () =>
     interviewDetail.value?.status === "in_progress" &&
     isInterviewStarted.value &&
-    websocketState.value !== "pending"
+    !isTakeoverPending.value
 );
 const activeMode = ref("transcript");
 const activeModeIndex = ref(2);

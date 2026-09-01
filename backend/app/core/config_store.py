@@ -54,6 +54,7 @@ SENSITIVE_KEYS: frozenset[str] = frozenset({
     "llm.api_key",
     "ocr.api_key",
     "ocr.secret_key",
+    "asr.doubao_stream.appid",
     "asr.doubao_stream.access_token",
     "system.jwt_secret",
 })

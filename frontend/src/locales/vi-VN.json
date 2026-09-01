@@ -361,6 +361,7 @@
   "create.dialog.ocr_empty": "Không nhận diện được văn bản, vui lòng chụp lại",
   "create.dialog.back": "Quay lại",
   "create.dialog.load_defaults": "Tải giá trị mặc định",
+  "create.dialog.load_defaults_failed": "Tải giá trị mặc định thất bại",
   "create.dialog.clear_form": "Xóa biểu mẫu",
   "interview.back": "Quay lại",
   "interview.default_title": "Phỏng vấn",

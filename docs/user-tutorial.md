@@ -256,6 +256,30 @@ LLM / ASR / OCR 三家都填好后，回到配置页右上角，点 **「运行�
 **密码忘了？**
 → 让管理员在「用户管理」里点「重置密码」。
 
+**前端默认走 HTTPS，但浏览器会弹「不安全」？**
+→ 仓库自带的是一份演示用的自签证书，仅够让 Vite 启 HTTPS；浏览器不认识这张证书的签发者，所以会提示「不安全」，要点「高级 → 继续前往 localhost」才放行。**这只是浏览器对自签证书的固定提示，不代表连接真的有问题**。
+
+如果想消除这个提示，让浏览器信任本地 HTTPS，用 [mkcert](https://github.com/FiloSottile/mkcert) 把本地 CA 装进系统信任链最省事：
+
+```bash
+brew install mkcert            # macOS
+mkcert -install
+
+# 覆盖仓库自带的演示证书，文件名固定两个，Vite 自动识别
+cd frontend/src/certs
+mkcert localhost
+# mkcert 默认输出 localhost.pem + localhost-key.pem
+```
+
+没有 mkcert 时，用 OpenSSL 也能签一张自签证书（效果一样——浏览器仍会弹「不安全」）：
+
+```bash
+cd frontend/src/certs
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 825 \
+  -keyout localhost-key.pem -out localhost.pem \
+  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
 ---
 
 ## 10. 其他

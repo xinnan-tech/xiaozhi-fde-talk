@@ -82,11 +82,13 @@ pnpm install
 pnpm dev
 ```
 
+启动走 HTTPS（浏览器调用麦克风等 MediaDevices API 在 https 下才有完整权限）。仓库自带一对 `frontend/src/certs/localhost.pem` + `localhost-key.pem` 演示证书，直接 `pnpm dev` 就能跑 HTTPS；只想用自己的证书（比如想信任浏览器不再弹「不安全」），生成方法见 [使用教程](docs/user-tutorial.md)「常见问题」。
+
 <a id="first-run-register-admin"></a>
 
 #### 1.4. 首次启动：注册首位管理员
 
-1. 浏览器打开 http://localhost:8848。
+1. 浏览器打开 https://localhost:8848（首次访问自签证书要手动信任一次，证书生成方法见 [使用教程](docs/user-tutorial.md)「常见问题」）。
 2. 点"去注册" → 填用户名（4-32 位字母数字下划线连字符）、强密码、确认密码。
 3. 第一个注册的用户自动成为超级管理员。
 4. 登录后，先打开"系统配置"填入 LLM 密钥，否则后续创建访谈会被 LLM 拒绝；填好后点击右上角的"运行自检"，确认 ASR、LLM、OCR 三项都正常。

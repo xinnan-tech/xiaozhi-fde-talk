@@ -453,8 +453,8 @@ def _valid_item_ids(state: SessionState) -> Optional[set[str]]:
     仅看模板快照（创建访谈时的快照），不走 resolve_template 的回退：访谈
     创建后模板被改 / 删项不影响访谈自身的合法集合（既保 immutability，也避免
     admin 删 must_ask 时把活跃访谈标成「错 id」、加项让旧访谈历史里根本没
-    有的 id 被误接受）。快照空 / 损坏时返 None，让 manager 跳过校验——
-    与历史行为一致，旧访谈仍可用。
+    有的 id 被误接受）。快照空 / 损坏 / must_ask 为空时返 None，让 manager
+    跳过校验——与历史行为一致，旧访谈仍可用。
     """
     snap = state.session.template_snapshot
     if not snap:
@@ -462,6 +462,8 @@ def _valid_item_ids(state: SessionState) -> Optional[set[str]]:
     try:
         tpl = Template(**snap)
     except Exception:  # noqa: BLE001
+        return None
+    if not tpl.coaching.must_ask:
         return None
     return {m.id for m in tpl.coaching.must_ask}
 

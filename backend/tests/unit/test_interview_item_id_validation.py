@@ -290,3 +290,94 @@ def test_route_valid_item_ids_returns_none_when_snapshot_corrupted():
     state = SessionState.initial(s, tpl)
 
     assert _valid_item_ids(state) is None
+
+
+def test_route_valid_item_ids_returns_none_when_must_ask_empty():
+    """template_snapshot.coaching.must_ask=[] → _valid_item_ids 返 None（regression: over-block）。
+
+    over-block 根因：现有访谈的 template_snapshot.coaching.must_ask 都是 []（legacy
+    数据形态），first-batch 跑出的 item id（objective/pain/...）来自 loader 的
+    must_ask fallback，不进 snapshot。snapshot.must_ask=[] 时严格按 snapshot 走
+    会返回空集合，所有 skip/ignore 都 404——和历史行为不符。把「空 must_ask」
+    归类到「快照空」走 fallback 路径，让 manager 跳过校验，旧访谈仍可用。
+    """
+    from datetime import datetime, timezone
+    from app.domain.session import Session, SessionStatus
+    from app.services.sessions.state import SessionState
+    from app.services.template.loader import get_template
+    from app.transport.http.routes.interviews import _valid_item_ids
+
+    s = Session(
+        id="s-164-empty",
+        template_id="pm-research",
+        user_id="u",
+        status=SessionStatus.ENDED,
+        created_at=datetime.now(timezone.utc),
+        template_snapshot={"coaching": {"must_ask": []}},
+    )
+    tpl = get_template("pm-research")
+    state = SessionState.initial(s, tpl)
+
+    assert _valid_item_ids(state) is None
+
+
+def test_route_skip_when_must_ask_empty_does_not_404_over_block(monkeypatch):
+    """白盒：snapshot.must_ask=[] 时 POST /items/{id}/skip 应当 200，不 over-block。
+
+    复用 test_route_skip_passes_snapshot_must_ask_ids_as_valid_set 的 monkeypatch
+    套路，但把 snapshot 改成 must_ask=[]，验证 handler 把 valid_ids=None 透传给
+    manager（旧访谈宽松行为），合法 item id 不再被空集合 over-block 误拒。
+    """
+    import asyncio
+    from datetime import datetime, timezone
+    from fastapi.testclient import TestClient
+
+    from app.app import create_app
+    from app.domain.session import Session, SessionStatus
+    from app.services.sessions.state import SessionState
+    from app.services.template.loader import get_template
+    from app.persistence.repositories.interview import interview_repo
+
+    async def _setup_empty_snapshot():
+        tpl = get_template("pm-research")
+        s = Session(
+            id="s-164-empty-route",
+            template_id="pm-research",
+            user_id="u",
+            status=SessionStatus.ENDED,
+            created_at=datetime.now(timezone.utc),
+            # 关键：snapshot 的 must_ask 为空——复现 legacy 数据形态
+            template_snapshot={"coaching": {"must_ask": []}},
+        )
+        state = SessionState.initial(s, tpl)
+        await interview_repo.save_state_auto(state)
+
+    asyncio.get_event_loop().run_until_complete(_setup_empty_snapshot())
+
+    captured = {}
+
+    async def _fake_set(session_id, item_id, action, valid_ids=None):
+        captured["valid_ids"] = valid_ids
+        captured["action"] = action
+        # 走真实 repo 写回 state
+        state = await manager.get(session_id)
+        if action == "skip":
+            state.skipped_ids.add(item_id)
+            from app.persistence.repositories.interview import interview_repo as _repo
+            await _repo.save_state_auto(state)
+        return state
+
+    monkeypatch.setattr(manager, "set_item_status", _fake_set)
+
+    app = create_app()
+    dep, fake_user = _build_user_override("u")
+    app.dependency_overrides[dep] = fake_user
+
+    client = TestClient(app)
+    r = client.post("/api/v1/interviews/s-164-empty-route/items/objective/skip")
+
+    # 核心断言：合法 item id 不被 over-block（应当 200，不是 404）
+    assert r.status_code == 200, r.text
+    # handler 必须把 valid_ids=None 透传给 manager（_valid_item_ids 走 fallback）
+    assert captured["valid_ids"] is None
+    assert captured["action"] == "skip"

@@ -12,6 +12,11 @@
 **/dist
 **/.env
 **/.env.*
+# 例外：把前端 Vite 构建需要的 mode 文件白名单回来——build / build:e2e
+# 都要从 .env.production / .env.e2e-suspend 读 VITE_API_URL / VITE_ROUTER_HISTORY
+# 等常量。.env.development 不放（里面是 127.0.0.1:8000，会污染生产包）。
+!frontend/.env.production
+!frontend/.env.e2e-suspend
 **/coverage
 **/logs
 **/__pycache__

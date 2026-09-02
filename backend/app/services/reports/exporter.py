@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import io
+import re
 
 import bleach
 import markdown
@@ -131,8 +132,14 @@ def _to_docx(md: str, language: str = "en") -> bytes:
     language 决定字体：
     - zh_cn/zh_tw → ascii/hAnsi=宋体, eastAsia=宋体（中文场景整篇中文，宋体即可）
     - en/vi/ru/... → ascii/hAnsi=Times New Roman, eastAsia=宋体（CJK 字符仍走宋体兜底）
+
+    行内 `<br>` 会被翻译成 docx 真换行（add_break），保证 markdown-table 单元格里
+    通过 `_escape_table_cell` 嵌入的 `<br>` 在 Word 里也是可见换行而非字面量。
+    Markdown 表格 (`| ... | ... |`) 在 Word 渲染仍未支持——单元格会被当成普通段落，
+    完整表格支持见后续 issue。
     """
     from docx import Document
+    from docx.enum.text import WD_BREAK
 
     ascii_font, east_asia_font = _fonts_for(language)
     doc = Document()
@@ -152,7 +159,25 @@ def _to_docx(md: str, language: str = "en") -> bytes:
         elif s.startswith(("- ", "* ")):
             doc.add_paragraph(s[2:].strip(), style="List Bullet")
         else:
-            doc.add_paragraph(s)
+            _add_paragraph_with_breaks(doc, s)
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+def _add_paragraph_with_breaks(doc, text: str) -> None:
+    """添加段落：把 `<br>` / `<br/>` / `<br />` 切成多段 run，用真换行连接。
+
+    其余文本原样放入同一段。Markdown 表格行（`| a | b |`）也会走这里——后续
+    issue 里给表格单独走 docx table 渲染时再覆盖。
+    """
+    from docx.enum.text import WD_BREAK
+
+    # 用一个不会出现在 Markdown 文本里的占位符先 split，再 add_break 替换
+    parts = re.split(r"<br\s*/?>", text, flags=re.IGNORECASE)
+    para = doc.add_paragraph()
+    for i, seg in enumerate(parts):
+        if i > 0:
+            para.add_run().add_break(WD_BREAK.LINE)
+        if seg:
+            para.add_run(seg)

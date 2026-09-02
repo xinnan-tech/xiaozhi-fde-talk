@@ -189,3 +189,47 @@ def test_markdown_table_columns_escaped():
     }))
     # 'a|b' → 'a\|b'；None → ''
     assert art.content.startswith("### T\n\n| a\\|b |  |\n| --- | --- |\n| x | y |")
+
+
+def test_markdown_table_backslash_escaped_first():
+    """'\\' 必须先于 '|' 转义：'\\|' → '\\\\\\|'（最终 Markdown 渲染回 '\\|'）。
+
+    顺序反了会怎样？先 | → \\|：输入 \\| → \\\\\\| （4 字符），Markdown 解析
+    '\\\\' 被吃掉变 '\\'，剩下 '|' 被识别为列分隔符——表格照裂。
+    """
+    art = _run(_markdown_table({
+        "title": "T",
+        "columns": ["a"],
+        "rows": [["\\|"]],  # 用户输入 \|（2 字符）
+    }))
+    # 完整 data 行应是 '| \\\| |' (8 字符：|, space, 3 backslashes, |, space, |)
+    # 直接断言 escape 输出字符序列：
+    # 输入 \| → escape → \\\| (4 字符)
+    assert "\\\\\\|" in art.content
+    # 反例：如果漏掉反斜杠转义，data 行会是 '| \| |'，被 Markdown 解析时 \| 又变回 |
+    # 整个 content 里 \\ 出现 3 次（输入 1 个 \ 变 3 个 \），| 出现 4 次（| a | 外壳 + | 单元 | 外壳）
+    # ——这里只验关键子序列，避免脆数
+
+
+def test_markdown_table_double_backslash_preserved():
+    """'\\\\' 应转义为 '\\\\\\\\'，Markdown 渲染回 '\\\\'。"""
+    from app.services.skill.builtins import _escape_table_cell
+    # 输入 \\ (2 字符) → 转义 → \\\\ (4 字符)
+    assert _escape_table_cell("\\\\") == "\\\\\\\\"
+
+
+def test_markdown_table_pipe_with_backslash_roundtrip():
+    """直接调 escape 函数验证 round-trip：原意 \\| 在渲染后仍是 \\|。"""
+    from app.services.skill.builtins import _escape_table_cell
+    # 输入 \"\\|\"（一个反斜杠 + 一个竖线，2 字符）→ 应输出 '\\\\\\|'（4 字符）
+    assert _escape_table_cell("\\|") == "\\\\\\|"
+    # 输入单个 '|'
+    assert _escape_table_cell("|") == "\\|"
+    # 输入 '\\\\'
+    assert _escape_table_cell("\\\\") == "\\\\\\\\"
+    # 顺序敏感性：先转 | 再转 \ 会得到错的 '\\\\|'（4 字符），正确是 '\\\\\\|'（4 字符含一个 |）
+    # 直接断言两者的差异以锁死顺序
+    bad_order = "\\|".replace("|", "\\|").replace("\\", "\\\\")
+    good_order = "\\|".replace("\\", "\\\\").replace("|", "\\|")
+    assert good_order != bad_order  # 顺序敏感，回归保护
+    assert _escape_table_cell("\\|") == good_order

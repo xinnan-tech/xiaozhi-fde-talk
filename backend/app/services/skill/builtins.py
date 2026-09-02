@@ -23,15 +23,21 @@ def _sanitize_blockquote_text(text: str) -> str:
 
 
 def _escape_table_cell(value) -> str:
-    """表格单元格转义：None → ''；'|' → '\\|'；换行 → '<br>'（GFM 表格内换行标准写法）。
+    """表格单元格转义：None → ''；'\\' → '\\\\'；'|' → '\\|'；换行 → '<br>'。
 
-    '<'br'>' 在 docx / html 导出链路里都按行内换行处理（GitHub 渲染亦同），
+    顺序关键：必须先转义反斜杠再转义竖线，否则输入 '\\|' 会变成 '\\\\|'，
+    Markdown 解析时 '\\\\' 被吃掉变成 literal '\\'，剩下的 '|' 仍被识别为列分隔符
+    —— 跟没转义一样。
+
+    '<br>' 在 docx / html 导出链路里都按行内换行处理（GitHub 渲染亦同），
     比起裸 '\\n' 更安全——后者会让整张表在该单元格处断裂。
     """
     if value is None:
         return ""
     s = str(value)
     s = s.replace("\r\n", "\n").replace("\r", "\n")
+    # 顺序：'\\' 先 → '|' 后
+    s = s.replace("\\", "\\\\")
     s = s.replace("|", "\\|")
     s = s.replace("\n", "<br>")
     return s

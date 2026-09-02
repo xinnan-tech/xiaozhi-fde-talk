@@ -53,6 +53,9 @@ _register_limiter = RateLimiter(capacity=3, refill_per_hour=60)
 # refresh 通常由前端 axios 拦截器自动触发，频繁度高于登录；按用户限会把自动刷新
 # 路径锁死。纯 ip 限足够挡住外网滥用。
 _refresh_limiter = RateLimiter(capacity=30, refill_per_hour=600)
+# change-password 复用与 login 同款限流参数：capacity=5, refill_per_hour=300。
+# 按 (client_ip + user_id) 做 key，与 login 的 (client_ip + username) 错开但体量对等。
+_change_pwd_limiter = RateLimiter(capacity=5, refill_per_hour=300)
 
 
 def _reset_for_test() -> None:
@@ -69,6 +72,7 @@ def _reset_for_test() -> None:
     _login_limiter._buckets.clear()
     _register_limiter._buckets.clear()
     _refresh_limiter._buckets.clear()
+    _change_pwd_limiter._buckets.clear()
     from app.services.auth import token as _tok
     _tok._reset_revoked_for_test()
 
@@ -303,6 +307,7 @@ async def change_password(
     body: ChangePasswordRequest,
     current: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ) -> dict:
     """普通用户自助改密：验证旧密码 + 写新密码 + bump password_changed_at。
 
@@ -311,6 +316,9 @@ async def change_password(
 
     旧密码错误 → 401；新密码强度不合规 → 400（validate_password_strength 抛 I18nError）。
     """
+    key = f"{_client_ip(request)}:{current.user_id}"
+    if not _change_pwd_limiter.try_acquire(key):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
     user = await user_repo.get_by_id(db, current.user_id)
     if user is None or not await verify_password_async(body.old_password, user.password_hash):
         raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)

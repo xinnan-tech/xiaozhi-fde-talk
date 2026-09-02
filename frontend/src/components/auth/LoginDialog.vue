@@ -155,7 +155,7 @@ function onKeydown(event: KeyboardEvent) {
           alt="Login icon"
         />
       </div>
-      <el-form ref="ruleFormRef" :model="ruleForm" :rules="loginRules">
+      <el-form ref="ruleFormRef" :model="ruleForm" :rules="loginRules" :validate-on-rule-change="false">
         <el-form-item prop="username">
           <el-input
             v-model="ruleForm.username"

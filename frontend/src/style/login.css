@@ -9,7 +9,7 @@
 
 .login-container {
   width: 100vw;
-  height: 100vh;
+  height: 100%;
   max-width: 100%;
   display: grid;
   grid-template-columns: repeat(2, 1fr);

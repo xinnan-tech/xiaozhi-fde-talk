@@ -54,8 +54,11 @@ async def _wipe_db() -> None:
 
 @pytest.fixture
 async def empty_db(_lifespan_app):
+    from app.transport.http.routes.auth import _reset_for_test
+
     await _wipe_db()
     get_config_store().invalidate()
+    _reset_for_test()
     yield _lifespan_app
     await _wipe_db()
     get_config_store().invalidate()
@@ -206,4 +209,51 @@ async def test_change_password_with_weak_new_password_returns_400(empty_db):
         )
         assert r.status_code == 400, (
             f"弱密码应 400，实际 {r.status_code}：{r.text}"
+        )
+
+
+async def test_change_password_rate_limited_after_5_attempts(empty_db):
+    """连续 5 次错误旧密码后，第 6 次触发 429限流。
+
+    _change_pwd_limiter capacity=5，与 _login_limiter 同款。合法用户改密本就低频，
+    5 次/小时已足够防密码猜测攻击，同时不影响正常使用。
+    """
+    from app.transport.http.routes.auth import _reset_for_test
+
+    app = empty_db
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await _register(c, "first_admin")
+        await get_config_store().set("auth.allow_registration", "true")
+        bob = await _register(c, "bobby")
+        bob_token = bob["access_token"]
+
+        # 清桶保证测试可重复
+        _reset_for_test()
+
+        # 前 5 次错误旧密码都应 401（未触发限流）
+        for i in range(5):
+            r = await c.post(
+                "/api/v1/auth/change-password",
+                headers={"Authorization": f"Bearer {bob_token}"},
+                json={
+                    "old_password": "WrongOld1!pwd",
+                    "new_password": _STRONG_PWD_NEW,
+                },
+            )
+            assert r.status_code == 401, (
+                f"第 {i+1} 次错误旧密码应 401，实际 {r.status_code}"
+            )
+
+        # 第 6 次应触发限流 → 429
+        r = await c.post(
+            "/api/v1/auth/change-password",
+            headers={"Authorization": f"Bearer {bob_token}"},
+            json={
+                "old_password": "WrongOld1!pwd",
+                "new_password": _STRONG_PWD_NEW,
+            },
+        )
+        assert r.status_code == 429, (
+            f"第 6 次应触发限流 429，实际 {r.status_code}：{r.text}"
         )

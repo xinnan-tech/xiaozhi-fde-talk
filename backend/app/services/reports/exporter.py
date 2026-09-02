@@ -132,11 +132,6 @@ def _to_docx(md: str, language: str = "en") -> bytes:
     language 决定字体：
     - zh_cn/zh_tw → ascii/hAnsi=宋体, eastAsia=宋体（中文场景整篇中文，宋体即可）
     - en/vi/ru/... → ascii/hAnsi=Times New Roman, eastAsia=宋体（CJK 字符仍走宋体兜底）
-
-    行内 `<br>` 会被翻译成 docx 真换行（add_break），保证 markdown-table 单元格里
-    通过 `_escape_table_cell` 嵌入的 `<br>` 在 Word 里也是可见换行而非字面量。
-    Markdown 表格 (`| ... | ... |`) 在 Word 渲染仍未支持——单元格会被当成普通段落，
-    完整表格支持见后续 issue。
     """
     from docx import Document
     from docx.enum.text import WD_BREAK
@@ -145,7 +140,7 @@ def _to_docx(md: str, language: str = "en") -> bytes:
     doc = Document()
     _apply_docx_fonts(doc, ascii_font, east_asia_font)
     for line in md.splitlines():
-        s = line.rstrip()
+        s = _unescape_markdown_text(line.rstrip())
         if not s:
             continue
         if s.startswith("### "):
@@ -166,11 +161,7 @@ def _to_docx(md: str, language: str = "en") -> bytes:
 
 
 def _add_paragraph_with_breaks(doc, text: str) -> None:
-    """添加段落：把 `<br>` / `<br/>` / `<br />` 切成多段 run，用真换行连接。
-
-    其余文本原样放入同一段。Markdown 表格行（`| a | b |`）也会走这里——后续
-    issue 里给表格单独走 docx table 渲染时再覆盖。
-    """
+    """添加段落：把 `<br>` / `<br/>` / `<br />` 切成多段 run，用真换行连接。"""
     from docx.enum.text import WD_BREAK
 
     # 用一个不会出现在 Markdown 文本里的占位符先 split，再 add_break 替换
@@ -181,3 +172,8 @@ def _add_paragraph_with_breaks(doc, text: str) -> None:
             para.add_run().add_break(WD_BREAK.LINE)
         if seg:
             para.add_run(seg)
+
+
+def _unescape_markdown_text(text: str) -> str:
+    """Decode the Markdown escapes that the lightweight docx renderer supports."""
+    return re.sub(r"\\([\\|])", r"\1", text)

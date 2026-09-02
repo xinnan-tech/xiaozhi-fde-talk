@@ -10,6 +10,8 @@ import io
 import re
 import zipfile
 
+from docx import Document
+
 from app.services.reports.exporter import export
 
 
@@ -56,3 +58,19 @@ def test_exporter_docx_multiple_br_in_one_line():
     # 三个 break：a 与 b 间、b 与 c 间——2 次换行分割出 3 段
     br_count = len(re.findall(r"<w:br", xml))
     assert br_count >= 2, f"expected at least 2 <w:br>, got {br_count}"
+
+
+def test_exporter_docx_unescapes_skill_table_cells():
+    """Word must show cell values, not the Markdown escapes used in the source."""
+    md = (
+        "### T\n"
+        "\n"
+        "| a | b |\n"
+        "| --- | --- |\n"
+        "| x\\|y | C:\\\\tmp |\n"
+    )
+    docx_bytes, _mime = export(md, fmt="word", language="en")
+    paragraphs = [p.text for p in Document(io.BytesIO(docx_bytes)).paragraphs]
+
+    assert "| x|y | C:\\tmp |" in paragraphs
+    assert "| x\\|y | C:\\\\tmp |" not in paragraphs

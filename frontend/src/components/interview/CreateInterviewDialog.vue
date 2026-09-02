@@ -1069,6 +1069,7 @@ watch(
       ref="formRef"
       :model="form"
       :rules="rules"
+      :validate-on-rule-change="false"
       label-position="top"
       require-asterisk-position="right"
       scroll-to-error

@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import random
 from typing import Optional
 
 from sqlalchemy import func, select, text
@@ -25,7 +27,16 @@ async def authenticate_user(
 ) -> Optional[CurrentUser]:
     # user_repo.get_by_username 内部已 .lower()，service 无需再归一
     user = await user_repo.get_by_username(db, username)
-    if user is None or not await verify_password_async(password, user.password_hash):
+    if user is None:
+        # 时序均衡：用户不存在时也 sleep，使响应时间与「用户存在但密码错误」
+        # 路径对齐，防止攻击者通过响应时间枚举用户名。
+        # 区间 [0.9s, 1.3s] 覆盖真实 bcrypt 耗时（系统 cost 不确定），
+        # 随机性防止固定时间的 cron 分析攻击。
+        await asyncio.sleep(random.uniform(0.9, 1.3))
+        return None
+    if not await verify_password_async(password, user.password_hash):
+        # 时序均衡：密码错误时 sleep，与「用户不存在」路径对齐。
+        await asyncio.sleep(random.uniform(0.9, 1.3))
         return None
     return CurrentUser(user_id=user.id, username=user.username, role=user.role or "user")
 

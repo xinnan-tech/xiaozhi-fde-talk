@@ -53,13 +53,13 @@ Full docs are [here](../index.md).
 > [!Note]
 > This project offers two configuration options:
 >
-> 1. `Starter, all free` setup: suited for personal use. Every component uses a free option, no extra payment required.
+> 1. `Starter, free` setup: suited for personal use. Every component uses a free option, no extra payment required.
 >
-> 2. `Streaming` setup: suited for scenarios with more than 2 concurrent interviews. Faster responses and a smoother experience.
+> 2. `Commercial Pro` setup: suited for scenarios with more than 2 concurrent interviews. Faster responses and a smoother experience.
 >
 
-| Module | Starter, all free | Streaming |
+| Module | Starter, free | Commercial Pro |
 |:---:|:---:|:---:|
 | ASR (Speech Recognition) | FunASR Server (local streaming) | 👍 Doubao Stream ASR (Doubao streaming) |
-| LLM (Large Model) | glm-4-flash (Zhipu) | 👍 qwen-plus (Aliyun Bailian) |
+| LLM (Large Model) | glm-4.7-flash (Zhipu) | 👍 qwen-plus (Aliyun Bailian) |
 | OCR (Image Recognition) | Baidu OCR (Baidu Cloud OCR with a generous monthly quota) | 👍 Baidu OCR (Baidu Cloud OCR) |

@@ -5,8 +5,6 @@
 """
 from __future__ import annotations
 
-import asyncio
-import random
 from typing import Optional
 
 from sqlalchemy import func, select, text
@@ -16,10 +14,16 @@ from app.core.config_store import get_config_store
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.core.password_policy import validate_password_strength
-from app.core.security import hash_password_async, verify_password_async
+from app.core.security import hash_password, hash_password_async, verify_password_async
 from app.domain.auth import CurrentUser
 from app.persistence.models import User
 from app.persistence.repositories.user import user_repo
+
+# 模块级预计算 dummy hash：bcrypt cost=12（~1.2s on this system）。
+# 用于用户不存在时的时序填充——确保「用户不存在」路径也跑一次与「用户存在
+# 但密码错误」路径相同量的 bcrypt 运算（两次：dummy + real），使攻击者无法
+# 通过响应时间区分「用户是否存在」。
+_DUMMY_HASH: str = hash_password("__timing_dummy_user_does_not_exist__")
 
 
 async def authenticate_user(
@@ -28,15 +32,14 @@ async def authenticate_user(
     # user_repo.get_by_username 内部已 .lower()，service 无需再归一
     user = await user_repo.get_by_username(db, username)
     if user is None:
-        # 时序均衡：用户不存在时也 sleep，使响应时间与「用户存在但密码错误」
-        # 路径对齐，防止攻击者通过响应时间枚举用户名。
-        # 区间 [0.9s, 1.3s] 覆盖真实 bcrypt 耗时（系统 cost 不确定），
-        # 随机性防止固定时间的 cron 分析攻击。
-        await asyncio.sleep(random.uniform(0.9, 1.3))
+        # 时序均衡：用户不存在时也跑一次 dummy bcrypt（~1.2s），
+        # 使两条失败路径（用户不存在 / 密码错误）的 CPU 工作量完全一致。
+        await verify_password_async(password, _DUMMY_HASH)
         return None
     if not await verify_password_async(password, user.password_hash):
-        # 时序均衡：密码错误时 sleep，与「用户不存在」路径对齐。
-        await asyncio.sleep(random.uniform(0.9, 1.3))
+        # 时序均衡：密码错误时也跑一次 dummy bcrypt，使 CPU 工作量与
+        # 「用户不存在」路径完全一致。
+        await verify_password_async(password, _DUMMY_HASH)
         return None
     return CurrentUser(user_id=user.id, username=user.username, role=user.role or "user")
 

@@ -29,24 +29,30 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_cors_origins(settings) -> list[str]:
-    """解析 CORS_ORIGINS：留空 → ["*"]（开发友好），显式设值 → 白名单（生产安全）。
+    """解析 CORS_ORIGINS：dev/test 留空 → 本地前端默认 origin（5173）；prod 留空 → 抛错。
 
-    留空模式自动放行所有 origin，配合下方 allow_credentials=False 走通：
-    鉴权走 Authorization header（JWT，见 transport/http/dependencies.py），
-    不依赖 cookie，跨域 cookie 被浏览器禁掉跟鉴权无关——任意 origin 都能调 API。
+    显式设值（逗号分隔 origin）→ 白名单，与 env 无关：上公网前在 .env / 环境变量
+    里显式列白名单启用严格模式，allow_credentials 同步启用，未来切 cookie 鉴权
+    也能无缝接上。
 
-    上公网前在 .env / 环境变量里显式列白名单（逗号分隔 origin），自动切回严格模式：
-    allow_credentials 重新启用，未来若改用 cookie 鉴权也能无缝接上。
+    prod 留空即拒：避免「生产环境任意 origin 都能调 API」的默认不安全配置
+    漏到线上，错误尽早抛在启动期。
     """
     raw = (settings.cors_origins or "").strip()
     origins = [o.strip() for o in raw.split(",") if o.strip()]
     if origins:
         return origins
+    env = (getattr(settings, "env", "dev") or "dev").lower()
+    if env in ("prod", "production"):
+        raise RuntimeError(
+            "CORS_ORIGINS 未配置；prod 环境必须显式列白名单 origin（逗号分隔）"
+        )
     logger.warning(
-        "CORS_ORIGINS 未配置，默认放行所有 origin（开发友好）。"
-        "上公网前请在 .env / 环境变量里显式列白名单启用严格模式。"
+        "CORS_ORIGINS 未配置，%s 环境 fallback 到 http://localhost:5173（前端本地默认）。"
+        "上公网前请在 .env / 环境变量里显式列白名单。",
+        env,
     )
-    return ["*"]
+    return ["http://localhost:5173"]
 
 
 async def _lifespan_startup(app: FastAPI) -> None:
@@ -188,10 +194,6 @@ def create_app() -> FastAPI:
     from fastapi.middleware.cors import CORSMiddleware
     settings = get_settings()
     origins = _resolve_cors_origins(settings)
-    # CORS_ORIGINS 留空时返回 ["*"]，FastAPI 强制要求 * 模式下 allow_credentials=False
-    # （否则启动报 ValueError）。本项目鉴权走 Authorization header，cookie 不关键，
-    # 留空模式不带 cookie 无影响；显式白名单模式下重新启用 credentials。
-    allow_all = origins == ["*"]
     # 显式方法/请求头白名单：通配 "*" 锁定到 RESTful 标准 + 当前路由实际用到的
     # 自定义头（X-Lang 多语请求；X-Request-ID 由中间件生成回传，便于客户端核对）。
     # expose 同步回写 X-Request-ID，否则浏览器 JS 拿不到该响应头，对账失败。
@@ -200,7 +202,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_credentials=not allow_all,
+        allow_credentials=True,
         allow_methods=_ALLOWED_METHODS,
         allow_headers=_ALLOWED_HEADERS,
         expose_headers=["X-Request-ID"],

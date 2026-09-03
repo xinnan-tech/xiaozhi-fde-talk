@@ -9,7 +9,7 @@
 
 Các công cụ ghi âm thông thường chỉ giúp bạn tổng hợp sau buổi phỏng vấn. Công cụ này lắng nghe theo thời gian thực và gợi ý bạn nên hỏi gì tiếp theo, những điểm nào chưa được đề cập. Khi buổi phỏng vấn kết thúc, bạn có ngay báo cáo yêu cầu có cấu trúc—không cần ghi chép thủ công.
 
-[Tài liệu](../index.md) · [Bắt đầu nhanh](#-ba-bước-để-chạy) · [Báo lỗi](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[Bắt đầu nhanh](#quick-start) · [Tài liệu](../index.md) · [Báo lỗi](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-zh--CN-lightgrey.svg)](../../README.md)
 [![English](https://img.shields.io/badge/English-en--US-lightgrey.svg)](README.en-US.md)
@@ -25,7 +25,9 @@ Các công cụ ghi âm thông thường chỉ giúp bạn tổng hợp sau bu�
 
 ***
 
-## 🚀 Ba bước để chạy
+<a id="quick-start"></a>
+
+## 🚀 Ba câu để chạy
 
 Cần cài Docker sẵn.
 
@@ -43,9 +45,21 @@ Sau đó mở trình duyệt, vào [https://localhost:8848](https://localhost:88
 
 Vào trong thì bấm "Đăng ký" để tạo tài khoản. **Người đăng ký đầu tiên sẽ làm admin**, quản lý mọi thứ.
 
-Phỏng vấn có giọng nói cần cả mô hình AI và nhận dạng giọng nói. Không có khóa AI thì không tạo được phỏng vấn. Không có nhận dạng giọng nói thì không có transcript trực tiếp khi nói chuyện. Có thể chạy chương trình trước rồi cấu hình sau trong "Cấu hình hệ thống":
+Phỏng vấn có giọng nói cần cả mô hình AI và nhận dạng giọng nói. Không có khóa AI thì không tạo được phỏng vấn. Không có nhận dạng giọng nói thì không có transcript trực tiếp khi nói chuyện. Có thể chạy chương trình trước rồi cấu hình sau trong "Cấu hình hệ thống".
 
-- [Cấu hình LLM](../llm-config.md): Aliyun Bailian, DeepSeek, OpenAI, …
-- [Cấu hình nhận dạng giọng nói](../asr-config.md): Doubao streaming API (trả phí) hoặc FunASR local (miễn phí)
+Đầy đủ tài liệu ở [đây](../index.md).
 
-Đầy đủ tài liệu ở [đây](../index.md). Muốn phát triển local (không dùng Docker) xem [hướng dẫn phát triển local](../local-development.md).
+## 🚩 Hướng dẫn cấu hình và khuyến nghị
+> [!Note]
+> Dự án này cung cấp hai phương án cấu hình:
+>
+> 1. Cấu hình `cơ bản miễn phí`: phù hợp cho cá nhân sử dụng, mọi thành phần đều dùng phương án miễn phí, không cần trả phí thêm.
+>
+> 2. Cấu hình `streaming`: phù hợp cho kịch bản từ 2 cuộc phỏng vấn đồng thời trở lên. Tốc độ phản hồi nhanh hơn, trải nghiệm mượt mà hơn.
+>
+
+| Mô-đun | Cấu hình cơ bản miễn phí | Cấu hình streaming |
+|:---:|:---:|:---:|
+| ASR (Nhận dạng giọng nói) | FunASR Server (local streaming) | 👍 Doubao Stream ASR (Doubao streaming) |
+| LLM (Mô hình ngôn ngữ lớn) | glm-4-flash (Zhipu) | 👍 qwen-plus (Aliyun Bailian) |
+| OCR (Nhận dạng hình ảnh) | Baidu OCR (Baidu Cloud OCR có hạn mức miễn phí hàng tháng dồi dào) | 👍 Baidu OCR (Baidu Cloud OCR) |

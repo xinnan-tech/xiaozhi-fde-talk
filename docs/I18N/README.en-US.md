@@ -9,7 +9,7 @@
 
 Regular recording tools only help you clean up after the interview. This one listens in real time and nudges you on what to ask next and what you have not covered yet. When the interview ends, you get a structured requirements report—no manual note-taking needed.
 
-[Docs](../index.md) · [Quick Start](#-quick-start) · [Report an issue](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[Quick Start](#quick-start) · [Full Docs](../index.md) · [Report an issue](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-zh--CN-lightgrey.svg)](../../README.md)
 [![English](https://img.shields.io/badge/English-current-green.svg)](README.en-US.md)
@@ -25,7 +25,9 @@ Regular recording tools only help you clean up after the interview. This one lis
 
 ***
 
-## 🚀 Three steps to start
+<a id="quick-start"></a>
+
+## 🚀 Three lines to start
 
 You need Docker installed.
 
@@ -43,9 +45,21 @@ Then open your browser and go to [https://localhost:8848](https://localhost:8848
 
 Inside, click "Register" to create your account. **The first registered user becomes the admin** and can manage everything.
 
-Voice interviews need both the AI model and voice recognition. Without the AI key, interview creation is rejected. Without voice recognition, there is no live transcript during the interview. You can start the program first and configure both later under "System Configuration":
+Voice interviews need both the AI model and voice recognition. Without the AI key, interview creation is rejected. Without voice recognition, there is no live transcript during the interview. You can start the program first and configure both later under "System Configuration".
 
-- [LLM config](../llm-config.md): Aliyun Bailian, DeepSeek, OpenAI, etc.
-- [Voice recognition config](../asr-config.md): Doubao streaming API (paid) or local FunASR (free)
+Full docs are [here](../index.md).
 
-Full docs are [here](../index.md). For local development without Docker, see [local dev docs](../local-development.md).
+## 🚩 Configuration Guide and Recommendations
+> [!Note]
+> This project offers two configuration options:
+>
+> 1. `Starter, all free` setup: suited for personal use. Every component uses a free option, no extra payment required.
+>
+> 2. `Streaming` setup: suited for scenarios with more than 2 concurrent interviews. Faster responses and a smoother experience.
+>
+
+| Module | Starter, all free | Streaming |
+|:---:|:---:|:---:|
+| ASR (Speech Recognition) | FunASR Server (local streaming) | 👍 Doubao Stream ASR (Doubao streaming) |
+| LLM (Large Model) | glm-4-flash (Zhipu) | 👍 qwen-plus (Aliyun Bailian) |
+| OCR (Image Recognition) | Baidu OCR (Baidu Cloud OCR with a generous monthly quota) | 👍 Baidu OCR (Baidu Cloud OCR) |

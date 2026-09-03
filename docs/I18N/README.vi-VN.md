@@ -53,13 +53,13 @@ Phỏng vấn có giọng nói cần cả mô hình AI và nhận dạng giọng
 > [!Note]
 > Dự án này cung cấp hai phương án cấu hình:
 >
-> 1. Cấu hình `cơ bản miễn phí`: phù hợp cho cá nhân sử dụng, mọi thành phần đều dùng phương án miễn phí, không cần trả phí thêm.
+> 1. Cấu hình `miễn phí`: phù hợp cho cá nhân sử dụng, mọi thành phần đều dùng phương án miễn phí, không cần trả phí thêm.
 >
-> 2. Cấu hình `streaming`: phù hợp cho kịch bản từ 2 cuộc phỏng vấn đồng thời trở lên. Tốc độ phản hồi nhanh hơn, trải nghiệm mượt mà hơn.
+> 2. Cấu hình `thương mại nâng cao`: phù hợp cho kịch bản từ 2 cuộc phỏng vấn đồng thời trở lên. Tốc độ phản hồi nhanh hơn, trải nghiệm mượt mà hơn.
 >
 
-| Mô-đun | Cấu hình cơ bản miễn phí | Cấu hình streaming |
+| Mô-đun | Cấu hình miễn phí | Cấu hình thương mại nâng cao |
 |:---:|:---:|:---:|
 | ASR (Nhận dạng giọng nói) | FunASR Server (local streaming) | 👍 Doubao Stream ASR (Doubao streaming) |
-| LLM (Mô hình ngôn ngữ lớn) | glm-4-flash (Zhipu) | 👍 qwen-plus (Aliyun Bailian) |
+| LLM (Mô hình ngôn ngữ lớn) | glm-4.7-flash (Zhipu) | 👍 qwen-plus (Aliyun Bailian) |
 | OCR (Nhận dạng hình ảnh) | Baidu OCR (Baidu Cloud OCR có hạn mức miễn phí hàng tháng dồi dào) | 👍 Baidu OCR (Baidu Cloud OCR) |

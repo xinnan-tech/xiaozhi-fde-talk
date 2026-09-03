@@ -38,9 +38,9 @@
 
 配置项分三组，按需填：
 
-- **LLM**（必填）：见 [LLM 配置](llm-config.md) — 阿里云百炼 / DeepSeek / OpenAI 等
-- **ASR**（不填也能用，但语音识别跑不起来）：见 [ASR 配置](asr-config.md) — 豆包流式 API / 本地 FunASR
-- **OCR**（可选，纯语音访谈不用填）：见 [OCR 配置](ocr-config.md) — 百度 / OpenAI 兼容
+- **AI 大模型**（必填）：见 [AI 大模型配置](llm-config.md) — 阿里云百炼 / DeepSeek / OpenAI 等
+- **语音识别**（不填也能用，但说话时没转写）：见 [语音识别配置](asr-config.md) — 豆包流式 API / 本地 FunASR
+- **图片识别**（可选，纯语音访谈不用填）：见 [图片识别配置](ocr-config.md) — 百度 / OpenAI 兼容
 
 ---
 
@@ -59,13 +59,13 @@ LLM / ASR / OCR 都填好后，回到配置页右上角，点 **「运行自检�
 
 常见失败原因：
 
-- LLM 红字 → 多半是密钥错、或 `base_url` 填成「聊天界面」而不是 API 地址（见 [LLM 配置](llm-config.md)）
-- ASR 红字 → 看一下 FunASR Docker 容器是不是没起来；或豆包的 `appid` / `access_token` 填错（见 [ASR 配置](asr-config.md)）
-- OCR 红字 → AK / SK 漏填、或者百度账号还没开通文字识别服务。如果你不做图片提取，可以跳过 OCR 自检
+- AI 大模型红字 → 多半是密钥错、或 `base_url` 填成「聊天界面」而不是 API 地址（见 [AI 大模型配置](llm-config.md)）
+- 语音识别红字 → 看一下 FunASR Docker 容器是不是没起来；或豆包的 `appid` / `access_token` 填错（见 [语音识别配置](asr-config.md)）
+- 图片识别红字 → AK / SK 漏填、或者百度账号还没开通文字识别服务。如果你不做图片提取，可以跳过图片识别自检
 
 全部绿灯后关掉弹窗，进入下一步。
 
-> **基础能力保证**：ASR 和 LLM 正常就够了，OCR 纯语音访谈用不到。
+> **基础能力保证**：语音识别和 AI 大模型正常就够了，图片识别纯语音访谈用不到。
 
 ---
 
@@ -135,11 +135,11 @@ LLM / ASR / OCR 都填好后，回到配置页右上角，点 **「运行自检�
 1、**看不到「去注册」链接？**
 > 系统已经有用户、且注册已关闭。请联系管理员开账号。
 
-2、**自检 LLM 失败？**
-> 先看密钥是否对，再看 `base_url` 是否正确（很多厂商控制台上的「对话」地址 ≠ API 地址）。详见 [LLM 配置](llm-config.md)。
+2、**自检 AI 大模型失败？**
+> 先看密钥是否对，再看 `base_url` 是否正确（很多厂商控制台上的「对话」地址 ≠ API 地址）。详见 [AI 大模型配置](llm-config.md)。
 
-3、**自检 ASR 失败？**
-> 确认 FunASR Docker 容器在跑：`docker compose ps` 或者地址写错了。详见 [ASR 配置](asr-config.md)。
+3、**自检语音识别失败？**
+> 确认 FunASR Docker 容器在跑：`docker compose ps` 或者地址写错了。详见 [语音识别配置](asr-config.md)。
 
 4、**访谈跑到一半想暂停又不想结束？**
 > 点「暂停访谈」即可，不要直接关浏览器。直接关浏览器且不在存活窗口（默认 60 秒）内回来，连接会被服务端收尾。

@@ -4,7 +4,7 @@
 
 - **后端**：conda 建虚拟环境 + pip 装依赖 + `python main.py`
 - **前端**：pnpm install + pnpm dev
-- **ASR**：单独起 FunASR Docker（按需；用豆包流式 API 可不开本地容器）
+- **语音识别**：单独起 FunASR Docker（按需；用豆包流式 API 可不开本地容器）
 
 只是想试用产品，**直接看 [README.md 走 Docker 部署](../README.md)** 更快。
 
@@ -38,7 +38,7 @@ pnpm dev
 
 ---
 
-## 3. ASR（按需）
+## 3. 语音识别（按需）
 
 ### 3.1 推荐本地免费 FunASR
 
@@ -47,7 +47,7 @@ docker compose up -d funasr
 docker compose logs -f funasr
 ```
 
-首次启动会自动下载约几 GB 的模型，等日志显示模型就绪后再回到系统配置页面。容器内监听 10095 端口，映射到宿主机 10096。
+第一次会下载几个 G 的模型，等日志显示模型就绪再回系统配置页面。容器里监听 10095 端口，映射到宿主机 10096。
 
 ### 3.2 不想跑 Docker？
 
@@ -59,6 +59,6 @@ docker compose logs -f funasr
 
 打开 [https://localhost:8848](https://localhost:8848)。
 
-仓库自带自签证书，浏览器会弹「不安全」提示——点「高级 → 继续前往」放行（这只是浏览器对自签证书的固定行为，不代表连接真有问题）。
+浏览器会弹「连接不安全」——别紧张。这是开发用的演示证书，点「高级 → 继续前往 localhost」放行。
 
 进系统后下一步见 [用户使用教程](user-tutorial.md)（注册 → 配置 → 跑访谈 → 导出报告）。

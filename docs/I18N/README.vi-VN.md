@@ -3,13 +3,13 @@
 
 # Xiaozhi FDE Talk
 
-### Không chỉ là chuyển giọng nói thành văn bản—mà là trợ lý phỏng vấn AI biết lắng nghe và gợi ý
+### Không chỉ chuyển giọng nói thành văn bản—mà là trợ lý phỏng vấn AI biết lắng nghe và gợi ý
 
-**Dành cho FDE, Product Manager, pre-sales và tư vấn viên thường xuyên phỏng vấn khách hàng**
+**Dành cho người thường xuyên phỏng vấn khách hàng**: FDE, quản lý sản phẩm, pre-sales, tư vấn viên…
 
-Khác với các công cụ chuyển giọng nói hay ghi âm, hệ thống phân tích cuộc trò chuyện theo thời gian thực ngay trong buổi phỏng vấn, gợi ý bạn nên hỏi gì tiếp theo và những điểm quan trọng nào chưa được đề cập. Khi buổi phỏng vấn kết thúc, nó tự động tạo báo cáo yêu cầu có cấu trúc, giúp mỗi buổi phỏng vấn trọn vẹn và chuyên nghiệp hơn, giảm việc bổ sung sau buổi.
+Các công cụ ghi âm thông thường chỉ giúp bạn tổng hợp sau buổi phỏng vấn. Công cụ này lắng nghe theo thời gian thực và gợi ý bạn nên hỏi gì tiếp theo, những điểm nào chưa được đề cập. Khi buổi phỏng vấn kết thúc, bạn có ngay báo cáo yêu cầu có cấu trúc—không cần ghi chép thủ công.
 
-[Bắt đầu nhanh](#quick-start) · [Giao thức WebSocket](../websocket-protocol.md) · [HTTP API](../http-api.md) · [Báo lỗi](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[Tài liệu](../index.md) · [Bắt đầu nhanh](#-ba-bước-để-chạy) · [Báo lỗi](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-zh--CN-lightgrey.svg)](../../README.md)
 [![English](https://img.shields.io/badge/English-en--US-lightgrey.svg)](README.en-US.md)
@@ -17,83 +17,35 @@ Khác với các công cụ chuyển giọng nói hay ghi âm, hệ thống phâ
 
 </div>
 
-<a id="core-features"></a>
+## ✨ Nó làm được gì
 
-## ✨ Tính năng cốt lõi
-
-- 🤖 **Hỗ trợ theo thời gian thực, mách bạn nên hỏi gì**: vừa nghe vừa phân tích cuộc trò chuyện, nhắc "nên hỏi gì tiếp theo, điểm nào chưa được đề cập", người mới cũng phỏng vấn như chuyên gia
-- 🎙️ **Chuyển giọng nói thành văn bản trực tiếp suốt buổi**: bật mic là dùng được, văn bản hiện lên theo thời gian thực và làm đầu vào cho coaching engine; FunASR chạy local nên dữ liệu giọng nói không ra khỏi mạng nội bộ
-- 📝 **Tự động xuất báo cáo khi kết thúc**: không cần nghe lại ghi âm để tổng hợp, buổi phỏng vấn vừa kết thúc là có tài liệu yêu cầu có cấu trúc, hỗ trợ xuất Markdown, HTML, Word
+- 🤖 **Bảo bạn nên hỏi gì, theo thời gian thực**: vừa nghe vừa phân tích, gợi ý câu hỏi tiếp theo và những điểm chưa được đề cập—người mới cũng phỏng vấn như chuyên gia
+- 🎙️ **Chuyển giọng nói thành văn bản ngay khi nói**: bật mic là chạy. Văn bản chuyển ngay còn làm đầu vào cho bộ coaching. Nếu dùng FunASR local thì dữ liệu giọng nói không ra khỏi mạng nội bộ
+- 📝 **Tự động ra báo cáo khi kết thúc**: không cần nghe lại ghi âm tổng hợp. Có ngay tài liệu yêu cầu có cấu trúc, xuất Markdown, HTML, hoặc Word
 
 ***
 
-<a id="quick-start"></a>
+## 🚀 Ba bước để chạy
 
-## 🚀 Bắt đầu nhanh
-
-<a id="local-development"></a>
-
-### Cách 1: Phát triển trên máy
-
-<a id="asr-service-funasr-docker"></a>
-
-#### 1.1. Khởi động dịch vụ ASR (FunASR Docker)
+Cần cài Docker sẵn.
 
 ```bash
-# Lần đầu chạy sẽ tự động tải model, sau đó lắng nghe trên cổng 10096 của máy host
-docker compose up -d funasr
-
-# Xem tiến trình tải model
-docker compose logs -f funasr
+git clone https://github.com/xinnan-tech/xiaozhi-fde-talk.git
+cd xiaozhi-fde-talk
+docker compose up -d app
 ```
 
-Backend mặc định lấy địa chỉ ASR là `wss://localhost:10096`, được cung cấp bởi trường hệ thống "WebSocket URL" (tự động seed khi khởi động lần đầu), không cần khai báo trong `.env`—phát triển local dùng được ngay.
+Lần đầu sẽ tải chương trình từ internet (vài trăm MB), mất khoảng một hai phút.
 
-<a id="start-the-backend"></a>
+Sau đó mở trình duyệt, vào [https://localhost:8848](https://localhost:8848).
 
-#### 1.2. Khởi động backend
+> Trình duyệt sẽ báo "Kết nối của bạn không riêng tư" hoặc tương tự—đừng lo. Đó là chứng chỉ demo đi kèm repo. Bấm "Nâng cao" rồi "Tiếp tục đến localhost" là vào được.
 
-```bash
-cd backend
-conda create -n xiaozhi-fde-talk python=3.12 -y
-conda activate xiaozhi-fde-talk
-pip install -r requirements.txt
-# Dữ liệu runtime (.env, SQLite DB) nằm trong backend/data/; đường dẫn được
-# tính tương đối với backend/, không phụ thuộc CWD — thuận tiện cho Docker mount.
-# .gitignore đã loại trừ mọi thứ trong data/ trừ file placeholder .gitkeep.
-# .gitkeep đã có sẵn sau clone, nhưng `mkdir -p` là lưới an toàn phòng khi ai đó
-# chạy `git clean -fdx` xóa luôn data/ — nếu thiếu nó, dòng `cp` phía dưới sẽ lỗi.
-mkdir -p data
-cp .env.example data/.env
-python main.py
-```
+Vào trong thì bấm "Đăng ký" để tạo tài khoản. **Người đăng ký đầu tiên sẽ làm admin**, quản lý mọi thứ.
 
-Người dùng tại Trung Quốc có thể thêm `-i https://pypi.tuna.tsinghua.edu.cn/simple` vào sau `pip install` để dùng gương Tsinghua tải nhanh hơn; mặc định dùng PyPI chính thức.
+Phỏng vấn có giọng nói cần cả mô hình AI và nhận dạng giọng nói. Không có khóa AI thì không tạo được phỏng vấn. Không có nhận dạng giọng nói thì không có transcript trực tiếp khi nói chuyện. Có thể chạy chương trình trước rồi cấu hình sau trong "Cấu hình hệ thống":
 
-Sau khi khởi động, tài liệu API của backend xem tại `http://localhost:8000/docs`.
+- [Cấu hình LLM](../llm-config.md): Aliyun Bailian, DeepSeek, OpenAI, …
+- [Cấu hình nhận dạng giọng nói](../asr-config.md): Doubao streaming API (trả phí) hoặc FunASR local (miễn phí)
 
-<a id="start-the-frontend"></a>
-
-#### 1.3. Khởi động frontend
-
-```bash
-cd frontend
-pnpm install
-pnpm dev
-```
-
-<a id="first-run-register-admin"></a>
-
-#### 1.4. Lần đầu: đăng ký quản trị viên đầu tiên
-
-1. Mở [https://localhost:8848](https://localhost:8848) trên trình duyệt (nếu trình duyệt cảnh báo "Không an toàn", hãy bấm để tin tưởng chứng chỉ).
-2. Bấm "Đăng ký" → nhập tên đăng nhập (4–32 chữ cái, số, gạch dưới, gạch nối) + mật khẩu mạnh + xác nhận mật khẩu
-3. Người đăng ký đầu tiên sẽ tự động trở thành super administrator
-4. Sau khi đăng nhập, vào "Cấu hình hệ thống" trước để nhập khóa LLM, rồi bấm "Chạy tự kiểm tra" ở góc trên bên phải để xem từng thành phần có chạy ổn không
-5. Tạo một buổi phỏng vấn và thử nói thử
-
-Đọc thêm: [Hướng dẫn sử dụng](../user-tutorial.md)（chỉ có tiếng Trung: đăng ký → cấu hình hệ thống → chạy phỏng vấn → xuất báo cáo）.
-
-Lưu ý:
-
-Vì dự án này cần bật quyền microphone của trình duyệt, khi test qua mạng LAN trình duyệt bắt buộc phải dùng HTTPS. Repo đã có sẵn một cặp chứng chỉ demo tại `frontend/src/certs/localhost.pem` + `localhost-key.pem`, nên mặc định chạy HTTPS. Nếu muốn dùng chứng chỉ riêng, xem [Hướng dẫn sử dụng](../user-tutorial.md) phần "Câu hỏi thường gặp" để biết cách tạo.
+Đầy đủ tài liệu ở [đây](../index.md). Muốn phát triển local (không dùng Docker) xem [hướng dẫn phát triển local](../local-development.md).

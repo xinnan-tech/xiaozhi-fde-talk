@@ -27,74 +27,27 @@
 
 ***
 
-<a id="quick-start"></a>
+## 🚀 三步跑起来
 
-## 🚀 快速开始
-
-<a id="local-development"></a>
-
-### 方式一：本地开发
-
-<a id="asr-service-funasr-docker"></a>
-
-#### 1.1. 启动 ASR 服务（FunASR Docker）
+需要本机装好 Docker。
 
 ```bash
-# 首次启动会自动下载模型，完成后监听宿主机 10096 端口
-docker compose up -d funasr
-
-# 查看模型下载进度
-docker compose logs -f funasr
+# 把代码拉到你电脑本地
+git clone https://github.com/xinnan-tech/xiaozhi-fde-talk.git
+# 进入项目目录
+cd xiaozhi-fde-talk
+# 启动项目
+docker compose up -d app
 ```
 
-后端默认 ASR 地址为 `wss://localhost:10096`，由系统配置项「WebSocket 地址」提供
-（首次启动时自动种入默认值），不在 `.env` 里配——本地开发开箱即连。
+第一次会从网上下载程序（约几百兆），耐心等一两分钟。
 
-<a id="start-the-backend"></a>
+然后打开浏览器，访问 [https://localhost:8848](https://localhost:8848)。
 
-#### 1.2. 启动后端
+> 浏览器会弹「连接不安全」——别紧张。这是开发用的演示证书，点「高级 → 继续前往 localhost」就能进。
 
-```bash
-cd backend
-conda create -n xiaozhi-fde-talk python=3.12 -y
-conda activate xiaozhi-fde-talk
-pip install -r requirements.txt
-# 运行时数据（.env、SQLite DB）落在 backend/data/ 下，路径相对 backend/ 解析，
-# 不依赖 CWD——便于 Docker 挂 data/ 卷。.gitignore 已忽略 data/ 下除 .gitkeep 之外的所有文件。
-# .gitkeep 已占位，正常 clone 后 data/ 已存在；mkdir -p 是防御性兜底——若有人
-# `git clean -fdx` 把 data/ 一并删了，下一行 cp 才能跑通。
-mkdir -p data
-cp .env.example data/.env
-python main.py
-```
+进去后点「去注册」建账号。**第一个注册的就是管理员**，能管所有事。
 
-国内用户可在`pip install` 后追加 `-i https://pypi.tuna.tsinghua.edu.cn/simple` 走清华镜像加速，默认走官方 PyPI。
+跑访谈需要 AI 大模型和语音识别——不配 LLM 创建访谈会被拒，不配 ASR 访谈里说话没转写。可以先把程序跑起来，再慢慢在「系统配置」里配置。
 
-启动后，后端接口可以在`http://localhost:8000/docs`查看
-
-<a id="start-the-frontend"></a>
-
-#### 1.3. 启动前端
-
-```bash
-cd frontend
-pnpm install
-pnpm dev
-```
-
-<a id="first-run-register-admin"></a>
-
-#### 1.4. 首次启动：注册首位管理员
-
-1. 浏览器打开 [https://localhost:8848](https://localhost:8848) （如果浏览器弹「不安全」，请点击页面上的信任证书）。
-2. 进入登录页，点击"去注册" → 填用户名（4-32 位字母数字下划线连字符）、强密码、确认密码。
-3. 第一个注册的用户自动成为超级管理员。
-4. 登录后，先打开"系统配置"填入 LLM 密钥，否则后续创建访谈会被 LLM 拒绝；填好后点击右上角的"运行自检"，确认 ASR、LLM、OCR 三项都正常。
-5. 创建访谈，尝试发出声音。
-
-进一步阅读：[使用教程](docs/user-tutorial.md)（注册 → 系统配置 → 跑访谈 → 导出报告的完整流程）。
-
-请注意：
-由于本项目需要开启浏览器麦克风权限，局域网连测试时浏览器必须要求走 HTTPS协议。
-本仓库默认自带了一对 `frontend/src/certs/localhost.pem` + `localhost-key.pem` 演示证书，默认是跑 HTTPS；
-如果想用自己的证书，生成方法见 [使用教程](docs/user-tutorial.md)「常见问题」。
+完整文档看 [这里](docs/index.md)。

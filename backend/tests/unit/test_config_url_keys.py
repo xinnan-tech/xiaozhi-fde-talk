@@ -20,7 +20,7 @@ def test_url_keys_exact_set():
 
 
 def test_url_keys_ws_url_allowed_schemes():
-    """funasr_server 是 ws/wss；doubao_stream 走 appid 不进表。"""
+    """funasr_server 是 ws/wss；doubao_stream 使用 API Key，不进表。"""
     assert URL_KEYS["asr.funasr_server.ws_url"] == {"ws", "wss"}
 
 

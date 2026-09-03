@@ -122,7 +122,7 @@ const selfCheckResults = reactive<SelfCheckResult[]>([]);
  * 再次保存→覆盖服务端最新值」的连锁问题。 */
 const staleGroups = ref(new Set<string>());
 /** 敏感密码字段 */
-const sensitiveKeys = ["api_key", "access_token", "secret_key", "appid"];
+const sensitiveKeys = ["api_key", "access_token", "secret_key"];
 /** 复选框字段 */
 const checkboxKeys = [
   "ws_verify_ssl",
@@ -509,7 +509,7 @@ const saveConfig = async (group: ConfigGroup) => {
   if (group.key === "asr") {
     // ASR: 嵌套结构 { type, <active_type>: {...} }——只发当前激活类型的字段，
     // 避免把非激活类型（比如选了 funasr_server 时）的空必填字段
-    // （doubao_stream.access_token 等）一并提交，否则后端按
+    // （doubao_stream.api_key 等）一并提交，否则后端按
     // REQUIRED_STRING_KEYS 校验会拒整批保存（#177）。
     const activeType = (config.asr?.type as string) ?? "";
     payload = { type: activeType };

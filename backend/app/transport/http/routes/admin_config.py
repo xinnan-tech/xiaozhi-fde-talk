@@ -31,7 +31,7 @@ def _flatten_asr(raw: dict[str, Any]) -> dict[str, Any]:
     {
       type: "funasr_server",
       funasr_server: { language, sample_rate, ws_url, ... },
-      doubao_stream: { language, sample_rate, appid, ... }
+      doubao_stream: { language, sample_rate, api_key, ... }
     }
     """
     result: dict[str, Any] = {"type": raw.get("type", "funasr_server")}

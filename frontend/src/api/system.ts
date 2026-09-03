@@ -20,6 +20,7 @@ export interface SystemConfig {
     sample_rate?: string | number;
     ws_url?: string;
     ws_verify_ssl?: string | boolean;
+    api_key?: string | null;
   };
   coach?: SystemConfigSection & {
     pause_s?: string | number;

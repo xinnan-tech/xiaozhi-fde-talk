@@ -11,6 +11,8 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
   const mediaRecorder = shallowRef<MediaRecorder | null>(null);
   const isRecording = ref(false);
   const error = ref<Error | DOMException | null>(null);
+  let audioEventCount = 0;
+  let lastAudioEventAt = 0;
 
   const acquireStream = async () => {
     if (mediaStream.value) return true;
@@ -68,7 +70,22 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
         mediaStream.value,
         mimeType ? { mimeType } : undefined
       );
+      audioEventCount = 0;
+      lastAudioEventAt = 0;
       mediaRecorder.value.ondataavailable = event => {
+        const now = performance.now();
+        const intervalMs = lastAudioEventAt
+          ? Math.round(now - lastAudioEventAt)
+          : null;
+        audioEventCount += 1;
+        lastAudioEventAt = now;
+        console.info("[useAudioRecorder] dataavailable", {
+          count: audioEventCount,
+          intervalMs,
+          size: event.data.size,
+          type: event.data.type,
+          recorderState: mediaRecorder.value?.state
+        });
         if (!event.data.size) return;
 
         console.info("[useAudioRecorder] 收到音频片段", {
@@ -78,6 +95,10 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
         options.onAudioData?.(event.data);
       };
       mediaRecorder.value.start(200);
+      console.info("[useAudioRecorder] MediaRecorder 已启动", {
+        requestedTimesliceMs: 200,
+        actualMimeType: mediaRecorder.value.mimeType
+      });
       error.value = null;
       isRecording.value = true;
       const stream = mediaStream.value;

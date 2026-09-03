@@ -211,7 +211,8 @@ class SessionRuntime:
 
     # ── 入站 API（所有协议统一调用）──────────────────────────
 
-    async def submit_audio(self, session_seq: int, payload: bytes) -> None:
+    async def submit_audio(self, session_seq: int, payload: bytes,
+                           audio_format: str = "opus") -> None:
         """入站音频帧：seq 去重 → 喂管线（仅 LIVE 态处理）。"""
         if not self.seq.should_accept(session_seq):
             return
@@ -219,7 +220,7 @@ class SessionRuntime:
         self.state.session.consumed_seq = self.seq.consumed_seq
         if not self._fsm.is_listening or self._asr_dead:
             return
-        await self.pipeline.feed(payload)
+        await self.pipeline.feed(payload, audio_format)
         _touch(self.state.session.id)
 
     async def listen_start(self) -> None:

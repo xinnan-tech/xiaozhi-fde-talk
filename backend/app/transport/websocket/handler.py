@@ -140,6 +140,7 @@ class WSHandler:
         self._user: Optional[CurrentUser] = None
         self._handshake_timeout_s: float = 5.0   # 等首条 hello 的超时（避免客户端建连后不发 hello 永久挂住）
         self._max_frame_bytes: int = 64 * 1024   # 单帧大小上限（text/bytes 任一 payload）
+        self._audio_format = "opus"
 
     # ---- IO 辅助 ----
     async def _send(self, obj: dict) -> None:
@@ -216,6 +217,12 @@ class WSHandler:
                         i18n_key=Keys.WS_BAD_HANDSHAKE_ORDER,
                         close_code=4000)
             return False
+
+        audio_params = msg.get("audio_params")
+        if isinstance(audio_params, dict) and audio_params.get("format") == "pcm_s16le":
+            self._audio_format = "pcm_s16le"
+        else:
+            self._audio_format = "opus"
 
         state = await manager.get(self.session_id)
         if state is None or state.session.user_id != self._user.user_id:
@@ -371,7 +378,7 @@ class WSHandler:
         if self.runtime._send_fn != self._send:
             return
         seq = int.from_bytes(frame[:4], "big")
-        await self.runtime.submit_audio(seq, frame[4:])
+        await self.runtime.submit_audio(seq, frame[4:], self._audio_format)
 
     async def _on_takeover(self) -> None:
         """pending 连接确认接管：踢旧 owner → 绑自己 → 回 hello 让前端开麦。

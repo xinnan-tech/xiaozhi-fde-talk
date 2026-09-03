@@ -81,25 +81,36 @@ class AudioPipeline:
         logger.info("音频管线开始监听：stream=%s provider_alive=%s",
                     self._is_stream, provider_alive)
 
-    async def feed(self, webm: bytes) -> None:
-        """喂一帧 WebM → decode → 推送流式 ASR。
+    async def feed(self, audio: bytes, audio_format: str = "opus") -> None:
+        """喂一帧 WebM 或 PCM → 推送流式 ASR。
 
         解码临界区（_decode_only + 游标更新）须串行：见 _feed_lock 说明。
         feed_stream / overflow / low_level 回调放到锁外——前者 provider 自带
         send lock，后两者只通知、无需阻塞后续 decode。
         """
-        async with self._feed_lock:
-            pcm_new = await asyncio.to_thread(self._decode_only, webm)
-            overflowed = (
-                self.decoder is not None
-                and getattr(self.decoder, "overflowed", False)
-            )
-            if overflowed:
-                self.decoder.overflowed = False
-            low = None
+        if audio_format == "pcm_s16le":
+            pcm_new = audio
+            overflowed = False
+            low = self._level_monitor.feed(pcm_new) if pcm_new else None
             if pcm_new:
                 self._pcm_samples += len(pcm_new) // 2
-                low = self._level_monitor.feed(pcm_new)
+            logger.info("收到 PCM 音频帧：pcm_bytes=%d", len(pcm_new))
+        else:
+            logger.info("收到 WebM 音频帧：bytes=%d", len(audio))
+            async with self._feed_lock:
+                pcm_new = await asyncio.to_thread(self._decode_only, audio)
+                overflowed = (
+                    self.decoder is not None
+                    and getattr(self.decoder, "overflowed", False)
+                )
+                if overflowed:
+                    self.decoder.overflowed = False
+                low = None
+                if pcm_new:
+                    self._pcm_samples += len(pcm_new) // 2
+                    low = self._level_monitor.feed(pcm_new)
+            logger.info("WebM 音频帧解码完成：webm_bytes=%d pcm_bytes=%d",
+                        len(audio), len(pcm_new))
         if overflowed and self._on_overflow is not None:
             await self._on_overflow()
         if low is not None and self._on_low_level is not None:
@@ -160,4 +171,6 @@ class AudioPipeline:
         """流式 ASR 返回文本时的回调（2pass 模式：标签判断句尾，is_final 恒为 True）。"""
         if not text:
             return
+        logger.info("音频管线收到最终转写：text=%r samples=%d",
+                    text, self._pcm_samples)
         await self._on_utterance(text, True, self._pcm_samples)

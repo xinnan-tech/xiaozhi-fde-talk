@@ -14,9 +14,12 @@ PyAV 的 av.open(BytesIO(...)) 只能整段解一次、无原生「追加续解�
 from __future__ import annotations
 
 import io
+import logging
 
 import av
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 _CLUSTER_ID = b"\x1f\x43\xb6\x75"          # Matroska/WebM Cluster 元素 ID
 _MIN_DECODE_BYTES = 4000                     # ~1s Opus；攒够完整簇再解，避免每帧小窗冷启动
@@ -72,6 +75,13 @@ class WebMDecoder:
         header = self._header
         tail_start = len(header)
         cluster_offsets = _find_clusters(self._buf, tail_start)
+        logger.info(
+            "WebM 结构：buffer_bytes=%d header_bytes=%d clusters=%d force=%s",
+            len(self._buf),
+            len(header),
+            len(cluster_offsets),
+            force,
+        )
 
         if force:
             pcm = self._decode(bytes(self._buf))
@@ -111,8 +121,13 @@ class WebMDecoder:
                     frames.append(rf.to_ndarray().reshape(-1))
             for rf in resampler.resample(None):   # flush
                 frames.append(rf.to_ndarray().reshape(-1))
-        except Exception:
+        except Exception as exc:
             # 解码中途失败（WebM 不完整/损坏）→ 跳过本批，等更多字节，绝不抛出
+            logger.warning(
+                "WebM 解码失败：bytes=%d error=%r",
+                len(data),
+                exc,
+            )
             frames = []
         finally:
             container.close()

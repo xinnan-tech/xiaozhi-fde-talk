@@ -34,6 +34,7 @@ import {
   unignoreInterviewItemApi
 } from "@/api/interview";
 import { useAudioRecorder } from "@/composables/useAudioRecorder";
+import { usePcmRecorder } from "@/composables/usePcmRecorder";
 import {
   useWebSocket,
   type InterviewServerMessage
@@ -429,7 +430,7 @@ const handleStartInterview = async () => {
 
   // 在点击事件中立即请求权限，避免等待 WebSocket 握手后丢失浏览器用户手势。
   shouldResumeMicrophone.value = true;
-  const microphoneStarted = await acquireStream();
+  const microphoneStarted = await acquireMicrophone();
   // 显式标注 string | undefined，避免 TS 沿入口守卫控制流把 ended /
   // suspended 收窄掉——handleServerMessage 在 await 期间可异步改写 status。
   const statusAfterAcquire: string | undefined = interviewDetail.value?.status;
@@ -508,7 +509,7 @@ const handlePauseInterview = async () => {
     }
   }
   sendListenState("stop");
-  stopRecording();
+  stopMicrophone();
   isInterviewStarted.value = false;
   stopInterviewTimer();
   if (interviewDetail.value) {
@@ -619,10 +620,13 @@ const getInterviewSessionId = () =>
   interviewDetail.value?.id || (route.params.id as string);
 
 const AUDIO_PARAMS = {
-  format: "opus",
+  format:
+    typeof window !== "undefined" && "AudioWorkletNode" in window
+      ? "pcm_s16le"
+      : "opus",
   sample_rate: 16000,
   channels: 1,
-  frame_duration: 60
+  frame_duration: 20
 };
 
 const shouldResumeMicrophone = ref(false);
@@ -848,7 +852,7 @@ const handleServerMessage = (message: InterviewServerMessage) => {
 
   if (message.type === "connection.kicked") {
     shouldResumeMicrophone.value = false;
-    stopRecording();
+    stopMicrophone();
     isInterviewStarted.value = false;
     stopInterviewTimer();
     ElMessage.warning(message.reason || t("interview.runtime.kicked"));
@@ -890,7 +894,7 @@ const handleServerMessage = (message: InterviewServerMessage) => {
       interviewDetail.value.status =
         message.type === "session.ended" ? "ended" : "suspended";
       shouldResumeMicrophone.value = false;
-      stopRecording();
+      stopMicrophone();
       isInterviewStarted.value = false;
       stopInterviewTimer();
     }
@@ -930,8 +934,8 @@ const websocket = useWebSocket({
     // 必须保留启动意图，让新连接握手完成后发送 listen:start；仅在本端
     // 已不处于访谈状态时清掉它（手动暂停、被踢出或结束等路径）。
     shouldResumeMicrophone.value = isInterviewStarted.value;
-    if (!isMicrophoneEnabled.value) return;
-    stopRecording();
+    if (!microphoneEnabled.value) return;
+    stopMicrophone();
   },
   onError: message => {
     console.error("[InterviewPage] WebSocket 错误", message);
@@ -949,6 +953,25 @@ const isWebSocketConnected = computed(
   () => websocketState.value === "connected"
 );
 
+const pcmRecorder = usePcmRecorder({
+  audio: {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  },
+  onAudioData: audio => {
+    if (!microphoneEnabled.value) return;
+    const sent = sendAudioFrame(audio);
+    if (!sent) {
+      console.warn("[InterviewPage] PCM 音频帧未发送", {
+        size: audio.byteLength,
+        websocketState: websocketState.value
+      });
+    }
+  }
+});
+
 const {
   isRecording: isMicrophoneEnabled,
   error: microphoneErrorState,
@@ -964,8 +987,18 @@ const {
   },
   onAudioData: async audio => {
     const payload = await audio.arrayBuffer();
-    if (!isMicrophoneEnabled.value) return;
+    console.info("[InterviewPage] 音频准备发送", {
+      size: payload.byteLength,
+      websocketState: websocketState.value,
+      microphoneEnabled: microphoneEnabled.value
+    });
+    if (!microphoneEnabled.value) return;
     const sent = sendAudioFrame(payload);
+    console.info("[InterviewPage] 音频发送结果", {
+      sent,
+      size: payload.byteLength,
+      websocketState: websocketState.value
+    });
     if (!sent) {
       console.warn("[InterviewPage] 音频片段未发送", {
         size: audio.size,
@@ -974,6 +1007,29 @@ const {
     }
   }
 });
+
+const microphoneEnabled = computed(
+  () => pcmRecorder.isRecording.value || isMicrophoneEnabled.value
+);
+const microphoneError = computed(
+  () => pcmRecorder.error.value || microphoneErrorState.value
+);
+const acquireMicrophone = async () => {
+  if (AUDIO_PARAMS.format === "pcm_s16le") {
+    return pcmRecorder.acquireStream();
+  }
+  return acquireStream();
+};
+const startMicrophone = async () => {
+  if (AUDIO_PARAMS.format === "pcm_s16le") {
+    return pcmRecorder.startRecording();
+  }
+  return startRecording();
+};
+const stopMicrophone = () => {
+  pcmRecorder.stopRecording();
+  stopRecording();
+};
 
 const openMicrophone = async () => {
   if (!isWebSocketConnected.value) {
@@ -984,14 +1040,14 @@ const openMicrophone = async () => {
     ElMessage.warning(t("interview.runtime.listen_failed"));
     return false;
   }
-  const started = await startRecording();
+  const started = await startMicrophone();
   if (!started) sendListenState("stop");
   return started;
 };
 
 function suspendLocalInterview() {
   shouldResumeMicrophone.value = false;
-  stopRecording();
+  stopMicrophone();
   isInterviewStarted.value = false;
   stopInterviewTimer();
   if (interviewDetail.value?.status === "in_progress") {
@@ -1083,8 +1139,8 @@ onBeforeUnmount(() => {
   suggestionCards.value.forEach(card => clearIgnoreTimer(card));
   clearIdleWarning();
   stopInterviewTimer();
-  if (isMicrophoneEnabled.value) sendListenState("stop");
-  stopRecording();
+  if (microphoneEnabled.value) sendListenState("stop");
+  stopMicrophone();
   websocket.close();
 });
 
@@ -1226,8 +1282,8 @@ const handleEndInterview = async () => {
 
   stopInterviewTimer();
   isInterviewStarted.value = false;
-  if (isMicrophoneEnabled.value) sendListenState("stop");
-  stopRecording();
+  if (microphoneEnabled.value) sendListenState("stop");
+  stopMicrophone();
   websocket.close();
   router.push("/home");
 };

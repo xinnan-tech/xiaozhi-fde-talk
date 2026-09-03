@@ -306,17 +306,21 @@ class FunASRServerProvider(ASRProvider):
                 response = response.decode("utf-8")
             msg = json.loads(response)
         except (json.JSONDecodeError, UnicodeDecodeError):
+            logger.warning("FunASR 返回无法解析：type=%s", type(response).__name__)
             return False
 
         text = ""
 
         if isinstance(msg, dict):
             raw = msg.get("text", "").strip()
+            logger.info("FunASR 返回：text=%r is_final=%r has_tag=%s",
+                        raw, msg.get("is_final"), bool(_TAG_RE.search(raw)))
             # 有 <|...|> 标签 → 完整纠错句（2pass 句尾）；无标签 → 中间态，跳过
             if _TAG_RE.search(raw):
                 text = _STRIP_RE.sub("", raw).strip()
 
         if text and self._on_utterance:
+            logger.info("FunASR 输出最终文本：%r", text)
             await self._on_utterance(text, is_final=True)
 
         # FunASR 的 is_final 字段在 2pass 模式下不准确，忽略之

@@ -9,7 +9,7 @@
 
 和转写、录音工具不同，它在你访谈过程中实时分析对话，提示你"接下来该问什么、哪些关键点还没问到"，结束自动生成结构化需求报告。让每次访谈更完整、更专业，减少事后补漏。
 
-[快速开始](#quick-start) · [WebSocket 通信协议](docs/websocket-protocol.md) · [HTTP 接口协议](docs/http-api.md) · [问题反馈](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[快速开始](#quick-start) · [完整文档](docs/index.md) · [问题反馈](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-current-green.svg)](README.md)
 [![English](https://img.shields.io/badge/English-en--US-lightgrey.svg)](docs/I18N/README.en-US.md)
@@ -27,7 +27,9 @@
 
 ***
 
-## 🚀 三步跑起来
+<a id="quick-start"></a>
+
+## 🚀 三句话跑起来
 
 需要本机装好 Docker。
 
@@ -51,3 +53,18 @@ docker compose up -d app
 跑访谈需要 AI 大模型和语音识别——不配 LLM 创建访谈会被拒，不配 ASR 访谈里说话没转写。可以先把程序跑起来，再慢慢在「系统配置」里配置。
 
 完整文档看 [这里](docs/index.md)。
+
+## 🚩 配置说明和推荐
+> [!Note]
+> 本项目提供两种配置方案：
+> 
+> 1. `入门全免费`配置：适合个人使用，所有组件均采用免费方案，无需额外付费。
+> 
+> 2. `流式配置`：适合超过2个并发等场景，响应速度更快，体验更佳。
+> 
+
+| 模块名称 | 入门全免费设置 | 流式配置 |
+|:---:|:---:|:---:|
+| ASR(语音识别) | FunASRServer(本地流式) | 👍DoubaoStreamASR(豆包流式) |
+| LLM(大模型) | glm-4-flash(智谱) | 👍qwen-plus(阿里百炼) |
+| OCR(图片识别) | baiduOCR(百度云OCR每月额度很多) | 👍baiduOCR(百度云OCR) |

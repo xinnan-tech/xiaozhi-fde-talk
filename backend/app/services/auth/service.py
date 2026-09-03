@@ -20,9 +20,7 @@ from app.persistence.models import User
 from app.persistence.repositories.user import user_repo
 
 # 模块级预计算 dummy hash：bcrypt cost=12（~1.2s on this system）。
-# 用于用户不存在时的时序填充——确保「用户不存在」路径也跑一次与「用户存在
-# 但密码错误」路径相同量的 bcrypt 运算（两次：dummy + real），使攻击者无法
-# 通过响应时间区分「用户是否存在」。
+# 用于时序均衡——确保「用户不存在」路径与「密码错误」路径执行相同量的 bcrypt 运算。
 _DUMMY_HASH: str = hash_password("__timing_dummy_user_does_not_exist__")
 
 
@@ -32,14 +30,14 @@ async def authenticate_user(
     # user_repo.get_by_username 内部已 .lower()，service 无需再归一
     user = await user_repo.get_by_username(db, username)
     if user is None:
-        # 时序均衡：用户不存在时也跑一次 dummy bcrypt（~1.2s），
-        # 使两条失败路径（用户不存在 / 密码错误）的 CPU 工作量完全一致。
+        # 时序均衡：用户不存在时也跑一次 bcrypt，与「密码错误」路径对称，
+        # 使攻击者无法通过响应时间区分用户是否存在。
         await verify_password_async(password, _DUMMY_HASH)
         return None
+    # 密码错误时也跑一次 bcrypt（与用户不存在路径对称的 1 次 bcrypt），
+    # verify_password_async 内部 catch ValueError/TypeError → return False，
+    # 异常路径极快但不影响均衡。
     if not await verify_password_async(password, user.password_hash):
-        # 时序均衡：密码错误时也跑一次 dummy bcrypt，使 CPU 工作量与
-        # 「用户不存在」路径完全一致。
-        await verify_password_async(password, _DUMMY_HASH)
         return None
     return CurrentUser(user_id=user.id, username=user.username, role=user.role or "user")
 

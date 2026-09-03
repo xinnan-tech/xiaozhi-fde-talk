@@ -77,6 +77,22 @@ NUMERIC_KEYS: dict[str, type] = {
     "session.liveness_window_s": float,
 }
 
+# 数值 key 的合法上限：超出会让运行时溢出、OOM 分配或逻辑失效（#201 系列）。
+NUMERIC_MAX_VALUE: dict[str, int | float] = {
+    # 30 天 = 43200 分钟；access token TTL 业务上限（更长应用 refresh 机制）
+    "auth.jwt_expire_minutes": 30 * 24 * 60,
+    # 365 天；refresh token 撤销表可接受的"用户不登录"最长窗口
+    "auth.refresh_token_expire_days": 365,
+    # 1000；FunASR 单机房间容量上限
+    "session.max_concurrent": 1000,
+    # 1000；engine.py:277 用作 segment buffer 阈值，无上限会让兜底永远不命中
+    "coach.max_pending_segments": 1000,
+    # 192000；专业音频最大标准采样率。超限触发 funasr_server/doubao_stream 的
+    # silence_bytes 分配（sample_rate * 2 * tail_ms）OOM Killed，全站 ASR 中断
+    "asr.funasr_server.sample_rate": 192000,
+    "asr.doubao_stream.sample_rate": 192000,
+}
+
 # 枚举 key 的合法清单：写入前校验。坏值若落库，admin 配置页会把脏值
 # 显示给用户；运行时 llm.output_language 错值会让 LLM 报错或行为异常。
 # LLM 输出语种从 app.core.i18n.lang_meta.derived_output_language_enum() 派生——
@@ -239,6 +255,16 @@ def validate_value(key: str, value: str) -> None:
             name=key,
             value=value,
         )
+    # 上限校验（#201）：仅作用于 NUMERIC_MAX_VALUE 列出的 key。
+    max_value = NUMERIC_MAX_VALUE.get(key)
+    if max_value is not None and v > max_value:
+        raise I18nError(
+            Keys.CONFIG_INVALID_NUMERIC_TOO_LARGE,
+            http_status=400,
+            name=key,
+            value=value,
+            max=max_value,
+        )
 
 
 # 默认值（首次 warm 时若 DB 缺则种入）
@@ -283,10 +309,13 @@ DEFAULTS: dict[str, str] = {
 }
 
 
-def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
+def _sanitize_loaded_values(loaded: dict[str, str]) -> tuple[dict[str, str], list[str]]:
     """加载层兜底：DB 已有行里若有脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放等历史脏值），
-    按 ENUM/BOOL/NUMERIC/URL 重新校验，命中失败回退到 DEFAULTS[k] 并 logger.warning——
-    避免脏 URL 在 warm 路径绕过写入校验静默进缓存，runtime websockets.connect 才抛 InvalidURI。
+    按 ENUM/BOOL/NUMERIC/URL 重新校验，命中失败回退到 DEFAULTS[k]。
+
+    返回 (sanitized, reverted_keys)：reverted_keys 是本次回退的 key 列表，供
+    warm() / _refresh_cache() 一次性打 banner 让 admin 部署后看到「哪些 key
+    偷偷改回默认」（#201 系列：仅 logger.warning 单条会被淹没在启动日志里）。
 
     必填鉴权字段（REQUIRED_STRING_KEYS）空值仅 warn、不回退（DEFAULTS 自身也是 ""，
     无有效回退目标），由 provider 构造路径的 ValueError 兜底——但要让 admin 可见。
@@ -296,6 +325,7 @@ def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
     """
     validated_keys = set(ENUM_KEYS) | set(BOOL_KEYS) | set(NUMERIC_KEYS) | set(URL_KEYS)
     sanitized: dict[str, str] = {}
+    reverted: list[str] = []
     for k, v in loaded.items():
         if k in validated_keys:
             try:
@@ -307,6 +337,7 @@ def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
                         k, v, DEFAULTS[k],
                     )
                     sanitized[k] = DEFAULTS[k]
+                    reverted.append(k)
                     continue
                 # 拿不到 DEFAULTS：跳过避免后续运行路径炸 500（理论上 ALL_B_KEYS
                 # 与 DEFAULTS key 一一对应，这里是兜底）。
@@ -325,7 +356,7 @@ def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
                 k, v,
             )
         sanitized[k] = v
-    return sanitized
+    return sanitized, reverted
 
 
 class ConfigStore:
@@ -390,7 +421,15 @@ class ConfigStore:
         async with SessionLocal() as session:
             existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
             loaded = {row.key: row.value for row in existing.scalars().all()}
-        self._cache = _sanitize_loaded_values(loaded)
+        sanitized, reverted = _sanitize_loaded_values(loaded)
+        self._cache = sanitized
+        # 一次性 banner：admin 部署后立刻看到「哪些 key 被偷偷改回默认」，
+        # 避免下次再写同一个错值。WARNING 而非 ERROR：sanitize 是恢复不是失败。
+        if reverted:
+            logger.warning(
+                "ConfigStore 加载时回退 %d 个 key 到 DEFAULTS：%s",
+                len(reverted), ", ".join(sorted(reverted)),
+            )
 
     async def get(self, key: str) -> Optional[str]:
         if key not in self._cache:
@@ -614,10 +653,13 @@ async def get_max_concurrent() -> int:
     """全局同时活跃访谈上限（= FunASR 房间容量）。
 
     读 session.max_concurrent；解析失败或 <1 一律钳到 1（否则谁也开不了访谈）。
+    上限钳到 NUMERIC_MAX_VALUE 兜底——validate_value 是写入侧唯一入口，
+    但 DB 直改 / 镜像回放 / 未来重构漏调校验时，运行时仍能自保。
     """
     s = get_config_store()
     try:
-        return max(1, int(await s.get("session.max_concurrent") or "10"))
+        v = max(1, int(await s.get("session.max_concurrent") or "10"))
     except (TypeError, ValueError):
         return 10
+    return min(v, NUMERIC_MAX_VALUE["session.max_concurrent"])
 

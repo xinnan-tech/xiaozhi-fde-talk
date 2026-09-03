@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import functools
 from typing import Optional
 
 from sqlalchemy import func, select, text
@@ -19,9 +20,11 @@ from app.domain.auth import CurrentUser
 from app.persistence.models import User
 from app.persistence.repositories.user import user_repo
 
-# 模块级预计算 dummy hash：bcrypt cost=12（~1.2s on this system）。
-# 用于时序均衡——确保「用户不存在」路径与「密码错误」路径执行相同量的 bcrypt 运算。
-_DUMMY_HASH: str = hash_password("__timing_dummy_user_does_not_exist__")
+# lazy 计算的 dummy hash：bcrypt cost=12，首次调用时计算一次后缓存。
+# 避免模块导入期同步阻塞 ~1.2s（影响 uvicorn worker 启动、pytest collection）。
+@functools.lru_cache(maxsize=1)
+def _get_dummy_hash() -> str:
+    return hash_password("__timing_dummy_user_does_not_exist__")
 
 
 async def authenticate_user(
@@ -32,7 +35,7 @@ async def authenticate_user(
     if user is None:
         # 时序均衡：用户不存在时也跑一次 bcrypt，与「密码错误」路径对称，
         # 使攻击者无法通过响应时间区分用户是否存在。
-        await verify_password_async(password, _DUMMY_HASH)
+        await verify_password_async(password, _get_dummy_hash())
         return None
     # 密码错误时也跑一次 bcrypt（与用户不存在路径对称的 1 次 bcrypt），
     # verify_password_async 内部 catch ValueError/TypeError → return False，

@@ -29,6 +29,9 @@ async def test_timing_spread_small():
     CPU 工作量完全一致，差值只来自 call scheduling 误差（< 50ms）。
     攻击者多次采样也无法统计区分。
     """
+    # 预热 dummy hash cache：确保两次 authenticate_user 调用都命中已缓存的 hash
+    auth_svc._get_dummy_hash()
+
     dummy = _DummyUser()
     original_get = auth_svc.user_repo.get_by_username
 

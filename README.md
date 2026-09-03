@@ -5,11 +5,11 @@
 
 ### 不只是录音转写，而是会"听你聊、提示你问"的 AI 访谈搭档
 
-**适合需要经常做客户访谈的人**：FDE、产品经理、售前、咨询师……
+**面向 FDE、产品经理、售前、咨询师等需要频繁做客户访谈的角色**
 
-普通录音工具只能事后整理。这个会在你访谈时实时分析对话，提醒你"接下来该问什么、哪些还没问到"，结束自动出结构化需求报告，让每次访谈更完整、更专业。
+和转写、录音工具不同，它在你访谈过程中实时分析对话，提示你"接下来该问什么、哪些关键点还没问到"，结束自动生成结构化需求报告。让每次访谈更完整、更专业，减少事后补漏。
 
-[文档目录](docs/index.md) · [快速开始](#-快速开始) · [问题反馈](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[快速开始](#quick-start) · [WebSocket 通信协议](docs/websocket-protocol.md) · [HTTP 接口协议](docs/http-api.md) · [问题反馈](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-current-green.svg)](README.md)
 [![English](https://img.shields.io/badge/English-en--US-lightgrey.svg)](docs/I18N/README.en-US.md)
@@ -17,11 +17,13 @@
 
 </div>
 
-## ✨ 它能做什么
+<a id="core-features"></a>
 
-- 🤖 **实时告诉你该问什么**：边听边分析，新手也能像专家一样访谈
-- 🎙️ **一边说一边实时转写**：开麦即用，转写内容同时给辅导引擎；语音数据可以全留在内网（用本地 FunASR 的话）
-- 📝 **结束自动出报告**：不用事后整理录音，访谈一结束就有结构化需求文档，支持 Markdown / HTML / Word 导出
+## ✨ 核心特性
+
+- 🤖 **实时辅导，告诉你该问什么**：边听边分析对话，提示"接下来该问什么、哪些关键点还没问到"，新手也能像专家一样访谈
+- 🎙️ **全程实时转写**：开麦即用，流式转写实时上屏，并作为辅导引擎的输入；FunASR 本地推理，语音数据不出内网
+- 📝 **结束自动出可交付报告**：不用事后整理录音，访谈结束即生成结构化需求文档，支持 Markdown / HTML / Word 导出
 
 ***
 
@@ -30,8 +32,11 @@
 需要本机装好 Docker。
 
 ```bash
+# 把代码拉到你电脑本地
 git clone https://github.com/xinnan-tech/xiaozhi-fde-talk.git
+# 进入项目目录
 cd xiaozhi-fde-talk
+# 启动项目
 docker compose up -d app
 ```
 
@@ -43,9 +48,6 @@ docker compose up -d app
 
 进去后点「去注册」建账号。**第一个注册的就是管理员**，能管所有事。
 
-跑访谈需要 AI 大模型和语音识别——不配 LLM 创建访谈会被拒，不配 ASR 访谈里说话没转写。可以先把程序跑起来，再慢慢在「系统配置」里填：
+跑访谈需要 AI 大模型和语音识别——不配 LLM 创建访谈会被拒，不配 ASR 访谈里说话没转写。可以先把程序跑起来，再慢慢在「系统配置」里配置。
 
-- [AI 大模型配置](docs/llm-config.md)：阿里云百炼 / DeepSeek / OpenAI 等
-- [语音识别配置](docs/asr-config.md)：豆包流式 API（按量付费）或本地 FunASR（免费）
-
-完整文档看 [这里](docs/index.md)。想本地开发（不用 Docker）看 [本地开发文档](docs/local-development.md)。
+完整文档看 [这里](docs/index.md)。

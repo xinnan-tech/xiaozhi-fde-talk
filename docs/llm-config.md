@@ -21,7 +21,7 @@
 3. 关键两步开通：
    - **第一步：开通百炼平台**——控制台首页弹窗「开通百炼大模型服务」，按提示走完
    - **第二步：开通具体模型**——左侧菜单「模型服务」，挑模型（如 `qwen-plus`）点「开通」（新用户通常有免费 token 额度）
-4. 进「API-Key」页面（左侧菜单 → 「API-Key 管理」），点「创建 API-Key」
+4. 进[API-Key](https://bailian.console.aliyun.com/cn-beijing?tab=model#/api-key)页面（左侧菜单 → 「API-Key 管理」），点「创建 API-Key」
 5. **复制生成的密钥字符串**——这就是 `api_key`，**只显示一次**，关掉页面就再也看不到
 
 ### 1.2 字段填什么
@@ -62,50 +62,12 @@
 | 字段 | 填什么 |
 | --- | --- |
 | `type` | `openai` |
-| `base_url` | `https://api.deepseek.com/v1` |
+| `base_url` | `https://api.deepseek.com` |
 | `api_key` | 上面拿到的 API Key |
-| `model` | `deepseek-chat`（V3，通用） / `deepseek-reasoner`（R1，推理强但慢）|
+| `model` | `deepseek-v4-flash` / `deepseek-v4-pro`|
 
 ### 2.3 怎么测一下通不通
 
 填好保存 → 点「运行自检」选 LLM。失败多半是密钥错或账户欠费。
 
 ---
-
-## 3. OpenAI（海外）
-
-适合：海外账户、需要 GPT 系列模型。
-
-### 3.1 怎么注册开通
-
-1. 打开 [OpenAI Platform](https://platform.openai.com/)
-2. 注册账号、绑卡（需要海外卡）
-3. 左侧「API keys」点「Create new secret key」，复制（**只显示一次**）
-
-### 3.2 字段填什么
-
-| 字段 | 填什么 |
-| --- | --- |
-| `type` | `openai` |
-| `base_url` | `https://api.openai.com/v1` |
-| `api_key` | `sk-` 开头的密钥 |
-| `model` | `gpt-4o-mini`（便宜） / `gpt-4o`（强）|
-
-### 3.3 怎么测一下通不通
-
-填好保存 → 点「运行自检」选 LLM。**国内直连 OpenAI 通常不通**，需要代理或中转；如果你用中转服务，`base_url` 改成中转商提供的端点即可。
-
----
-
-## 4. 其它 OpenAI 兼容厂商
-
-凡是有 OpenAI 兼容端点的厂商（智谱、月之暗面、硅基流动、自建网关等）都按以下四件套填：
-
-| 字段 | 填什么 |
-| --- | --- |
-| `type` | `openai` |
-| `base_url` | 厂商提供的 OpenAI 兼容端点 |
-| `api_key` | 厂商给的密钥 |
-| `model` | 厂商支持的模型名 |
-
-填好保存 → 点「运行自检」选 LLM 验证即可。

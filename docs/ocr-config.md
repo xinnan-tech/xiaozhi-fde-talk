@@ -7,7 +7,6 @@
 本项目支持两种：
 
 - **百度智能云 OCR**：国内厂商，按次计费，每月都有免费额度
-- **OpenAI 兼容 OCR**：用 GPT-4o 这类带视觉的模型（适合已有 OpenAI 账户的）
 
 > OCR = Optical Character Recognition = 从图片里识别出文字。本项目用它在访谈中识别截图、合同照片等。
 
@@ -45,26 +44,3 @@
    - 账户欠费
 
 ---
-
-## 2. OpenAI 兼容 OCR
-
-适合：已有 OpenAI 兼容端点 / 用 GPT-4o vision。
-
-### 2.1 怎么注册开通
-
-参见 [AI 大模型配置](llm-config.md) 第 3 节「OpenAI（海外）」的注册流程。API Key 共用 OpenAI 平台（也可以用 OpenRouter、Azure OpenAI 等兼容端点）。
-
-### 2.2 字段填什么
-
-| 字段 | 填什么 |
-| --- | --- |
-| `type` | `openai` |
-| `base_url` | `https://api.openai.com/v1`（或你用的兼容端点）|
-| `api_key` | OpenAI 平台的 API Key |
-| `model` | `gpt-4o-mini`（便宜） / `gpt-4o`（强）|
-
-> `secret_key` 字段保留空——OpenAI OCR 不用 SK。
-
-### 2.3 怎么测一下通不通
-
-填好保存 → 点「运行自检」选 OCR。**国内直连 OpenAI 通常不通**，需要代理或中转；用中转时 `base_url` 改成中转商端点。

@@ -7,7 +7,7 @@
 - **本地免费 FunASR**：装 Docker 在本机跑（免费，语音数据不出公司）
 - **豆包流式 API**：火山引擎的（按量付费，不用跑 Docker）
 
-> 字段里的 `type` 就是告诉系统用哪种识别引擎。`funasr_server` 是本地 FunASR，`doubao_stream` 是豆包流式。
+> 字段里的 `第一项` 就是告诉系统用哪种识别引擎。`funasr_server` 是本地 FunASR，`doubao_stream` 是豆包流式。
 
 ---
 

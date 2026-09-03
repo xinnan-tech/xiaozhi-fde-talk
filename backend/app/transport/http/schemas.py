@@ -49,7 +49,7 @@ def _validate_base_info_size(base_info: dict) -> None:
             raise I18nError(
                 Keys.SESSION_BASE_INFO_VALUE_TOO_LONG,
                 http_status=422,
-                key=key,
+                field=key,
                 byte_len=field_bytes,
                 max_bytes=BASE_INFO_VALUE_MAX_BYTES,
             )

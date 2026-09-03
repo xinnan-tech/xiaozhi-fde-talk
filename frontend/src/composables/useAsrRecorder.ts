@@ -165,7 +165,7 @@ export function useAsrRecorder() {
       return false;
     }
 
-    // token 只走子协议（与 useWebSocket 同款）：服务端在 accept 前校验
+    // token 走子协议 bearer.<jwt>，服务端在 accept 前校验
     const token = useUserStoreHook().accessToken;
     if (!token) {
       error.value = new Error("Not authenticated");

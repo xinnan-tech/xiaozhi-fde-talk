@@ -18,10 +18,7 @@ from app.services.auth.token import decode_token
 # ─────────────── 协议无关鉴权 ───────────────
 
 def token_from_subprotocols(subprotocols: Optional[list[str]]) -> Optional[str]:
-    """从 Sec-WebSocket-Protocol 列表里挑出 bearer.<token>，无则 None。
-
-    interview WS 与 ASR WS 共用：token 只认子协议，accept 之前校验。
-    """
+    """从 Sec-WebSocket-Protocol 列表里挑出 bearer.<token>，无则 None。"""
     for sp in subprotocols or []:
         if sp.startswith("bearer."):
             return sp[len("bearer."):]

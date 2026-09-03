@@ -1,9 +1,10 @@
 """ASR 专用 WebSocket 处理器（访谈创建时的录音转写，无需 session）。
 
 流程：
-  ws 连接 → 用户按按钮开始录音 → MediaRecorder 推 WebM 音频帧
-  → 本 handler 实时解码 + 送 FunASR 流式识别 → 实时推送 asr 文本给前端
-  → 用户松手 / 超时 → 前端请求 /api/v1/interviews/extract 提取字段 → 自动填表
+  ws 连接（需 bearer.<jwt> 子协议，鉴权失败立即拒握）→ 用户按按钮开始录音
+  → MediaRecorder 推 WebM 音频帧 → 本 handler 实时解码 + 送 FunASR 流式识别
+  → 实时推送 asr 文本给前端 → 用户松手 / 超时
+  → 前端请求 /api/v1/interviews/extract 提取字段 → 自动填表
 
 生命周期与 session 无关：连接即用，断开即释放。
 """
@@ -38,16 +39,18 @@ class ASRHandler:
         self._max_timer: Optional[asyncio.Task] = None
 
     async def run(self) -> None:
-        # 鉴权在 accept 之前，与 interview WS（handler.py）同一规则：token 只认
-        # 子协议 bearer.<jwt>，缺失/无效直接拒绝握手（uvicorn 回 HTTP 403），
-        # 未认证连接进不了 WS 层，也就建不起上游 ASR 流、起不了 WebM 解码器。
+        # 鉴权在 accept 之前：token 只认子协议 bearer.<jwt>，校验失败即拒握。
         token = token_from_subprotocols(self.ws.scope.get("subprotocols"))
         try:
             await extract_auth(token)
         except AuthError as e:
             # accept 之前 close = 拒绝握手：uvicorn 回 HTTP 403，浏览器 onclose code=1006。
+            peer = self.ws.scope.get("client")
             await self.ws.close()
-            logger.info("ASR WS 握手被拒（鉴权失败）：%s", e)
+            logger.info(
+                "ASR WS 握手被拒（鉴权失败）：peer=%s 原因=%s",
+                f"{peer[0]}:{peer[1]}" if peer else "?", e,
+            )
             return
         try:
             await self.ws.accept(subprotocol="bearer." + token)

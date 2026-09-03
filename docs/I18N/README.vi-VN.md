@@ -43,8 +43,9 @@ Sau đó mở trình duyệt, vào [https://localhost:8848](https://localhost:88
 
 Vào trong thì bấm "Đăng ký" để tạo tài khoản. **Người đăng ký đầu tiên sẽ làm admin**, quản lý mọi thứ.
 
-Việc đầu tiên sau khi đăng nhập: nhập khóa API của mô hình AI vào "Cấu hình hệ thống → LLM" (hướng dẫn chi tiết ở [Cấu hình LLM](../llm-config.md)). Không nhập thì tạo phỏng vấn sẽ bị từ chối, các tính năng khác vẫn chạy bình thường.
+Phỏng vấn có giọng nói cần cả mô hình AI và nhận dạng giọng nói. Không có khóa AI thì không tạo được phỏng vấn. Không có nhận dạng giọng nói thì không có transcript trực tiếp khi nói chuyện. Có thể chạy chương trình trước rồi cấu hình sau trong "Cấu hình hệ thống":
 
-Nhận dạng giọng nói là tùy chọn—không cấu hình vẫn dùng được, chỉ là không có transcript trực tiếp khi nói chuyện. Sau này muốn dùng thì theo [hướng dẫn cấu hình nhận dạng giọng nói](../asr-config.md).
+- [Cấu hình LLM](../llm-config.md): Aliyun Bailian, DeepSeek, OpenAI, …
+- [Cấu hình nhận dạng giọng nói](../asr-config.md): Doubao streaming API (trả phí) hoặc FunASR local (miễn phí)
 
 Đầy đủ tài liệu ở [đây](../index.md). Muốn phát triển local (không dùng Docker) xem [hướng dẫn phát triển local](../local-development.md).

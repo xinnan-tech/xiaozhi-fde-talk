@@ -43,8 +43,9 @@ Then open your browser and go to [https://localhost:8848](https://localhost:8848
 
 Inside, click "Register" to create your account. **The first registered user becomes the admin** and can manage everything.
 
-First thing after logging in: fill in your AI model's API key under "System Configuration → LLM" (full steps in [LLM config](../llm-config.md)). Without it, creating interviews will be rejected, but everything else works.
+Voice interviews need both the AI model and voice recognition. Without the AI key, interview creation is rejected. Without voice recognition, there is no live transcript during the interview. You can start the program first and configure both later under "System Configuration":
 
-Voice recognition is optional—you can skip it and the app still works. You just won't see live transcripts when someone talks. Set it up later via [voice recognition config](../asr-config.md).
+- [LLM config](../llm-config.md): Aliyun Bailian, DeepSeek, OpenAI, etc.
+- [Voice recognition config](../asr-config.md): Doubao streaming API (paid) or local FunASR (free)
 
 Full docs are [here](../index.md). For local development without Docker, see [local dev docs](../local-development.md).

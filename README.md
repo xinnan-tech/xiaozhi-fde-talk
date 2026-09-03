@@ -43,8 +43,9 @@ docker compose up -d app
 
 进去后点「去注册」建账号。**第一个注册的就是管理员**，能管所有事。
 
-登录后第一件事：把 AI 大模型的密钥填进「系统配置 → LLM」（[详细步骤](docs/llm-config.md)）。不填的话，创建访谈会被拒，其它功能没问题。
+跑访谈需要 AI 大模型和语音识别——不配 LLM 创建访谈会被拒，不配 ASR 访谈里说话没转写。可以先把程序跑起来，再慢慢在「系统配置」里填：
 
-语音识别可以先不管——不填也能用，只是访谈里说话时没有实时转写。想用再按 [语音识别配置](docs/asr-config.md) 来。
+- [AI 大模型配置](docs/llm-config.md)：阿里云百炼 / DeepSeek / OpenAI 等
+- [语音识别配置](docs/asr-config.md)：豆包流式 API（按量付费）或本地 FunASR（免费）
 
 完整文档看 [这里](docs/index.md)。想本地开发（不用 Docker）看 [本地开发文档](docs/local-development.md)。

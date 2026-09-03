@@ -1689,7 +1689,6 @@ onMounted(() => {
   padding: 38px 16px 24px;
   background: url("@/assets/images/bg.webp") no-repeat;
   background-size: cover;
-  overflow: hidden;
 }
 
 .interview-page {

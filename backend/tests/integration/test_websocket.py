@@ -53,7 +53,7 @@ async def test_ws_bad_token(client, login, create_session):
     sid = await create_session(client, token)
     uri = f"{WS_BASE}/ws/v1/interview/{sid}"
     for subprotocols in (["bearer.bad.token"], []):
-        with pytest.raises(websockets.exceptions.InvalidStatus):
+        with pytest.raises(websockets.InvalidStatus):
             async with websockets.connect(uri, subprotocols=subprotocols):
                 pass
 
@@ -62,7 +62,7 @@ async def test_ws_token_in_hello_body_rejected(client, login, create_session):
     """token 只认子协议：放在 hello 消息体里不生效，握手照样被拒。"""
     token = await login(client)
     sid = await create_session(client, token)
-    with pytest.raises(websockets.exceptions.InvalidStatus):
+    with pytest.raises(websockets.InvalidStatus):
         async with websockets.connect(f"{WS_BASE}/ws/v1/interview/{sid}") as ws:
             await ws.send(json.dumps({"type": "hello", "token": f"Bearer {token}"}))
 
@@ -73,7 +73,7 @@ async def test_ws_asr_bad_token():
     回归：/ws/v1/asr 曾完全无鉴权，匿名连接可白用上游 ASR（计费/算力）。
     """
     for subprotocols in (["bearer.bad.token"], []):
-        with pytest.raises(websockets.exceptions.InvalidStatus):
+        with pytest.raises(websockets.InvalidStatus):
             async with websockets.connect(f"{WS_BASE}/ws/v1/asr", subprotocols=subprotocols):
                 pass
 

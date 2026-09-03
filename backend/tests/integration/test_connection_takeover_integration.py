@@ -27,7 +27,7 @@ async def _recv_type(ws, want: str, timeout: float = 6.0) -> bool:
             msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=timeout))
             if msg.get("type") == want:
                 return True
-    except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+    except (asyncio.TimeoutError, websockets.ConnectionClosed):
         return False
     return False
 

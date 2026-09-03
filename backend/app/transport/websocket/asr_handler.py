@@ -17,6 +17,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from app.adapters.asr.audio_decode import WebMDecoder
 from app.adapters.asr.factory import create_asr_provider
+from app.core.exceptions import AuthError
+from app.transport.base import extract_auth, token_from_subprotocols
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +38,19 @@ class ASRHandler:
         self._max_timer: Optional[asyncio.Task] = None
 
     async def run(self) -> None:
+        # 鉴权在 accept 之前，与 interview WS（handler.py）同一规则：token 只认
+        # 子协议 bearer.<jwt>，缺失/无效直接拒绝握手（uvicorn 回 HTTP 403），
+        # 未认证连接进不了 WS 层，也就建不起上游 ASR 流、起不了 WebM 解码器。
+        token = token_from_subprotocols(self.ws.scope.get("subprotocols"))
         try:
-            await self.ws.accept()
+            await extract_auth(token)
+        except AuthError as e:
+            # accept 之前 close = 拒绝握手：uvicorn 回 HTTP 403，浏览器 onclose code=1006。
+            await self.ws.close()
+            logger.info("ASR WS 握手被拒（鉴权失败）：%s", e)
+            return
+        try:
+            await self.ws.accept(subprotocol="bearer." + token)
             await self._loop()
         except WebSocketDisconnect:
             pass

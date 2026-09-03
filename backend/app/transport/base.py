@@ -17,6 +17,17 @@ from app.services.auth.token import decode_token
 
 # ─────────────── 协议无关鉴权 ───────────────
 
+def token_from_subprotocols(subprotocols: Optional[list[str]]) -> Optional[str]:
+    """从 Sec-WebSocket-Protocol 列表里挑出 bearer.<token>，无则 None。
+
+    interview WS 与 ASR WS 共用：token 只认子协议，accept 之前校验。
+    """
+    for sp in subprotocols or []:
+        if sp.startswith("bearer."):
+            return sp[len("bearer."):]
+    return None
+
+
 async def extract_auth(raw_token: Optional[str]) -> CurrentUser:
     """解析 `Bearer xxx` 或裸 token，比对 DB password_changed_at，返回当前用户。
 

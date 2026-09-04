@@ -248,3 +248,14 @@ div:focus {
     content: " ";
   }
 }
+
+html,
+body,
+button,
+a,
+input,
+textarea,
+select,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}

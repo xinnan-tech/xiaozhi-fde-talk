@@ -426,3 +426,179 @@ def test_sanitize_loaded_values_reverts_numeric_nan():
 
     sanitized = _sanitize_loaded_values({"coach.pause_s": "nan"})
     assert sanitized["coach.pause_s"] == DEFAULTS["coach.pause_s"]
+
+
+# ---- 豆包 ASR 1.0 → 2.0 协议升级迁移 ----
+#
+# PR #224 引入 API Key 协议升级，老 DB 里 appid + access_token 双字段被
+# api_key 单字段取代。_sanitize_loaded_values 必须把这些行迁移到 2.0 形态，
+# 否则 warm() 后 cache miss → doubao_stream.py:103 抛 "api_key 未配置"，
+# 升级用户 100% 失败。
+
+
+def test_sanitize_migrates_doubao_1_0_access_token_when_appid_present():
+    """老 DB 行 appid + access_token 都非空、api_key 为空 → access_token 复制到 api_key。
+
+    旧 key 同步从返回 dict 里 pop，warm() 据此 DELETE DB 行避免死数据堆积。
+    """
+    from app.core.config_store import _sanitize_loaded_values
+
+    loaded = {
+        "asr.doubao_stream.appid": "old-appid-123",
+        "asr.doubao_stream.access_token": "old-token-456",
+        "asr.doubao_stream.api_key": "",
+    }
+    sanitized = _sanitize_loaded_values(loaded)
+    assert sanitized["asr.doubao_stream.api_key"] == "old-token-456"
+    assert "asr.doubao_stream.appid" not in sanitized
+    assert "asr.doubao_stream.access_token" not in sanitized
+
+
+def test_sanitize_skips_migration_when_api_key_already_present():
+    """admin 已经手动填了 2.0 api_key → 不覆盖、warn 不发；旧 key 仍删（已是死字段）。"""
+    from app.core.config_store import _sanitize_loaded_values
+
+    loaded = {
+        "asr.doubao_stream.appid": "stale-appid",
+        "asr.doubao_stream.access_token": "stale-token",
+        "asr.doubao_stream.api_key": "ak-new",
+    }
+    sanitized = _sanitize_loaded_values(loaded)
+    assert sanitized["asr.doubao_stream.api_key"] == "ak-new"
+    assert "asr.doubao_stream.appid" not in sanitized
+    assert "asr.doubao_stream.access_token" not in sanitized
+
+
+def test_sanitize_skips_migration_when_appid_missing():
+    """只有 access_token 没 appid → 半坏配置，不迁移避免继承坏值。
+
+    1.0 协议要两者都填，缺一即坏配置；admin 调试时看到原值更易定位。
+    旧 key 仍删（已不在 ALL_B_KEYS）。
+    """
+    from app.core.config_store import _sanitize_loaded_values
+
+    loaded = {
+        "asr.doubao_stream.access_token": "orphan-token",
+        # appid 缺
+        "asr.doubao_stream.api_key": "",
+    }
+    sanitized = _sanitize_loaded_values(loaded)
+    # 没迁移：api_key 仍是空
+    assert sanitized["asr.doubao_stream.api_key"] == ""
+    assert "asr.doubao_stream.access_token" not in sanitized
+
+
+def test_sanitize_skips_migration_when_access_token_empty():
+    """access_token 空、appid 非空：同样属半坏配置，不迁移。"""
+    from app.core.config_store import _sanitize_loaded_values
+
+    loaded = {
+        "asr.doubao_stream.appid": "old-appid",
+        "asr.doubao_stream.access_token": "",
+        "asr.doubao_stream.api_key": "",
+    }
+    sanitized = _sanitize_loaded_values(loaded)
+    assert sanitized["asr.doubao_stream.api_key"] == ""
+    assert "asr.doubao_stream.appid" not in sanitized
+
+
+def test_sanitize_upgrades_legacy_resource_id_to_2_0_default():
+    """DB resource_id == 1.0 默认值（用户没手动改过）→ 自动升级到 2.0 默认值。"""
+    from app.core.config_store import (
+        DEFAULTS, LEGACY_DOUBAO_1_0_RESOURCE_ID, _sanitize_loaded_values,
+    )
+
+    loaded = {"asr.doubao_stream.resource_id": LEGACY_DOUBAO_1_0_RESOURCE_ID}
+    sanitized = _sanitize_loaded_values(loaded)
+    assert sanitized["asr.doubao_stream.resource_id"] == DEFAULTS[
+        "asr.doubao_stream.resource_id"
+    ]
+    assert sanitized["asr.doubao_stream.resource_id"] == "volc.seedasr.sauc.duration"
+
+
+def test_sanitize_does_not_overwrite_custom_resource_id():
+    """DB resource_id 是非默认自定义值（用户手动配过的 1.0 特殊值或别的）→ 不动。"""
+    from app.core.config_store import _sanitize_loaded_values
+
+    loaded = {"asr.doubao_stream.resource_id": "volc.custom.something"}
+    sanitized = _sanitize_loaded_values(loaded)
+    assert sanitized["asr.doubao_stream.resource_id"] == "volc.custom.something"
+
+
+def test_sanitize_does_not_overwrite_already_2_0_default():
+    """DB resource_id 已是 2.0 默认值 → 不动。"""
+    from app.core.config_store import DEFAULTS, _sanitize_loaded_values
+
+    loaded = {"asr.doubao_stream.resource_id": DEFAULTS["asr.doubao_stream.resource_id"]}
+    sanitized = _sanitize_loaded_values(loaded)
+    assert sanitized["asr.doubao_stream.resource_id"] == "volc.seedasr.sauc.duration"
+
+
+def test_sanitize_legacy_migration_logs_warning(store, caplog):
+    """迁移时必须 warn，让 admin 看到 1.0 旧配置已自动迁移。"""
+    import logging
+    from app.core.config_store import _sanitize_loaded_values
+
+    loaded = {
+        "asr.doubao_stream.appid": "old-appid",
+        "asr.doubao_stream.access_token": "old-token",
+        "asr.doubao_stream.resource_id": "volc.bigasr.sauc.duration",
+    }
+    with caplog.at_level(logging.WARNING, logger="app.core.config_store"):
+        _sanitize_loaded_values(loaded)
+    # 凭证迁移 + resource_id 升级两条 warn
+    cred_warned = any("豆包 ASR 1.0 凭证" in r.message for r in caplog.records)
+    rid_warned = any("豆包 ASR 1.0 resource_id" in r.message for r in caplog.records)
+    assert cred_warned, "凭证迁移缺少 warn"
+    assert rid_warned, "resource_id 升级缺少 warn"
+
+
+async def test_warm_runs_migration_end_to_end(store, monkeypatch):
+    """端到端：老 DB 行（appid + access_token + 1.0 resource_id）→ warm() 后 cache
+    含 api_key（值=原 access_token）、resource_id 已升级，旧 key 从 cache 消失。
+    """
+    # 模拟老 DB：有 appid/access_token 旧行、resource_id 是 1.0 默认值、其余 DEFAULTS 全有
+    legacy_rows = list(DEFAULTS.items())
+    legacy_rows = [
+        ("asr.doubao_stream.appid", "old-appid-999"),
+        ("asr.doubao_stream.access_token", "old-token-999"),
+        ("asr.doubao_stream.resource_id", "volc.bigasr.sauc.duration"),  # 1.0 默认
+    ] + [(k, v) for k, v in legacy_rows if not k.startswith("asr.doubao_stream.")]
+
+    session = _make_session_with_rows(legacy_rows)
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    monkeypatch.setattr("app.core.config_store.SessionLocal", lambda: session)
+
+    await store.warm()
+
+    # 凭证已迁移到 api_key
+    assert store._cache["asr.doubao_stream.api_key"] == "old-token-999"
+    # resource_id 已升级到 2.0 默认
+    assert store._cache["asr.doubao_stream.resource_id"] == "volc.seedasr.sauc.duration"
+    # 旧 key 从 cache 消失
+    assert "asr.doubao_stream.appid" not in store._cache
+    assert "asr.doubao_stream.access_token" not in store._cache
+
+
+async def test_warm_keeps_existing_valid_values_after_migration(store, monkeypatch):
+    """迁移不应影响其他合法 key——只动 legacy 行涉及的那几个。"""
+    # 标准 DEFAULTS + 一条 legacy 行
+    rows = list(DEFAULTS.items()) + [
+        ("asr.doubao_stream.appid", "old-appid"),
+        ("asr.doubao_stream.access_token", "old-token"),
+    ]
+    session = _make_session_with_rows(rows)
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    monkeypatch.setattr("app.core.config_store.SessionLocal", lambda: session)
+
+    await store.warm()
+
+    # 其他 DEFAULTS 全部保留
+    assert store._cache["llm.type"] == "openai"
+    assert store._cache["asr.funasr_server.language"] == "zh"
+    assert store._cache["session.grace_period_s"] == "60.0"
+    # 豆包迁移正常
+    assert store._cache["asr.doubao_stream.api_key"] == "old-token"
+    assert "asr.doubao_stream.appid" not in store._cache

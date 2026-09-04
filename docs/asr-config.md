@@ -67,6 +67,7 @@ docker compose logs -f funasr
 | `sample_rate` | `16000` |
 | `api_key` | 控制台创建的 API Key |
 | `resource_id` | 默认 `volc.seedasr.sauc.duration`（豆包 ASR 2.0 小时版）；并发版填写 `volc.seedasr.sauc.concurrent` |
+| `codec` | `raw`（2.0 协议必填，漏填或填错会导致握手失败） |
 | `enable_multilingual` | `false`（除非确认要开多语种识别）|
 
 > `api_key` 用于 API Key 鉴权。漏填或填错会导致 WebSocket 握手失败。
@@ -81,4 +82,5 @@ docker compose logs -f funasr
 2. 常见红字原因：
    - `api_key` 填错（注意大小写、别带空格）
    - `resource_id` 与已开通的小时版/并发版资源不匹配
+   - `codec` 未配或填错（2.0 协议必须 `raw`，否则握手失败）
    - 账户欠费（先看 [火山引擎账户中心](https://console.volcengine.com/user/basic-information/)）

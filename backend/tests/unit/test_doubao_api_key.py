@@ -1,11 +1,13 @@
 """Doubao Seed ASR 2.0 API-Key protocol contract."""
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
-def _provider():
+def _provider(api_key: str = "ak-test"):
     store = MagicMock()
     values = {
-        "asr.doubao_stream.api_key": "ak-test",
+        "asr.doubao_stream.api_key": api_key,
         "asr.doubao_stream.resource_id": "volc.seedasr.sauc.duration",
         "asr.doubao_stream.enable_multilingual": "false",
     }
@@ -35,3 +37,16 @@ def test_doubao_init_payload_does_not_use_legacy_token():
     assert payload["request"]["end_window_size"] == 800
     assert payload["audio"]["codec"] == "raw"
     assert "app" not in payload
+
+
+@pytest.mark.asyncio
+async def test_doubao_start_stream_raises_when_api_key_missing():
+    """P2-4: cache miss / DB 空 api_key 时 start_stream 必须 fail-fast 抛
+    ValueError，避免后续 websockets.connect 用空 key 走到服务端再被 401 拒。
+
+    provider.__init__ 已把 _api_key 兜底成 ""（cache miss + or ""），
+    start_stream 必须显式校验并抛带「api_key 未配置」字样的 ValueError。
+    """
+    provider = _provider(api_key="")
+    with pytest.raises(ValueError, match="api_key 未配置"):
+        await provider.start_stream(on_utterance=AsyncMock())

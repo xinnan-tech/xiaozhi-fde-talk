@@ -35,7 +35,7 @@ ALL_B_KEYS: list[str] = [
     "asr.funasr_server.ws_url", "asr.funasr_server.ws_verify_ssl",
     # Doubao Stream
     "asr.doubao_stream.language", "asr.doubao_stream.sample_rate",
-    "asr.doubao_stream.appid", "asr.doubao_stream.access_token",
+    "asr.doubao_stream.api_key",
     "asr.doubao_stream.resource_id", "asr.doubao_stream.enable_multilingual",
     # Coach
     "coach.pause_s", "coach.max_pending_segments", "coach.min_interval_s", "coach.llm_timeout_s",
@@ -54,8 +54,7 @@ SENSITIVE_KEYS: frozenset[str] = frozenset({
     "llm.api_key",
     "ocr.api_key",
     "ocr.secret_key",
-    "asr.doubao_stream.appid",
-    "asr.doubao_stream.access_token",
+    "asr.doubao_stream.api_key",
     "system.jwt_secret",
 })
 
@@ -126,8 +125,7 @@ BOOL_KEYS: frozenset[str] = frozenset({
 
 # 必填鉴权字段：写入侧挡空白，避免首握失败时 admin 误判是服务挂。
 REQUIRED_STRING_KEYS: frozenset[str] = frozenset({
-    "asr.doubao_stream.appid",
-    "asr.doubao_stream.access_token",
+    "asr.doubao_stream.api_key",
 })
 
 
@@ -257,9 +255,8 @@ DEFAULTS: dict[str, str] = {
     # Doubao Stream
     "asr.doubao_stream.language": "zh-CN",
     "asr.doubao_stream.sample_rate": "16000",
-    "asr.doubao_stream.appid": "",
-    "asr.doubao_stream.access_token": "",
-    "asr.doubao_stream.resource_id": "volc.bigasr.sauc.duration",
+    "asr.doubao_stream.api_key": "",
+    "asr.doubao_stream.resource_id": "volc.seedasr.sauc.duration",
     "asr.doubao_stream.enable_multilingual": "false",
     "coach.pause_s": "5.0",
     "coach.max_pending_segments": "8",
@@ -346,7 +343,7 @@ class ConfigStore:
     async def warm(self) -> None:
         """启动期一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入。
 
-        DEFAULTS 中若有空字符串类必填字段（如豆包 appid/access_token 没有合法
+        DEFAULTS 中若有空字符串类必填字段（如豆包 api_key 没有合法
         默认），validate_value 会拒——跳过种入并 warn，让 DB 留空由 admin 通过
         配置页补齐，避免无声写入"无效值"。其他 key 的脏 DEFAULTS（URL / ENUM /
         BOOL / NUMERIC 写错）属配置 bug，必须 fail-fast 抛出——首次启动通道与
@@ -357,6 +354,7 @@ class ConfigStore:
         并 logger.warning——避免首次 create_llm() 在 factory.py:54 抛 ValueError
         把全站 LLM 调打成 500（get_llm() 是 interviews.py / coaching/engine.py
         等热路径的必经节点）。老数据无需迁移脚本就能收敛。
+
         """
         async with SessionLocal() as session:
             existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
@@ -367,7 +365,7 @@ class ConfigStore:
                 try:
                     validate_value(k, v)
                 except I18nError:
-                    # 必填字段（豆包 appid/access_token 等）DEFAULTS 自身是 "" 无
+                    # 必填字段（豆包 api_key 等）DEFAULTS 自身是 "" 无
                     # 合法回退目标，跳过种入 + warn 让 admin 在配置页补齐；其他 key
                     # 的脏 DEFAULTS（如 URL 写错）属配置 bug，必须 fail-fast 抛出
                     # ——首次启动通道与 admin PUT 通道同等对待。
@@ -380,6 +378,7 @@ class ConfigStore:
                     )
                     continue
                 session.add(SystemConfig(key=k, value=v))
+
             if missing:
                 await session.commit()
                 logger.info("ConfigStore 种入 %d 个默认 key", len(missing))
@@ -478,8 +477,8 @@ class ConfigStore:
             for key, value in items.items():
                 if key not in ALL_B_KEYS:
                     raise ValueError(f"unknown config key: {key}")
-                # 敏感字段空值跳过：仅当缓存里已有非空值时跳过（保留旧 token，
-                # 防 admin 表单"看似保存"实则没改）。access_token 同时属于
+                # 敏感字段空值跳过：仅当缓存里已有非空值时跳过（保留旧 API Key，
+                # 防 admin 表单"看似保存"实则没改）。api_key 同时属于
                 # REQUIRED_STRING_KEYS，若缓存值已为空必须走 validate_value 拦
                 # 下空提交，否则首握失败时 admin 看不出是"忘了填"还是"服务挂"。
                 if (

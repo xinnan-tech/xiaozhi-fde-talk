@@ -54,6 +54,19 @@ def test_echo_content_block_prefix_is_escaped():
         assert art.content == f"### T\n\n{expected}"
 
 
+def test_echo_content_hr_escaped():
+    """三种水平分隔线输入都应作为普通文本输出。"""
+    for content in ("---", "***", "___"):
+        art = _run(_echo({"title": "T", "content": content}))
+        assert art.content.splitlines()[-1] == f"\\{content}"
+
+
+def test_echo_content_tab_collapsed():
+    """制表符不能在回显内容开头触发代码块。"""
+    art = _run(_echo({"title": "T", "content": "\tcode"}))
+    assert art.content == "### T\n\n code"
+
+
 def test_echo_defaults_when_missing():
     art = _run(_echo({}))
     assert art.content == "### Skill 输出\n\n（无输入内容）"
@@ -85,6 +98,12 @@ def test_text_card_title_newline_collapsed():
     art = _run(_text_card({"title": "X\nY", "body": "b"}))
     # title 折成单行
     assert art.content.startswith("> X Y\n")
+
+
+def test_text_card_title_strip_leading_hashes():
+    """引用块标题的前导井号不能生成嵌套标题。"""
+    art = _run(_text_card({"title": "### Pwned", "body": "x"}))
+    assert art.content.startswith("> Pwned\n")
 
 
 def test_text_card_defaults():
@@ -198,6 +217,16 @@ def test_markdown_table_columns_escaped():
     }))
     # 'a|b' → 'a\|b'；None → ''
     assert art.content.startswith("### T\n\n| a\\|b |  |\n| --- | --- |\n| x | y |")
+
+
+def test_markdown_table_title_strip_leading_hashes():
+    """表格标题的前导井号不能改变外层标题级别。"""
+    art = _run(_markdown_table({
+        "title": "### Pwned",
+        "columns": ["a"],
+        "rows": [["x"]],
+    }))
+    assert art.content.startswith("### Pwned\n")
 
 
 def test_markdown_table_backslash_escaped_first():

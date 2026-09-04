@@ -13,7 +13,17 @@ from app.services.skill.registry import SkillArtifact, SkillDefinition, register
 def _sanitize_inline(text: str) -> str:
     """单行 inline 上下文（标题 / 引用块首行 / 表头）用：折掉所有换行 / 回车成单行空格。"""
     # 统一换行符后再折叠，避免 CRLF / LF / CR 三种情况漏掉
-    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+    return (
+        text.replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\n", " ")
+        .replace("\t", " ")
+    )
+
+
+def _sanitize_heading_title(text: str, default: str) -> str:
+    """清理标题输入，避免输入的井号升级外层 Markdown 标题级别。"""
+    return _sanitize_inline(text).lstrip("#").lstrip() or default
 
 
 def _sanitize_inline_content(text: str) -> str:
@@ -27,7 +37,7 @@ def _sanitize_inline_content(text: str) -> str:
     text = re.sub(r"^( {0,3})([-+*])(?=\s|$)", r"\1\\\2", text)
     text = re.sub(r"^( {0,3})(\d+)([.)])(?=\s|$)", r"\1\2\\\3", text)
     # 单独的横线、星号或下划线序列会被解析为水平分隔线。
-    text = re.sub(r"^( {0,3})(?=(?:---+|\*\*\*+|___+)\s*$)([-*_])", r"\1\\\3", text)
+    text = re.sub(r"^( {0,3})(?=(?:---+|\*\*\*+|___+)\s*$)([-*_])", r"\1\\\2", text)
     return text
 
 
@@ -53,9 +63,7 @@ def _sanitize_table_cell(value) -> str:
 
 
 async def _echo(inputs: dict) -> SkillArtifact:
-    title = _sanitize_inline(str(inputs.get("title") or "Skill 输出"))
-    # 防级别提升：开头若有 '#'，把 '### title' 顶到更高级别甚至脱离标题上下文
-    title = title.lstrip("#").lstrip() or "Skill 输出"
+    title = _sanitize_heading_title(str(inputs.get("title") or "Skill 输出"), "Skill 输出")
     content = _sanitize_inline_content(
         str(inputs.get("content") or inputs.get("text") or "（无输入内容）")
     )
@@ -64,7 +72,7 @@ async def _echo(inputs: dict) -> SkillArtifact:
 
 
 async def _text_card(inputs: dict) -> SkillArtifact:
-    title = _sanitize_inline(str(inputs.get("title") or "补充信息"))
+    title = _sanitize_heading_title(str(inputs.get("title") or "补充信息"), "补充信息")
     body = str(inputs.get("body") or inputs.get("content") or "本节暂无可展示内容。")
     # body 中含空行 / 换行时，每行都要带 '> ' 前缀才能留在 blockquote 里
     body_block = _sanitize_blockquote_text(body)
@@ -73,7 +81,7 @@ async def _text_card(inputs: dict) -> SkillArtifact:
 
 
 async def _markdown_table(inputs: dict) -> SkillArtifact:
-    title = _sanitize_inline(str(inputs.get("title") or "表格"))
+    title = _sanitize_heading_title(str(inputs.get("title") or "表格"), "表格")
     columns = inputs.get("columns") or ["项目", "内容"]
     rows = inputs.get("rows") or []
     if not isinstance(columns, list) or not columns:

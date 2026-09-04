@@ -1193,8 +1193,8 @@ watch(locale, () => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100%;
-  min-height: 0;
+  height: auto;
+  min-height: 100%;
   padding: 0 8px 0 16px;
   overflow: visible;
   container-type: inline-size;
@@ -1210,7 +1210,7 @@ watch(locale, () => {
 
   &-body {
     display: flex;
-    flex: 1;
+    flex: 0 0 auto;
     min-height: 0;
   }
 
@@ -1426,6 +1426,7 @@ watch(locale, () => {
       min-height: 0;
 
       :deep(.el-scrollbar__wrap) {
+        height: auto;
         overflow: visible;
       }
 

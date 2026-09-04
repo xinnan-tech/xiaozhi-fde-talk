@@ -33,16 +33,6 @@ async def test_diagnose_asr_short_circuits_on_missing_ws_url():
 
 
 @pytest.mark.asyncio
-async def test_diagnose_asr_doubao_short_circuits_on_missing_credentials():
-    """豆包流式无 ws_url 字段，靠 api_key 判定。"""
-    with patch.object(diagnostics, "get_config_store") as gcs:
-        store = {"asr.type": "doubao_stream", "asr.doubao_stream.api_key": ""}
-        gcs.return_value.get_sync = lambda key, default=None: store.get(key, default)
-        res = await diagnostics.diagnose_asr()
-    assert res["code"] == "config_missing"
-
-
-@pytest.mark.asyncio
 async def test_diagnose_asr_doubao_short_circuits_on_missing_api_key():
     """豆包流式缺 API Key → 返 config_missing。"""
     with patch.object(diagnostics, "get_config_store") as gcs:

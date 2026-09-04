@@ -1,4 +1,5 @@
 """Doubao Seed ASR 2.0 API-Key protocol contract."""
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -24,7 +25,9 @@ def test_doubao_uses_api_key_headers_and_seed_resource():
 
     assert headers["X-Api-Key"] == "ak-test"
     assert headers["X-Api-Resource-Id"] == "volc.seedasr.sauc.duration"
-    assert headers["X-Api-Request-Id"]
+    # X-Api-Request-Id 必须是合法 UUID 格式（服务端用它幂等去重）；str(uuid.uuid4())
+    # 永远非空，原来的 `assert headers["X-Api-Request-Id"]` 是空断言。
+    uuid.UUID(headers["X-Api-Request-Id"])
     assert "X-Api-App-Key" not in headers
     assert "X-Api-Access-Key" not in headers
 

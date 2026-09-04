@@ -18,13 +18,14 @@
 """
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from app.adapters.llm.base import LLMContextOverflowError
-from app.adapters.llm.openai_compatible import _is_context_overflow
+from app.adapters.llm.openai_compatible import OpenAILLMProvider, _is_context_overflow
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.domain.auth import CurrentUser
@@ -90,6 +91,27 @@ def test_is_context_overflow_positive(body: str):
 ])
 def test_is_context_overflow_negative(body: str):
     assert _is_context_overflow(body) is False, body
+
+
+@pytest.mark.asyncio
+async def test_adapter_maps_context_overflow_after_response_prefix_to_422():
+    """Adapter must inspect the complete 4xx body before truncating diagnostics."""
+    provider = OpenAILLMProvider(
+        base_url="https://example.com",
+        api_key="test-key",
+        model="test-model",
+        llm_timeout_s=10.0,
+    )
+    response = MagicMock(spec=httpx.Response)
+    response.status_code = 400
+    response.text = "x" * 240 + '{"error":{"code":"context_length_exceeded"}}'
+    provider._client.post = AsyncMock(return_value=response)
+
+    with pytest.raises(LLMContextOverflowError) as ei:
+        await provider._request({"model": "test-model"}, retries=0)
+
+    assert ei.value.http_status == 422
+    assert ei.value.params["status"] == 400
 
 
 # ---------- 端到端：HTTP 422 + locale 文案 ----------

@@ -545,12 +545,11 @@ async def extract_fields(
             else:
                 values[k] = req.current_values.get(k, "")
         logger.info(f"[extract] 合并后 values: {values}")
-    except LLMContextOverflowError:
-        # context overflow 是客户端问题（输入太长），必须让前端看到 422 而不是
-        # 当成「LLM 抽不出来」静默吞掉——否则用户会一直重试同一条长 transcript
-        # 而无解（issue #207）。本身已是 I18nError（422），直接 re-raise。
-        raise
-    except LLMError:
+    except LLMError as e:
+        # LLMContextOverflowError 是 LLMError（I18nError）的子类。显式判断，
+        # 避免未来调整 except 顺序时把 422 重新吞成 200 + current_values。
+        if isinstance(e, LLMContextOverflowError):
+            raise
         # 其他 LLM 错误（鉴权失败 / 服务挂 / JSON 解析失败）→ 保留当前值
         values = dict(req.current_values)
 

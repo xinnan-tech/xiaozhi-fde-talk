@@ -156,17 +156,20 @@ class OpenAILLMProvider(LLMProvider):
                         return content
                 # 4xx（除 408/429）：不可重试
                 if 400 <= status < 500 and status not in (408, 429):
-                    body_text = resp.text[:200]
-                    if _is_context_overflow(body_text):
+                    # 先用完整响应体分类，再截断仅用于异常参数。供应商可能把
+                    # error.code 放在较长响应体的 200 字符之后；若先截断，
+                    # /extract 路由会把 overflow 误判成普通 LLMError 并静默 fallback。
+                    response_body = resp.text
+                    if _is_context_overflow(response_body):
                         # context overflow 是客户端问题（输入太长）而非服务故障，
                         # 4xx → 422 + i18n 提示，避免被上层路由层 except LLMError
                         # 当作「LLM 抽不出来」静默吞掉（issue #207）。
                         raise LLMContextOverflowError(
-                            status=status, snippet=body_text,
+                            status=status, snippet=response_body[:200],
                         )
                     raise LLMError(
                         Keys.LLM_NON_RETRYABLE, http_status=502,
-                        status=status, body=body_text,
+                        status=status, body=response_body[:200],
                     )
                 # 5xx / 429 / 408：可重试
                 last_err = f"HTTP {status}: {resp.text[:200]}"

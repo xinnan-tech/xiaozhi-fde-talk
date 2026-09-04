@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.config_store import get_config_store
 from app.core.i18n import Keys, current_locale, t
-from app.core.i18n.errors import I18nError
+from app.core.i18n.errors import I18nError, LLMContextOverflowError
 from app.core.i18n.extract_prompts import build_extract_system
 from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.domain.auth import CurrentUser
@@ -483,7 +483,15 @@ async def extract_fields(
     req: ExtractRequest,
     _: CurrentUser = Depends(get_current_user),
 ):
-    """接收转写文本 + 目标字段列表 → LLM 提取 → 返回字段值字典。"""
+    """接收转写文本 + 目标字段列表 → LLM 提取 → 返回字段值字典。
+
+    错误响应：
+    - transcript > 200k 字符 → 422（schema `max_length`，issue #207）
+    - LLM context overflow（输入超出模型上限）→ 422（LLMContextOverflowError），
+      让前端能区分「请缩短 transcript」与「重试」
+    - 其他 LLM 错误（鉴权 / 服务挂 / JSON 解析失败）→ 保留 current_values，
+      不暴露服务端细节
+    """
     from app.adapters.llm.base import LLMError
     from app.adapters.llm.factory import get_llm
 
@@ -537,8 +545,13 @@ async def extract_fields(
             else:
                 values[k] = req.current_values.get(k, "")
         logger.info(f"[extract] 合并后 values: {values}")
+    except LLMContextOverflowError:
+        # context overflow 是客户端问题（输入太长），必须让前端看到 422 而不是
+        # 当成「LLM 抽不出来」静默吞掉——否则用户会一直重试同一条长 transcript
+        # 而无解（issue #207）。本身已是 I18nError（422），直接 re-raise。
+        raise
     except LLMError:
-        # LLM 失败时保留当前值
+        # 其他 LLM 错误（鉴权失败 / 服务挂 / JSON 解析失败）→ 保留当前值
         values = dict(req.current_values)
 
     return ExtractResponse(values=values)

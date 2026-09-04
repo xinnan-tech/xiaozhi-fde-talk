@@ -85,6 +85,7 @@ class Keys(StrEnum):
     LLM_INVALID_JSON = "llm.invalid_json"
     LLM_SCHEMA_MISMATCH = "llm.schema_mismatch"
     LLM_TIMEOUT = "llm.timeout"
+    LLM_CONTEXT_OVERFLOW = "llm.context_overflow"
 
     # ---- ASR adapter ----
     ASR_URL_NOT_CONFIGURED = "asr.url_not_configured"

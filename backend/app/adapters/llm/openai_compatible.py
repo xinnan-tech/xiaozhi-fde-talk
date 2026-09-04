@@ -21,7 +21,7 @@ import httpx
 from pydantic import BaseModel
 
 from app.adapters.llm.base import LLMProvider
-from app.core.i18n.errors import I18nError
+from app.core.i18n.errors import I18nError, LLMContextOverflowError
 from app.core.i18n.messages import Keys
 from app.core.retry import BackoffPolicy
 
@@ -48,6 +48,28 @@ _THINKING_DISABLED_DOMAINS: dict[str, dict[str, Any]] = {
 # chat_json 输出上限：辅导清单合法输出实测 509-833 token，取 1.8 倍余量；
 # 失控复读时在 1500 处截断 → 抛 LLMError（引擎保留旧清单、限频续算），而不是耗满 read 超时。
 _JSON_MAX_TOKENS = 1500
+
+# OpenAI 兼容平台在 input 超过 context window 时 4xx 的常见 body 片段：
+# - OpenAI / Doubao / DeepSeek：{"error":{"code":"context_length_exceeded",...}} 或
+#   "This model's maximum context length is N tokens..."
+# - DashScope（qwen / 通义）："Range of input length should be [1, N] (M > N)"
+# - 部分国内平台："context length is too long"
+# 不命中任一标记就走通用 NON_RETRYABLE（502）；命中则 422 LLMContextOverflowError，
+# 让调用方区分「请缩短输入」与「服务故障」（issue #207）。
+_CONTEXT_OVERFLOW_MARKERS = (
+    "context_length_exceeded",
+    "maximum context length",
+    "Range of input length",
+    "context length is too long",
+)
+
+
+def _is_context_overflow(body: str) -> bool:
+    """LLM 4xx 响应体里命中 context overflow 标记 → 视作客户端输入过大。"""
+    if not body:
+        return False
+    lower = body.lower()
+    return any(m.lower() in lower for m in _CONTEXT_OVERFLOW_MARKERS)
 
 
 class OpenAILLMProvider(LLMProvider):
@@ -134,9 +156,17 @@ class OpenAILLMProvider(LLMProvider):
                         return content
                 # 4xx（除 408/429）：不可重试
                 if 400 <= status < 500 and status not in (408, 429):
+                    body_text = resp.text[:200]
+                    if _is_context_overflow(body_text):
+                        # context overflow 是客户端问题（输入太长）而非服务故障，
+                        # 4xx → 422 + i18n 提示，避免被上层路由层 except LLMError
+                        # 当作「LLM 抽不出来」静默吞掉（issue #207）。
+                        raise LLMContextOverflowError(
+                            status=status, snippet=body_text,
+                        )
                     raise LLMError(
                         Keys.LLM_NON_RETRYABLE, http_status=502,
-                        status=status, body=resp.text[:200],
+                        status=status, body=body_text,
                     )
                 # 5xx / 429 / 408：可重试
                 last_err = f"HTTP {status}: {resp.text[:200]}"

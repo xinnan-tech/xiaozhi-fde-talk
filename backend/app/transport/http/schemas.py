@@ -237,7 +237,7 @@ class ExtractRequest(BaseModel):
     # （template_id 已被字段声明；多余 system_prompt 等会被 Pydantic 拒收）。
     model_config = ConfigDict(extra="forbid")
 
-    transcript: str
+    transcript: str = Field(max_length=200_000)
     template_id: str
     fields: list[str]
     field_labels: dict[str, str] = {}  # key -> label

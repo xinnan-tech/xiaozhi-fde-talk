@@ -62,6 +62,7 @@
   "llm.invalid_json": "LLM returned invalid JSON: {err}; raw: {json_str}",
   "llm.schema_mismatch": "LLM output does not match schema: {err}; raw: {json_str}",
   "llm.timeout": "chat_text timed out (> {budget:.0f}s)",
+  "llm.context_overflow": "transcript exceeds LLM context limit, please shorten and retry (HTTP {status})",
   "asr.url_not_configured": "ASR_WS_URL not configured",
   "asr.connect_fail": "Voice recognition (ASR) connection failed: {ws_url} ({reason}). Please check the WebSocket address under '⚙️ Backend Config' and ensure the ASR service is running.",
   "asr.dead": "ASR connection dropped (funasr dead)",

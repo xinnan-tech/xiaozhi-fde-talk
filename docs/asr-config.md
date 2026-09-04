@@ -53,9 +53,9 @@ docker compose logs -f funasr
 ### 2.1 怎么注册开通
 
 1. 去 [火山引擎控制台](https://console.volcengine.com/)，手机号或抖音账号登录，完成实名认证
-2. 在「豆包语音」点击「开通管理」
-3. 开通「流式识别模型 2.0」服务（新用户通常有免费时长）
-4. 在服务控制台创建 API Key，并确认已开通小时版或并发版资源
+2. 在[豆包语音](https://console.volcengine.com/speech)点击[开通管理](https://console.volcengine.com/speech/new/setting/activate?projectName=default)
+3. 开通「流式语音识别2.0」服务（新用户通常有免费时长），确认开通成功
+4. 在[API Key](https://console.volcengine.com/speech/new/setting/apikeys?projectName=default)创建 API Key
 5. 资源 ID（`resource_id`）使用 `volc.seedasr.sauc.duration`（小时版）或 `volc.seedasr.sauc.concurrent`（并发版）
 
 ### 2.2 字段填什么

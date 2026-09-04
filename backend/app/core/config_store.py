@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Callable, Iterable, Optional
 from urllib.parse import urlparse
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import select
 
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
@@ -280,73 +280,20 @@ DEFAULTS: dict[str, str] = {
 }
 
 
-# 豆包 ASR 1.0 → 2.0 协议升级迁移表。1.0 用 appid + access_token 双字段
-# 鉴权，2.0 改单字段 API Key（X-Api-Key）。warm() / _refresh_cache() 加载
-# 时若同时看到 appid + access_token 都非空且 api_key 为空，把 access_token
-# 复制到 api_key 并删旧行——避免升级用户 DB 后 cache miss → provider 抛
-# "api_key 未配置" 100% 失败。仅迁移同时存在的全配置：缺一即半坏配置，
-# 继承会让 admin 调试更痛苦。
-LEGACY_DOUBAO_1_0_KEYS: dict[str, str] = {
-    "asr.doubao_stream.appid": "asr.doubao_stream.api_key",
-    "asr.doubao_stream.access_token": "asr.doubao_stream.api_key",
-}
-LEGACY_DOUBAO_1_0_RESOURCE_ID = "volc.bigasr.sauc.duration"
-
-
 def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
-    """加载层兜底 + 豆包 1.0 → 2.0 协议升级迁移。
+    """加载层兜底：DB 已有行里若有脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放等历史脏值），
+    按 ENUM/BOOL/NUMERIC/URL 重新校验，命中失败回退到 DEFAULTS[k] 并 logger.warning——
+    避免脏 URL 在 warm 路径绕过写入校验静默进缓存，runtime websockets.connect 才抛 InvalidURI。
 
-    三件事：
-    1. 豆包 1.0 凭证迁移：appid + access_token 双字段同时非空、api_key 为空
-       时把 access_token 复制到 api_key（warn）。不论是否迁移，旧 key
-       （不在 ALL_B_KEYS / DEFAULTS）从返回 dict 里删——warm() 据此 DELETE
-       DB 行，避免死数据堆积。
-    2. 豆包 resource_id 升级：DB 当前值 == 1.0 默认值（说明用户没手动改过）
-       时自动改到 2.0 默认值（warn）。手动改过的非默认值不动，留 warn 让
-       admin 自己评估——避免覆盖用户主动配置。
-    3. 脏值收敛：DB 已有行里若有脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放
-       等历史脏值），按 ENUM/BOOL/NUMERIC/URL 重新校验，命中失败回退到
-       DEFAULTS[k] 并 warn——避免脏 URL 在 warm 路径绕过写入校验静默进缓
-       存，runtime websockets.connect 才抛 InvalidURI。
+    必填鉴权字段（REQUIRED_STRING_KEYS）空值仅 warn、不回退（DEFAULTS 自身也是 ""，
+    无有效回退目标），由 provider 构造路径的 ValueError 兜底——但要让 admin 可见。
 
-    必填鉴权字段（REQUIRED_STRING_KEYS）空值仅 warn、不回退（DEFAULTS 自身
-    也是 ""，无有效回退目标），由 provider 构造路径的 ValueError 兜底——
-    但要让 admin 可见。
-
-    非受控 key（不在 ENUM/BOOL/NUMERIC/URL 表内的）原样保留——它们只走
-    validate_value "放行"分支，重新校验无意义。
+    非受控 key（不在 ENUM/BOOL/NUMERIC/URL 表内的）原样保留——它们只走 validate_value
+    "放行"分支，重新校验无意义。
     """
-    sanitized: dict[str, str] = dict(loaded)  # 复制，避免修改入参
-
-    # 豆包 1.0 → 2.0：access_token + appid 必须同时存在且非空才迁移
-    has_appid = bool(sanitized.get("asr.doubao_stream.appid", "").strip())
-    has_token = bool(sanitized.get("asr.doubao_stream.access_token", "").strip())
-    has_new_key = bool(sanitized.get("asr.doubao_stream.api_key", "").strip())
-    if (has_appid and has_token) and not has_new_key:
-        legacy_value = sanitized["asr.doubao_stream.access_token"]
-        sanitized["asr.doubao_stream.api_key"] = legacy_value
-        logger.warning(
-            "ConfigStore 检测到豆包 ASR 1.0 凭证（appid+access_token），"
-            "已自动迁移到 asr.doubao_stream.api_key；请管理员确认 2.0 API Key 有效性"
-        )
-    # 删旧 key（无论迁移与否，旧 key 已不在 ALL_B_KEYS / DEFAULTS，留着是死数据）
-    sanitized.pop("asr.doubao_stream.appid", None)
-    sanitized.pop("asr.doubao_stream.access_token", None)
-
-    # 豆包 resource_id：仅当 == 旧默认值（说明用户没手动改过）才升级
-    rid = sanitized.get("asr.doubao_stream.resource_id")
-    if rid == LEGACY_DOUBAO_1_0_RESOURCE_ID:
-        sanitized["asr.doubao_stream.resource_id"] = DEFAULTS[
-            "asr.doubao_stream.resource_id"
-        ]
-        logger.warning(
-            "ConfigStore 检测到豆包 ASR 1.0 resource_id=%r，已自动升级到 2.0 默认值 %r",
-            rid, DEFAULTS["asr.doubao_stream.resource_id"],
-        )
-
-    # 原有脏值收敛循环（对 sanitized 跑，已包含迁移后的值）
     validated_keys = set(ENUM_KEYS) | set(BOOL_KEYS) | set(NUMERIC_KEYS) | set(URL_KEYS)
-    for k, v in list(sanitized.items()):  # list() 避免迁移时 dict 改 size 引发的 RuntimeError
+    sanitized: dict[str, str] = {}
+    for k, v in loaded.items():
         if k in validated_keys:
             try:
                 validate_value(k, v)
@@ -374,7 +321,7 @@ def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
                 "需 admin 在配置页补齐后 provider 才能正常握手",
                 k, v,
             )
-        # sanitized[k] 已含迁移后的值，无需再写
+        sanitized[k] = v
     return sanitized
 
 
@@ -408,47 +355,11 @@ class ConfigStore:
         把全站 LLM 调打成 500（get_llm() 是 interviews.py / coaching/engine.py
         等热路径的必经节点）。老数据无需迁移脚本就能收敛。
 
-        豆包 1.0 → 2.0 协议升级迁移也在此路径上完成：SELECT 不再限定
-        ALL_B_KEYS，扫到 appid/access_token/resource_id 旧值时先 DELETE /
-        UPDATE 到 2.0 形态，再算 missing 与种入——避免升级用户首启动
-        cache miss 100% 失败。
         """
         async with SessionLocal() as session:
-            # 不再 where(SystemConfig.key.in_(ALL_B_KEYS))：要看到豆包 1.0
-            # 遗留的 appid / access_token 行才能迁移。启动期一次，全表扫可
-            # 接受。
-            existing = await session.execute(select(SystemConfig))
+            existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
             have = {row.key: row.value for row in existing.scalars().all()}
-
-            # 在内存里跑迁移——sanitized 是最终该进 cache 的形态，pop 掉的
-            # 旧 key 就是 DB 要 DELETE 的行，值变化的就是 DB 要 UPDATE 的行。
-            migrated = _sanitize_loaded_values(have)
-
-            # 1) 删旧 key（豆包 1.0 appid / access_token 等）
-            legacy_keys = [k for k in have if k not in migrated]
-            if legacy_keys:
-                await session.execute(
-                    delete(SystemConfig).where(SystemConfig.key.in_(legacy_keys))
-                )
-                logger.info(
-                    "ConfigStore 清理 %d 个豆包 1.0 旧 key：%s",
-                    len(legacy_keys), legacy_keys,
-                )
-
-            # 2) 更新迁移后值变化的 key（豆包 resource_id 升级等）
-            updated_pairs = [
-                (k, v) for k, v in migrated.items()
-                if k in have and have[k] != v
-            ]
-            for k, v in updated_pairs:
-                await session.execute(
-                    update(SystemConfig)
-                    .where(SystemConfig.key == k)
-                    .values(value=v)
-                )
-
-            # 3) 种入缺失 key
-            missing = [k for k in ALL_B_KEYS if k not in migrated]
+            missing = [k for k in ALL_B_KEYS if k not in have]
             for k in missing:
                 v = DEFAULTS[k]
                 try:
@@ -468,20 +379,15 @@ class ConfigStore:
                     continue
                 session.add(SystemConfig(key=k, value=v))
 
-            if legacy_keys or updated_pairs or missing:
+            if missing:
                 await session.commit()
-                logger.info(
-                    "ConfigStore 种入 %d 个默认 key，清理 %d 个旧 key，更新 %d 个迁移 key",
-                    len(missing), len(legacy_keys), len(updated_pairs),
-                )
+                logger.info("ConfigStore 种入 %d 个默认 key", len(missing))
         # 重读完整缓存
         await self._refresh_cache()
 
     async def _refresh_cache(self) -> None:
         async with SessionLocal() as session:
-            # 同 warm()：扫全表以便 _sanitize_loaded_values 看到豆包 1.0
-            # 旧 key；这些行不会进 cache（被 pop），所以对 hot path 透明。
-            existing = await session.execute(select(SystemConfig))
+            existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
             loaded = {row.key: row.value for row in existing.scalars().all()}
         self._cache = _sanitize_loaded_values(loaded)
 

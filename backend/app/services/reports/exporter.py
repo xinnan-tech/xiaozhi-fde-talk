@@ -134,25 +134,31 @@ def _to_docx(md: str, language: str = "en") -> bytes:
     - en/vi/ru/... → ascii/hAnsi=Times New Roman, eastAsia=宋体（CJK 字符仍走宋体兜底）
     """
     from docx import Document
-    from docx.enum.text import WD_BREAK
 
     ascii_font, east_asia_font = _fonts_for(language)
     doc = Document()
     _apply_docx_fonts(doc, ascii_font, east_asia_font)
     for line in md.splitlines():
-        s = _unescape_markdown_text(line.rstrip())
+        raw = line.rstrip()
+        s = _unescape_markdown_text(raw)
         if not s:
             continue
-        if s.startswith("### "):
-            doc.add_heading(s[4:].strip(), level=3)
-        elif s.startswith("## "):
-            doc.add_heading(s[3:].strip(), level=2)
-        elif s.startswith("# "):
-            doc.add_heading(s[2:].strip(), level=1)
-        elif s.startswith("> "):
-            doc.add_paragraph(s[2:].strip(), style="Intense Quote" if "Intense Quote" in [st.name for st in doc.styles] else None)
-        elif s.startswith(("- ", "* ")):
-            doc.add_paragraph(s[2:].strip(), style="List Bullet")
+        escaped_block_prefix = _has_escaped_block_prefix(raw)
+        if s.startswith("### ") and not escaped_block_prefix:
+            _add_paragraph_with_breaks(doc, s[4:].strip(), heading_level=3)
+        elif s.startswith("## ") and not escaped_block_prefix:
+            _add_paragraph_with_breaks(doc, s[3:].strip(), heading_level=2)
+        elif s.startswith("# ") and not escaped_block_prefix:
+            _add_paragraph_with_breaks(doc, s[2:].strip(), heading_level=1)
+        elif s.startswith("> ") and not escaped_block_prefix:
+            style = (
+                "Intense Quote"
+                if "Intense Quote" in [st.name for st in doc.styles]
+                else None
+            )
+            _add_paragraph_with_breaks(doc, s[2:].strip(), style=style)
+        elif s.startswith(("- ", "* ")) and not escaped_block_prefix:
+            _add_paragraph_with_breaks(doc, s[2:].strip(), style="List Bullet")
         else:
             _add_paragraph_with_breaks(doc, s)
     buf = io.BytesIO()
@@ -160,13 +166,21 @@ def _to_docx(md: str, language: str = "en") -> bytes:
     return buf.getvalue()
 
 
-def _add_paragraph_with_breaks(doc, text: str) -> None:
+def _add_paragraph_with_breaks(
+    doc,
+    text: str,
+    *,
+    style: str | None = None,
+    heading_level: int | None = None,
+) -> None:
     """添加段落：把 `<br>` / `<br/>` / `<br />` 切成多段 run，用真换行连接。"""
     from docx.enum.text import WD_BREAK
 
-    # 用一个不会出现在 Markdown 文本里的占位符先 split，再 add_break 替换
     parts = re.split(r"<br\s*/?>", text, flags=re.IGNORECASE)
-    para = doc.add_paragraph()
+    if heading_level is not None:
+        para = doc.add_heading(level=heading_level)
+    else:
+        para = doc.add_paragraph(style=style)
     for i, seg in enumerate(parts):
         if i > 0:
             para.add_run().add_break(WD_BREAK.LINE)
@@ -176,4 +190,16 @@ def _add_paragraph_with_breaks(doc, text: str) -> None:
 
 def _unescape_markdown_text(text: str) -> str:
     """Decode the Markdown escapes that the lightweight docx renderer supports."""
-    return re.sub(r"\\([\\|])", r"\1", text)
+    return re.sub(r"\\([\\|#>+\-*_.()])", r"\1", text)
+
+
+def _has_escaped_block_prefix(text: str) -> bool:
+    """判断行首的反斜杠是否保护了一个 Markdown 块级前缀。"""
+    prefix = r" {0,3}\\"
+    return bool(
+        re.match(prefix + r"#{1,6}(?=\s|$)", text)
+        or re.match(prefix + r">(?=\s|$)", text)
+        or re.match(prefix + r"[-+*](?=\s|$)", text)
+        or re.match(prefix + r"\d+[.)](?=\s|$)", text)
+        or re.match(prefix + r"(?:---+|\*\*\*+|___+)\s*$", text)
+    )

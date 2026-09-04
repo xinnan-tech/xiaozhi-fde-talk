@@ -5,6 +5,8 @@ register_skill(SkillDefinition(...)) 注册到 app.services.skill.registry。
 """
 from __future__ import annotations
 
+import re
+
 from app.services.skill.registry import SkillArtifact, SkillDefinition, register_skill
 
 
@@ -12,6 +14,21 @@ def _sanitize_inline(text: str) -> str:
     """单行 inline 上下文（标题 / 引用块首行 / 表头）用：折掉所有换行 / 回车成单行空格。"""
     # 统一换行符后再折叠，避免 CRLF / LF / CR 三种情况漏掉
     return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+
+
+def _sanitize_inline_content(text: str) -> str:
+    """清理回显内容开头的 Markdown 块级标记，同时保留用户文本。"""
+    text = _sanitize_inline(text)
+    # 4 个及以上前导空格会触发代码块；保留最多 3 个以避免改变正常文本太多。
+    text = re.sub(r"^ {4,}", "   ", text)
+    # 内容位于空行之后，开头的这些标记会改变报告结构，转义后仍能原样显示。
+    text = re.sub(r"^( {0,3})(#{1,6})(?=\s|$)", r"\1\\\2", text)
+    text = re.sub(r"^( {0,3})(>)(?=\s|$)", r"\1\\\2", text)
+    text = re.sub(r"^( {0,3})([-+*])(?=\s|$)", r"\1\\\2", text)
+    text = re.sub(r"^( {0,3})(\d+)([.)])(?=\s|$)", r"\1\2\\\3", text)
+    # 单独的横线、星号或下划线序列会被解析为水平分隔线。
+    text = re.sub(r"^( {0,3})(?=(?:---+|\*\*\*+|___+)\s*$)([-*_])", r"\1\\\3", text)
+    return text
 
 
 def _sanitize_blockquote_text(text: str) -> str:
@@ -22,21 +39,13 @@ def _sanitize_blockquote_text(text: str) -> str:
     return "\n".join("> " + ln if ln else ">" for ln in lines)
 
 
-def _escape_table_cell(value) -> str:
-    """表格单元格转义：None → ''；'\\' → '\\\\'；'|' → '\\|'；换行 → '<br>'。
-
-    顺序关键：必须先转义反斜杠再转义竖线，否则输入 '\\|' 会变成 '\\\\|'，
-    Markdown 解析时 '\\\\' 被吃掉变成 literal '\\'，剩下的 '|' 仍被识别为列分隔符
-    —— 跟没转义一样。
-
-    '<br>' 在 docx / html 导出链路里都按行内换行处理（GitHub 渲染亦同），
-    比起裸 '\\n' 更安全——后者会让整张表在该单元格处断裂。
-    """
+def _sanitize_table_cell(value) -> str:
+    """表格单元格转义：None → ''；反斜杠、竖线和换行转为安全 Markdown。"""
     if value is None:
         return ""
     s = str(value)
     s = s.replace("\r\n", "\n").replace("\r", "\n")
-    # 顺序：'\\' 先 → '|' 后
+    # 顺序敏感：先转义反斜杠，再转义竖线。
     s = s.replace("\\", "\\\\")
     s = s.replace("|", "\\|")
     s = s.replace("\n", "<br>")
@@ -47,7 +56,7 @@ async def _echo(inputs: dict) -> SkillArtifact:
     title = _sanitize_inline(str(inputs.get("title") or "Skill 输出"))
     # 防级别提升：开头若有 '#'，把 '### title' 顶到更高级别甚至脱离标题上下文
     title = title.lstrip("#").lstrip() or "Skill 输出"
-    content = _sanitize_inline(
+    content = _sanitize_inline_content(
         str(inputs.get("content") or inputs.get("text") or "（无输入内容）")
     )
     md = f"### {title}\n\n{content}"
@@ -73,7 +82,7 @@ async def _markdown_table(inputs: dict) -> SkillArtifact:
         rows = []
     warnings: list[str] = []
     n_cols = len(columns)
-    header_cells = [_escape_table_cell(c) for c in columns]
+    header_cells = [_sanitize_table_cell(c) for c in columns]
     header = "| " + " | ".join(header_cells) + " |"
     sep = "| " + " | ".join("---" for _ in range(n_cols)) + " |"
     body = []
@@ -92,7 +101,7 @@ async def _markdown_table(inputs: dict) -> SkillArtifact:
             cells = cells[:n_cols]
         elif len(cells) < n_cols:
             cells = list(cells) + [""] * (n_cols - len(cells))
-        body.append("| " + " | ".join(_escape_table_cell(c) for c in cells) + " |")
+        body.append("| " + " | ".join(_sanitize_table_cell(c) for c in cells) + " |")
     if not body:
         body.append("| " + " | ".join("待补充" for _ in range(n_cols)) + " |")
     meta: dict = {"kind": "markdown-table"}

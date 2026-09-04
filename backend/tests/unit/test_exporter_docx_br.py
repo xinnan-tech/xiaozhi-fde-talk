@@ -1,9 +1,4 @@
-"""Word 导出把 `<br>` 翻译成真换行（issue #194 P2）。
-
-之前 `_to_docx` 逐行处理 Markdown，行内 `<br>` 直接落到 plain paragraph，
-Word 看到的是字面量文本。fix 后每个 `<br>` 切成单独的 docx run 并 add_break，
-Word 打开看到的是真正的换行。
-"""
+"""Word 导出将 Markdown 中的 `<br>` 渲染为真正的换行。"""
 from __future__ import annotations
 
 import io
@@ -58,6 +53,26 @@ def test_exporter_docx_multiple_br_in_one_line():
     # 三个 break：a 与 b 间、b 与 c 间——2 次换行分割出 3 段
     br_count = len(re.findall(r"<w:br", xml))
     assert br_count >= 2, f"expected at least 2 <w:br>, got {br_count}"
+
+
+def test_exporter_docx_br_in_heading_and_list():
+    """标题和列表项中的 `<br>` 也应渲染为真正的换行。"""
+    md = "# first<br>second\n\n- item<br>continued\n"
+    docx_bytes, _mime = export(md, fmt="word", language="en")
+    xml = _docx_xml(docx_bytes)
+    assert len(re.findall(r"<w:br", xml)) >= 2
+    assert "&lt;br" not in xml
+
+
+def test_exporter_docx_keeps_escaped_block_prefix_as_text():
+    """被 skill 保护的块级前缀在 Word 中应作为普通文本显示。"""
+    md = "### T\n\n\\# heading\n\\- item\n1\\. numbered\n"
+    docx_bytes, _mime = export(md, fmt="word", language="en")
+    paragraphs = [p.text for p in Document(io.BytesIO(docx_bytes)).paragraphs]
+
+    assert "# heading" in paragraphs
+    assert "- item" in paragraphs
+    assert "1. numbered" in paragraphs
 
 
 def test_exporter_docx_unescapes_skill_table_cells():

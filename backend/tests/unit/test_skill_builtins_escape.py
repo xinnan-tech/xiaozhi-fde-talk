@@ -1,8 +1,4 @@
-"""内置 skill 转义测试：覆盖 markdown-table / text-card / echo 的 Markdown 注入场景。
-
-对应 issue #194：LLM 填充 inputs 时常出现 '|'、换行、null；之前直接 f-string 拼进
-Markdown，导致表格错位、引用块逃逸、标题级别被顶高等问题。
-"""
+"""内置 skill 转义测试：覆盖 Markdown 表格、引用块和回显内容的结构保护。"""
 from __future__ import annotations
 
 import asyncio
@@ -42,6 +38,20 @@ def test_echo_content_newline_collapsed():
     """content 带换行也要折成单行（echo 语义是 inline 段落）。"""
     art = _run(_echo({"title": "T", "content": "line1\nline2"}))
     assert art.content == "### T\n\nline1 line2"
+
+
+def test_echo_content_block_prefix_is_escaped():
+    """回显内容开头的块级标记不能改变报告结构。"""
+    cases = {
+        "# heading": r"\# heading",
+        "> quote": r"\> quote",
+        "- item": r"\- item",
+        "1. item": r"1\. item",
+        "---": r"\---",
+    }
+    for content, expected in cases.items():
+        art = _run(_echo({"title": "T", "content": content}))
+        assert art.content == f"### T\n\n{expected}"
 
 
 def test_echo_defaults_when_missing():
@@ -121,8 +131,7 @@ def test_markdown_table_newline_in_cell():
     # 单元格内容里不含裸 \n（除了由 <br> 之外的字符）
     # 内容里 'p\nq' 应被替换为 'p<br>q'
     assert "p<br>q" in art.content
-    # 行结构仍是 1 个 data 行
-    assert art.content.count("\n") == 4  # 5 行 = 4 个换行
+    assert art.content.splitlines()[-1] == "| x | p<br>q |"
 
 
 def test_markdown_table_none_cell_becomes_empty():
@@ -213,23 +222,23 @@ def test_markdown_table_backslash_escaped_first():
 
 def test_markdown_table_double_backslash_preserved():
     """'\\\\' 应转义为 '\\\\\\\\'，Markdown 渲染回 '\\\\'。"""
-    from app.services.skill.builtins import _escape_table_cell
+    from app.services.skill.builtins import _sanitize_table_cell
     # 输入 \\ (2 字符) → 转义 → \\\\ (4 字符)
-    assert _escape_table_cell("\\\\") == "\\\\\\\\"
+    assert _sanitize_table_cell("\\\\") == "\\\\\\\\"
 
 
 def test_markdown_table_pipe_with_backslash_roundtrip():
-    """直接调 escape 函数验证 round-trip：原意 \\| 在渲染后仍是 \\|。"""
-    from app.services.skill.builtins import _escape_table_cell
+    """表格单元格中的反斜杠和竖线按 Markdown 规则保持原意。"""
+    from app.services.skill.builtins import _sanitize_table_cell
     # 输入 \"\\|\"（一个反斜杠 + 一个竖线，2 字符）→ 应输出 '\\\\\\|'（4 字符）
-    assert _escape_table_cell("\\|") == "\\\\\\|"
+    assert _sanitize_table_cell("\\|") == "\\\\\\|"
     # 输入单个 '|'
-    assert _escape_table_cell("|") == "\\|"
+    assert _sanitize_table_cell("|") == "\\|"
     # 输入 '\\\\'
-    assert _escape_table_cell("\\\\") == "\\\\\\\\"
+    assert _sanitize_table_cell("\\\\") == "\\\\\\\\"
     # 顺序敏感性：先转 | 再转 \ 会得到错的 '\\\\|'（4 字符），正确是 '\\\\\\|'（4 字符含一个 |）
     # 直接断言两者的差异以锁死顺序
     bad_order = "\\|".replace("|", "\\|").replace("\\", "\\\\")
     good_order = "\\|".replace("\\", "\\\\").replace("|", "\\|")
     assert good_order != bad_order  # 顺序敏感，回归保护
-    assert _escape_table_cell("\\|") == good_order
+    assert _sanitize_table_cell("\\|") == good_order

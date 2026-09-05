@@ -62,6 +62,7 @@
   "llm.invalid_json": "LLM 返回非法 JSON：{err}；原文：{json_str}",
   "llm.schema_mismatch": "LLM 输出不符合 schema：{err}；原文：{json_str}",
   "llm.timeout": "chat_text 总超时（>{budget:.0f}s）",
+  "llm.context_overflow": "转写文本超出 LLM 上下文上限，请缩短后重试（HTTP {status}）",
   "asr.url_not_configured": "未配置 ASR_WS_URL",
   "asr.connect_fail": "语音识别（ASR）连接失败：{ws_url}（{reason}）。请到「⚙️ 后端配置」检查 WebSocket 地址并确认 ASR 服务已启动",
   "asr.dead": "ASR 连接已断开（funasr 假活）",

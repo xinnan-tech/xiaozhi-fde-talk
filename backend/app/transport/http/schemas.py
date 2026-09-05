@@ -39,17 +39,17 @@ def _validate_base_info_size(base_info: dict) -> None:
             max_bytes=BASE_INFO_TOTAL_MAX_BYTES,
         )
 
-    for key, value in base_info.items():
-        key_bytes = len(key.encode("utf-8"))
+    for field_name, value in base_info.items():
+        field_name_bytes = len(field_name.encode("utf-8"))
         value_bytes = len(
             json.dumps(value, ensure_ascii=False, default=str).encode("utf-8")
         )
-        field_bytes = key_bytes + value_bytes
+        field_bytes = field_name_bytes + value_bytes
         if field_bytes > BASE_INFO_VALUE_MAX_BYTES:
             raise I18nError(
                 Keys.SESSION_BASE_INFO_VALUE_TOO_LONG,
                 http_status=422,
-                key=key,
+                field=field_name,
                 byte_len=field_bytes,
                 max_bytes=BASE_INFO_VALUE_MAX_BYTES,
             )

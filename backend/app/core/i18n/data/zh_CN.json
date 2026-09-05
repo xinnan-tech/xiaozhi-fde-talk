@@ -52,7 +52,7 @@
   "session.illegal_transition": "非法状态转换：{from_state} → {to_state}",
   "session.edit_forbidden": "当前状态（{state}）不可编辑",
   "session.delete_forbidden": "当前状态（{state}）不可删除",
-  "session.base_info_value_too_long": "base_info.{key} 字段值过长（{byte_len} > {max_bytes} 字节）",
+  "session.base_info_value_too_long": "base_info.{field} 字段值过长（{byte_len} > {max_bytes} 字节）",
   "session.base_info_total_too_large": "base_info 整体过大（{byte_len} > {max_bytes} 字节）",
   "report.format_not_implemented": "格式 {fmt!r} 暂未实现",
   "llm.not_configured": "LLM 未配置（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL）",

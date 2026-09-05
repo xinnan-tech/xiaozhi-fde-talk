@@ -534,7 +534,7 @@ async def extract_fields(
         "请返回所有字段的完整 JSON 对象（包含已填内容+本次补充）："
     )
     result = await llm.chat_json(system_prompt, user_prompt)
-    logger.info(f"[extract] LLM 原始返回: {result}")
+    logger.debug(f"[extract] LLM 原始返回 keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
     # 合并：current_values 兜底，LLM 结果优先级
     values = {}
     for k in req.fields:
@@ -543,7 +543,7 @@ async def extract_fields(
             values[k] = str(llm_val)
         else:
             values[k] = req.current_values.get(k, "")
-    logger.info(f"[extract] 合并后 values: {values}")
+    logger.debug(f"[extract] 合并后 values keys={list(values.keys())}")
 
     return ExtractResponse(values=values)
 

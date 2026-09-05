@@ -133,6 +133,18 @@ def extract_client():
     return TestClient(app)
 
 
+@pytest.fixture
+def fake_config_store():
+    """get_config_store 的 MagicMock 替身：所有 key 返回 None。"""
+    fake_store = MagicMock()
+
+    async def fake_get(key):
+        return None
+
+    fake_store.get = fake_get
+    return fake_store
+
+
 def _post_extract(client, transcript: str = "客户是 ABC 公司 CEO 张三", fields: list[str] | None = None):
     return client.post(
         "/api/v1/interviews/extract",
@@ -143,6 +155,22 @@ def _post_extract(client, transcript: str = "客户是 ABC 公司 CEO 张三", f
             "field_labels": {"objective": "目标"},
             "field_types": {"objective": "text"},
             "current_values": {"objective": "已有值"},
+        },
+    )
+
+
+def _post_extract_with_empty_current(client):
+    """_post_extract 的伴生版本：current_values 故意为空，覆盖「文本里信息全
+    但 LLM 跑不通」的反例场景（issue #197）。"""
+    return client.post(
+        "/api/v1/interviews/extract",
+        json={
+            "transcript": "客户是 ABC 公司 CEO 张三，明天上午十点谈半小时",
+            "template_id": "pm-research",
+            "fields": ["objective"],
+            "field_labels": {"objective": "目标"},
+            "field_types": {"objective": "text"},
+            "current_values": {},
         },
     )
 
@@ -223,7 +251,7 @@ def test_extract_context_overflow_returns_422_not_silent_fallback(extract_client
     assert r.status_code != 200
 
 
-def test_extract_non_overflow_llm_error_passes_through_502(extract_client):
+def test_extract_non_overflow_llm_error_passes_through_502(extract_client, fake_config_store):
     """非 context overflow 的 LLMError（鉴权失败 / 服务挂 / JSON 解析失败）→ 502 透传。
 
     issue #197：旧实现 `except LLMError: values = dict(req.current_values)` 把
@@ -231,15 +259,6 @@ def test_extract_non_overflow_llm_error_passes_through_502(extract_client):
     配置问题误导成用户文本问题。现在路由层不再吞 LLMError，由 I18nError
     全局 handler 转 502 响应。
     """
-    from unittest.mock import MagicMock
-
-    fake_store = MagicMock()
-
-    async def fake_get(key):
-        return None
-
-    fake_store.get = fake_get
-
     async def fake_chat_json(system, user):
         raise I18nError(
             Keys.LLM_NON_RETRYABLE.value, http_status=502,
@@ -247,7 +266,7 @@ def test_extract_non_overflow_llm_error_passes_through_502(extract_client):
         )
 
     with patch("app.adapters.llm.factory.get_llm") as mock_get_llm, \
-         patch("app.transport.http.routes.interviews.get_config_store", return_value=fake_store):
+         patch("app.transport.http.routes.interviews.get_config_store", return_value=fake_config_store):
         mock_get_llm.return_value.chat_json = fake_chat_json
         r = _post_extract(extract_client, transcript="正常长度" * 100)
 
@@ -257,22 +276,13 @@ def test_extract_non_overflow_llm_error_passes_through_502(extract_client):
     assert body["code"] == Keys.LLM_NON_RETRYABLE.value, body
 
 
-def test_extract_auth_failure_passes_through_502_not_200(extract_client):
+def test_extract_auth_failure_passes_through_502_not_200(extract_client, fake_config_store):
     """复现 issue #197 的鉴权失败路径：LLM 返回 401 → 路由层透传 502。
 
     反例：旧实现对 `LLMError` 静默 fallback，鉴权失败也返 200 + current_values，
     前端 `filled === 0` 走「没提取到新字段」分支，把 LLM key 错配说成是
     用户文本信息不足。
     """
-    from unittest.mock import MagicMock
-
-    fake_store = MagicMock()
-
-    async def fake_get(key):
-        return None
-
-    fake_store.get = fake_get
-
     async def fake_chat_json(system, user):
         # 模拟 OpenAI 兼容 provider 在 401 时抛 LLM_NON_RETRYABLE（502）。
         raise I18nError(
@@ -281,29 +291,11 @@ def test_extract_auth_failure_passes_through_502_not_200(extract_client):
         )
 
     with patch("app.adapters.llm.factory.get_llm") as mock_get_llm, \
-         patch("app.transport.http.routes.interviews.get_config_store", return_value=fake_store):
+         patch("app.transport.http.routes.interviews.get_config_store", return_value=fake_config_store):
         mock_get_llm.return_value.chat_json = fake_chat_json
         # current_values 故意为空，模拟「文本里信息很全但 LLM 跑不通」的反例场景
-        r = client_post_extract_with_empty_current(extract_client)
+        r = _post_extract_with_empty_current(extract_client)
 
     assert r.status_code == 502, r.text
-    # 关键：不能是 200 + 空 values（旧实现就是这样）
-    assert r.status_code != 200, r.text
     body = r.json()
     assert body["code"] == Keys.LLM_NON_RETRYABLE.value, body
-
-
-def client_post_extract_with_empty_current(client):
-    """_post_extract 的伴生版本：current_values 故意为空，覆盖「文本里信息全
-    但 LLM 跑不通」的反例场景（issue #197）。"""
-    return client.post(
-        "/api/v1/interviews/extract",
-        json={
-            "transcript": "客户是 ABC 公司 CEO 张三，明天上午十点谈半小时",
-            "template_id": "pm-research",
-            "fields": ["objective"],
-            "field_labels": {"objective": "目标"},
-            "field_types": {"objective": "text"},
-            "current_values": {},
-        },
-    )

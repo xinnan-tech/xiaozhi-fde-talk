@@ -323,6 +323,12 @@ class WSHandler:
     async def _dispatch(self, msg: dict) -> None:
         if self.runtime is None:
             return
+        # msg 契约上是 dict，但 json.loads 对 list / 标量也合法，msg.get 在
+        # list 上抛 AttributeError 会被外层 except 当作服务端 bug。复用已有
+        # 的 code="bad_json"（4411）跟 JSONDecodeError 同语义。
+        if not isinstance(msg, dict):
+            await _fail(self.ws, code="bad_json", close_code=4411)
+            return
         t = msg.get("type", "")
         # 接管确认：pending（尚未 bind）连接专属，须在 ownership 守卫之前放行
         if t == "connection.takeover":

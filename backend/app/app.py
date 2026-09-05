@@ -29,11 +29,11 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_cors_origins(settings) -> list[str]:
-    """解析 CORS_ORIGINS：留空 → ["*"]（开发友好），显式设值 → 白名单（生产安全）。
+    """解析 CORS_ORIGINS：留空 → 环境默认，显式设值 → 白名单（生产安全）。
 
-    留空模式自动放行所有 origin，配合下方 allow_credentials=False 走通：
-    鉴权走 Authorization header（JWT，见 transport/http/dependencies.py），
-    不依赖 cookie，跨域 cookie 被浏览器禁掉跟鉴权无关——任意 origin 都能调 API。
+    - dev / test：留空 → ["http://localhost:5173"]（Vite dev server 默认端口）
+    - prod：留空 → 抛 RuntimeError，强制显式配置
+    - 任意环境：显式设值 → 解析为白名单列表
 
     上公网前在 .env / 环境变量里显式列白名单（逗号分隔 origin），自动切回严格模式：
     allow_credentials 重新启用，未来若改用 cookie 鉴权也能无缝接上。
@@ -42,11 +42,17 @@ def _resolve_cors_origins(settings) -> list[str]:
     origins = [o.strip() for o in raw.split(",") if o.strip()]
     if origins:
         return origins
-    logger.warning(
-        "CORS_ORIGINS 未配置，默认放行所有 origin（开发友好）。"
-        "上公网前请在 .env / 环境变量里显式列白名单启用严格模式。"
+    if settings.env in ("dev", "test"):
+        logger.warning(
+            "CORS_ORIGINS 未配置，默认放行 localhost:5173（开发友好）。"
+            "上公网前请在 .env / 环境变量里显式列白名单启用严格模式。"
+        )
+        return ["http://localhost:5173"]
+    # prod
+    raise RuntimeError(
+        "CORS_ORIGINS 未配置。生产环境必须显式设置 CORS_ORIGINS 白名单，"
+        "不允许留空。请在 .env 或环境变量中配置。"
     )
-    return ["*"]
 
 
 async def _lifespan_startup(app: FastAPI) -> None:

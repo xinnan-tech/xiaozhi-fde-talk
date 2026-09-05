@@ -35,6 +35,7 @@
   "ws.bad_handshake.expect_json": "期望首条消息为 JSON hello",
   "ws.bad_handshake.expect_hello_first": "期望先收到 hello",
   "ws.bad_handshake.invalid_json": "无效的 JSON 帧",
+  "ws.bad_handshake.not_object": "首条消息必须是 JSON 对象",
   "ws.auth.failed": "鉴权失败",
   "ws.frame.too_large": "单帧超过 {max_kb} KB",
   "ws.session.concurrent_limit": "活跃访谈数已达上限（{limit}）",

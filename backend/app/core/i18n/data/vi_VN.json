@@ -35,6 +35,7 @@
   "ws.bad_handshake.expect_json": "Mong đợi JSON hello",
   "ws.bad_handshake.expect_hello_first": "Mong đợi hello trước",
   "ws.bad_handshake.invalid_json": "Khung JSON không hợp lệ",
+  "ws.bad_handshake.not_object": "Tin nhắn đầu tiên phải là JSON object",
   "ws.auth.failed": "Xác thực thất bại",
   "ws.frame.too_large": "Khung đơn vượt quá {max_kb} KB",
   "ws.session.concurrent_limit": "Đã đạt giới hạn phỏng vấn đồng thời ({limit})",

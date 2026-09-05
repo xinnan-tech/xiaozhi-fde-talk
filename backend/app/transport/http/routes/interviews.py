@@ -485,14 +485,14 @@ async def extract_fields(
 ):
     """接收转写文本 + 目标字段列表 → LLM 提取 → 返回字段值字典。
 
-    错误响应：
+    错误响应全部由 LLMError（= I18nError，自带 http_status）透传到全局 handler，
+    与 OCR 路径对齐：
     - transcript > 200k 字符 → 422（schema `max_length`，issue #207）
     - LLM context overflow（输入超出模型上限）→ 422（LLMContextOverflowError），
-      让前端能区分「请缩短 transcript」与「重试」
-    - 其他 LLM 错误（鉴权 / 服务挂 / JSON 解析失败）→ 保留 current_values，
-      不暴露服务端细节
+      让前端区分「请缩短 transcript」与「重试」
+    - 其他 LLM 错误（鉴权失败 / 服务挂 / JSON 解析失败）→ 502，避免把配置
+      问题误导成「文本里没信息」（issue #197）
     """
-    from app.adapters.llm.base import LLMError
     from app.adapters.llm.factory import get_llm
 
     if not req.transcript.strip():
@@ -533,25 +533,17 @@ async def extract_fields(
         f"【待提取字段（仅限以下 key，禁止创建新字段）】\n" + "\n".join(field_lines) + "\n\n"
         "请返回所有字段的完整 JSON 对象（包含已填内容+本次补充）："
     )
-    try:
-        result = await llm.chat_json(system_prompt, user_prompt)
-        logger.info(f"[extract] LLM 原始返回: {result}")
-        # 合并：current_values 兜底，LLM 结果优先级
-        values = {}
-        for k in req.fields:
-            llm_val = result.get(k)
-            if llm_val not in (None, ""):
-                values[k] = str(llm_val)
-            else:
-                values[k] = req.current_values.get(k, "")
-        logger.info(f"[extract] 合并后 values: {values}")
-    except LLMError as e:
-        # LLMContextOverflowError 是 LLMError（I18nError）的子类。显式判断，
-        # 避免未来调整 except 顺序时把 422 重新吞成 200 + current_values。
-        if isinstance(e, LLMContextOverflowError):
-            raise
-        # 其他 LLM 错误（鉴权失败 / 服务挂 / JSON 解析失败）→ 保留当前值
-        values = dict(req.current_values)
+    result = await llm.chat_json(system_prompt, user_prompt)
+    logger.info(f"[extract] LLM 原始返回: {result}")
+    # 合并：current_values 兜底，LLM 结果优先级
+    values = {}
+    for k in req.fields:
+        llm_val = result.get(k)
+        if llm_val not in (None, ""):
+            values[k] = str(llm_val)
+        else:
+            values[k] = req.current_values.get(k, "")
+    logger.info(f"[extract] 合并后 values: {values}")
 
     return ExtractResponse(values=values)
 

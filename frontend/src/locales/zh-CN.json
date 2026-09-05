@@ -39,8 +39,6 @@
   "system.field.sample_rate": "采样率",
   "system.field.ws_url": "WebSocket 地址",
   "system.field.ws_verify_ssl": "验证 SSL",
-  "system.field.appid": "App ID",
-  "system.field.access_token": "Access Token",
   "system.field.resource_id": "Resource ID",
   "system.field.enable_multilingual": "多语种模式",
   "system.field.pause_s": "暂停时间（秒）",

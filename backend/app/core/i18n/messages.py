@@ -85,6 +85,7 @@ class Keys(StrEnum):
     LLM_INVALID_JSON = "llm.invalid_json"
     LLM_SCHEMA_MISMATCH = "llm.schema_mismatch"
     LLM_TIMEOUT = "llm.timeout"
+    LLM_CONTEXT_OVERFLOW = "llm.context_overflow"
 
     # ---- ASR adapter ----
     ASR_URL_NOT_CONFIGURED = "asr.url_not_configured"
@@ -154,6 +155,8 @@ class Keys(StrEnum):
     # 必填鉴权字段被留空（豆包 App ID / Access Token 等）：provider 构造路径
     # 读不到合法值会在首次握手时抛 ValueError，admin 配置页 400 拦截前置。
     CONFIG_INVALID_REQUIRED_STRING = "config.invalid_required_string"
+    # 数值 key 超过 NUMERIC_MAX_VALUE 上限（#201）。
+    CONFIG_INVALID_NUMERIC_TOO_LARGE = "config.invalid_numeric_too_large"
 
     # ---- Auth (registration / login) ----
     AUTH_USERNAME_INVALID_FORMAT = "auth.username_invalid_format"

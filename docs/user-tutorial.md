@@ -60,7 +60,7 @@ LLM / ASR / OCR 都填好后，回到配置页右上角，点 **「运行自检�
 常见失败原因：
 
 - AI 大模型红字 → 多半是密钥错、或 `base_url` 填成「聊天界面」而不是 API 地址（见 [AI 大模型配置](llm-config.md)）
-- 语音识别红字 → 看一下 FunASR Docker 容器是不是没起来；或豆包的 `appid` / `access_token` 填错（见 [语音识别配置](asr-config.md)）
+- 语音识别红字 → 看一下 FunASR Docker 容器是不是没起来；或豆包的 `api_key` / `resource_id` 填错（见 [语音识别配置](asr-config.md)）
 - 图片识别红字 → AK / SK 漏填、或者百度账号还没开通文字识别服务。如果你不做图片提取，可以跳过图片识别自检
 
 全部绿灯后关掉弹窗，进入下一步。
@@ -140,7 +140,7 @@ LLM / ASR / OCR 都填好后，回到配置页右上角，点 **「运行自检�
 
 3、**自检语音识别失败？**
 > - 用 FunASR：确认 Docker 容器在跑 `docker compose ps`，或者 `ws_url` 写错了
-> - 用豆包：检查 `appid` / `access_token` 是不是对的，或者火山引擎还没开通小时版服务
+> - 用豆包：检查 `api_key` / `resource_id` 是不是对的，或者火山引擎还没开通对应资源
 > - 详见 [语音识别配置](asr-config.md)
 
 4、**访谈跑到一半想暂停又不想结束？**

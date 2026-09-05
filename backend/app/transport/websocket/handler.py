@@ -28,20 +28,12 @@ from app.core.policies import get_policy
 from app.domain.session import SessionStatus
 from app.services.sessions.manager import ConcurrentLimitError, manager
 from app.services.sessions.runtime import SessionRuntime, registry
-from app.transport.base import extract_auth
+from app.transport.base import extract_auth, token_from_subprotocols
 
 logger = logging.getLogger(__name__)
 
 # WS 协议版本：hello 回包回显，客户端可据此判断协议面变更
 PROTOCOL_VERSION = 1
-
-
-def _token_from_subprotocols(subprotocols: list[str]) -> Optional[str]:
-    """从 Sec-WebSocket-Protocol 列表里挑出 bearer.<token>，无则 None。"""
-    for sp in subprotocols or []:
-        if sp.startswith("bearer."):
-            return sp[len("bearer."):]
-    return None
 
 
 def _ws_upgrade_accept_language(scope: dict) -> Optional[str]:
@@ -150,7 +142,7 @@ class WSHandler:
         # 鉴权在 accept 之前：token 只认子协议 bearer.<jwt>，缺失/无效直接拒绝握手
         # （uvicorn 回 HTTP 403），未认证连接连 WS 层都进不来。不读消息体 token——
         # 收消息必须先完成握手，accept-then-auth 会给无凭证连接留存活窗口。
-        token = _token_from_subprotocols(self.ws.scope.get("subprotocols"))
+        token = token_from_subprotocols(self.ws.scope.get("subprotocols"))
         try:
             self._user = await extract_auth(token)
         except AuthError as e:

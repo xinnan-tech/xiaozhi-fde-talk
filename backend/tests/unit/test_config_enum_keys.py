@@ -29,36 +29,24 @@ def test_enum_keys_exact_set():
     }
 
 
-def test_validate_value_rejects_doubao_appid_empty():
-    """#138: 切到 Doubao Stream 后 App ID 留空也能落库→ 首次握手才炸。
+def test_validate_value_rejects_doubao_api_key_empty():
+    """API Key 留空时不能落库，否则首次握手才会失败。
     写入侧必须拦：空白（含全空格）一律 400。
     """
     from app.core.config_store import REQUIRED_STRING_KEYS
-    assert "asr.doubao_stream.appid" in REQUIRED_STRING_KEYS
-    assert "asr.doubao_stream.access_token" in REQUIRED_STRING_KEYS
+    assert "asr.doubao_stream.api_key" in REQUIRED_STRING_KEYS
 
     for bad in ("", " ", "\t", "\n", "   \t\n"):
         with pytest.raises(I18nError) as ei:
-            validate_value("asr.doubao_stream.appid", bad)
+            validate_value("asr.doubao_stream.api_key", bad)
         assert ei.value.code == Keys.CONFIG_INVALID_REQUIRED_STRING.value
-        assert ei.value.params["name"] == "asr.doubao_stream.appid"
-        assert ei.value.http_status == 400
-
-
-def test_validate_value_rejects_doubao_access_token_empty():
-    """#138: 同款，access_token 留空也得拦。"""
-    for bad in ("", " ", "\t", "  \t"):
-        with pytest.raises(I18nError) as ei:
-            validate_value("asr.doubao_stream.access_token", bad)
-        assert ei.value.code == Keys.CONFIG_INVALID_REQUIRED_STRING.value
-        assert ei.value.params["name"] == "asr.doubao_stream.access_token"
+        assert ei.value.params["name"] == "asr.doubao_stream.api_key"
         assert ei.value.http_status == 400
 
 
 def test_validate_value_accepts_doubao_required_strings_non_empty():
-    """#138 正向：合法非空值放行。覆盖 REQUIRED_STRING_KEYS 两个 key。"""
-    validate_value("asr.doubao_stream.appid", "1234567890")
-    validate_value("asr.doubao_stream.access_token", "abc-def_token_123")
+    """API Key 非空时放行。"""
+    validate_value("asr.doubao_stream.api_key", "ak-1234567890")
 
 
 def test_enum_keys_values_are_correct_sets():

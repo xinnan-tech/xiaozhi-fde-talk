@@ -1,9 +1,10 @@
 """ASR 专用 WebSocket 处理器（访谈创建时的录音转写，无需 session）。
 
 流程：
-  ws 连接 → 用户按按钮开始录音 → MediaRecorder 推 WebM 音频帧
-  → 本 handler 实时解码 + 送 FunASR 流式识别 → 实时推送 asr 文本给前端
-  → 用户松手 / 超时 → 前端请求 /api/v1/interviews/extract 提取字段 → 自动填表
+  ws 连接（需 bearer.<jwt> 子协议，鉴权失败立即拒握）→ 用户按按钮开始录音
+  → MediaRecorder 推 WebM 音频帧 → 本 handler 实时解码 + 送 FunASR 流式识别
+  → 实时推送 asr 文本给前端 → 用户松手 / 超时
+  → 前端请求 /api/v1/interviews/extract 提取字段 → 自动填表
 
 生命周期与 session 无关：连接即用，断开即释放。
 """
@@ -17,6 +18,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from app.adapters.asr.audio_decode import WebMDecoder
 from app.adapters.asr.factory import create_asr_provider
+from app.core.exceptions import AuthError
+from app.transport.base import extract_auth, token_from_subprotocols
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +39,21 @@ class ASRHandler:
         self._max_timer: Optional[asyncio.Task] = None
 
     async def run(self) -> None:
+        # 鉴权在 accept 之前：token 只认子协议 bearer.<jwt>，校验失败即拒握。
+        token = token_from_subprotocols(self.ws.scope.get("subprotocols"))
         try:
-            await self.ws.accept()
+            await extract_auth(token)
+        except AuthError as e:
+            # accept 之前 close = 拒绝握手：uvicorn 回 HTTP 403，浏览器 onclose code=1006。
+            peer = self.ws.scope.get("client")
+            await self.ws.close()
+            logger.info(
+                "ASR WS 握手被拒（鉴权失败）：peer=%s 原因=%s",
+                f"{peer[0]}:{peer[1]}" if peer else "?", e,
+            )
+            return
+        try:
+            await self.ws.accept(subprotocol="bearer." + token)
             await self._loop()
         except WebSocketDisconnect:
             pass

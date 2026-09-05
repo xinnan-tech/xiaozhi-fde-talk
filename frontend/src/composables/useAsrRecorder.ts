@@ -1,5 +1,6 @@
 import { onBeforeUnmount, ref, shallowRef } from "vue";
 import { useAudioRecorder } from "@/composables/useAudioRecorder";
+import { useUserStoreHook } from "@/store/modules/user";
 
 /** 停止后等待尾句转写到达的缓冲时间 */
 const TRAILING_RESULT_DELAY_MS = 800;
@@ -24,9 +25,10 @@ const getAsrWebSocketUrl = () => {
  * 创建访谈表单的语音转写录音。
  *
  * 协议（backend/app/transport/websocket/asr_handler.py）：
- *   连接即用——无 hello 握手、无鉴权子协议，客户端直发原始 WebM 二进制分片
- *   （无 4 字节 seq 头，区别于访谈会话 WS），服务端回推 {type:"asr",text} 与
- *   {type:"stopped"}（60s 上限自动停）。
+ *   鉴权与访谈会话 WS 同款——token 走 Sec-WebSocket-Protocol 子协议
+ *   bearer.<jwt>，缺失/无效握手被 403 拒绝；无 hello 握手，客户端直发原始
+ *   WebM 二进制分片（无 4 字节 seq 头，区别于访谈会话 WS），服务端回推
+ *   {type:"asr",text} 与 {type:"stopped"}（60s 上限自动停）。
  */
 export function useAsrRecorder() {
   const state = ref<AsrRecorderState>("idle");
@@ -163,6 +165,13 @@ export function useAsrRecorder() {
       return false;
     }
 
+    // token 走子协议 bearer.<jwt>，服务端在 accept 前校验
+    const token = useUserStoreHook().accessToken;
+    if (!token) {
+      error.value = new Error("Not authenticated");
+      return false;
+    }
+
     transcriptParts = [];
     transcript.value = "";
     elapsedSeconds.value = 0;
@@ -172,7 +181,7 @@ export function useAsrRecorder() {
     error.value = null;
 
     // 先建 WS，等 onopen 再开麦，避免开头音频帧被丢掉
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(url, [`bearer.${token}`]);
     socket.binaryType = "arraybuffer";
     ws.value = socket;
 

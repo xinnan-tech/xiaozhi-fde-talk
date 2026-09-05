@@ -291,30 +291,24 @@ class WSHandler:
         return True
 
     async def _loop(self) -> None:
-        # 当前 message 已累积字节。Starlette/Uvicorn 当前实现下每次 receive()
-        # 是完整 WS message（不分块），dispatch 后清零；若以后切分 message，
-        # 累积语义也能拦住 — 单 message 总字节超 _max_frame_bytes 立即 4410
-        # 关连接。text 按 UTF-8 字节（与 Uvicorn ws_max_size 字节预算对齐），
-        # binary 按 bytes 长度。
-        current_message_bytes = 0
+        # 单 message 字节上限：text 按 UTF-8 字节、binary 按 bytes 长度；
+        # 超 _max_frame_bytes 立即 4410 关连接（兜底靠 Uvicorn ws_max_size）。
         while True:
             raw = await self.ws.receive()
             if raw["type"] == "websocket.disconnect":
                 logger.info("WebSocket 收到断开帧：session=%s code=%s reason=%r",
                             self.session_id, raw.get("code"), raw.get("reason"))
                 break
+            chunk_bytes = 0
             if "text" in raw:
                 chunk_bytes = len(raw["text"].encode("utf-8"))
             elif "bytes" in raw:
                 chunk_bytes = len(raw["bytes"])
-            else:
-                chunk_bytes = 0
-            current_message_bytes += chunk_bytes
-            if current_message_bytes > self._max_frame_bytes:
+            if chunk_bytes > self._max_frame_bytes:
                 await _fail(
                     self.ws, code="frame_too_large",
                     close_code=4410,
-                    max_kb=self._max_frame_bytes // 1024,
+                    max_kb=max(1, self._max_frame_bytes // 1024),
                 )
                 return
             if "text" in raw:
@@ -329,8 +323,6 @@ class WSHandler:
                     await self._on_audio(raw["bytes"])
                 except Exception as e:  # noqa: BLE001
                     logger.warning("音频帧已丢弃：session=%s 原因=%s", self.session_id, e)
-            # 当前 message 处理完：清零累积，等下一 message。
-            current_message_bytes = 0
             if self.runtime is not None and getattr(self.runtime, "_send_dead", False):
                 logger.warning("出站通道已标记失效，关闭 WebSocket：session=%s", self.session_id)
                 break

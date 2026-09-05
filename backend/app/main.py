@@ -96,6 +96,10 @@ def main() -> None:
         # 期间所有 send 都会卡在 _send_lock 里直到 safe_send 2s 超时。
         ws_ping_interval=20.0,
         ws_ping_timeout=20.0,
+        # WS 单帧字节上限：protocol 层提前拒绝超大帧，避免应用层 64 KB
+        # 判断在整帧已缓冲进内存后才跑、拦不住瞬时内存吞噬。兜底逻辑在
+        # handler._loop（按 UTF-8 字节 / bytes 长度判）。
+        ws_max_size=64 * 1024,
         # 反向代理后的 X-Forwarded-For/Proto 让 request.client.host 拿到真实客户端 IP
         # ——request.client.host 是 proxy 时，所有用户共享一个桶，单点刷爆全员 429。
         # 默认信任 loopback / docker 网络：compose 默认网关 172.16.0.0/12、私网 10/8、

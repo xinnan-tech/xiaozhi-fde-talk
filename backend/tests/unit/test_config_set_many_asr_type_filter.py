@@ -1,6 +1,6 @@
 """set_many 过滤非激活 ASR 类型的字段（#177）。
 
-复现：admin 选了 funasr_server，前端 payload 仍带空 doubao_stream.access_token
+复现：admin 选了 funasr_server，前端 payload 仍带空 doubao_stream.api_key
 （REQUIRED_STRING_KEYS 一员）。旧实现会被 validate_value 拒 400，导致用户无法
 保存已配好的 ws_url。
 
@@ -29,7 +29,7 @@ def store():
         "asr.type": "funasr_server",
         "asr.funasr_server.ws_url": "wss://legacy:10096",
         "asr.funasr_server.language": "zh",
-        "asr.doubao_stream.access_token": "old-doubao-token",
+        "asr.doubao_stream.api_key": "old-doubao-key",
     }
     ConfigStore._instance = s
     yield s
@@ -54,7 +54,7 @@ def _patch_session(monkeypatch, captured: dict):
 
 @pytest.mark.asyncio
 async def test_set_many_drops_inactive_asr_type_required_fields(store, monkeypatch):
-    """#177 复现：admin 选 funasr_server，payload 含空 doubao_stream.access_token。
+    """#177 复现：admin 选 funasr_server，payload 含空 doubao_stream.api_key。
     set_many 必须丢弃非激活类型的空必填项，不能让它触发 REQUIRED_STRING_KEYS 校验。
     """
     captured: dict = {}
@@ -65,8 +65,7 @@ async def test_set_many_drops_inactive_asr_type_required_fields(store, monkeypat
         "asr.funasr_server.ws_url": "wss://192.168.4.36:10096",
         "asr.funasr_server.language": "zh",
         "asr.funasr_server.sample_rate": "16000",
-        "asr.doubao_stream.access_token": "",  # 非激活类型空必填 → 必须丢弃
-        "asr.doubao_stream.appid": "",
+        "asr.doubao_stream.api_key": "",  # 非激活类型空必填 → 必须丢弃
         "asr.doubao_stream.language": "zh-CN",
         "asr.doubao_stream.sample_rate": "16000",
     })
@@ -75,9 +74,7 @@ async def test_set_many_drops_inactive_asr_type_required_fields(store, monkeypat
     # 缓存 + 通知断言副作用。
     assert store._cache["asr.funasr_server.ws_url"] == "wss://192.168.4.36:10096"
     # 非激活类型的旧值不应被空串覆盖——它根本不该进入 upsert 流程
-    assert store._cache["asr.doubao_stream.access_token"] == "old-doubao-token"
-    # cache 里原本没这个 key：filter 即便失效把它写回，断言也应失败
-    assert "asr.doubao_stream.appid" not in store._cache
+    assert store._cache["asr.doubao_stream.api_key"] == "old-doubao-key"
 
 
 @pytest.mark.asyncio
@@ -90,16 +87,14 @@ async def test_set_many_keeps_inactive_keys_when_switching_type(store, monkeypat
 
     await store.set_many({
         "asr.type": "doubao_stream",
-        "asr.doubao_stream.appid": "new-appid",
-        "asr.doubao_stream.access_token": "new-token",
+        "asr.doubao_stream.api_key": "new-api-key",
         # 前端切类型时把旧类型字段也发过来了（典型 bug）
         "asr.funasr_server.ws_url": "",
         "asr.funasr_server.language": "zh",
     })
 
     # 新类型被写入
-    assert store._cache["asr.doubao_stream.access_token"] == "new-token"
-    assert store._cache["asr.doubao_stream.appid"] == "new-appid"
+    assert store._cache["asr.doubao_stream.api_key"] == "new-api-key"
     # 旧类型字段不应被空串刷掉——它们只是没参与本次 upsert，cache 保留旧值
     assert store._cache["asr.funasr_server.ws_url"] == "wss://legacy:10096"
 
@@ -132,9 +127,9 @@ async def test_set_many_uses_cache_asr_type_when_items_lack_it(store, monkeypatc
     await store.set_many({
         # 没有 asr.type
         "asr.funasr_server.language": "en",  # 激活类型
-        "asr.doubao_stream.access_token": "",  # 非激活类型 → 应被丢
+        "asr.doubao_stream.api_key": "",  # 非激活类型 → 应被丢
     })
 
     assert store._cache["asr.funasr_server.language"] == "en"
     # 非激活类型空值不应写入
-    assert store._cache["asr.doubao_stream.access_token"] == "old-doubao-token"
+    assert store._cache["asr.doubao_stream.api_key"] == "old-doubao-key"

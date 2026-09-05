@@ -35,7 +35,7 @@ ALL_B_KEYS: list[str] = [
     "asr.funasr_server.ws_url", "asr.funasr_server.ws_verify_ssl",
     # Doubao Stream
     "asr.doubao_stream.language", "asr.doubao_stream.sample_rate",
-    "asr.doubao_stream.appid", "asr.doubao_stream.access_token",
+    "asr.doubao_stream.api_key",
     "asr.doubao_stream.resource_id", "asr.doubao_stream.enable_multilingual",
     # Coach
     "coach.pause_s", "coach.max_pending_segments", "coach.min_interval_s", "coach.llm_timeout_s",
@@ -54,8 +54,7 @@ SENSITIVE_KEYS: frozenset[str] = frozenset({
     "llm.api_key",
     "ocr.api_key",
     "ocr.secret_key",
-    "asr.doubao_stream.appid",
-    "asr.doubao_stream.access_token",
+    "asr.doubao_stream.api_key",
     "system.jwt_secret",
 })
 
@@ -75,6 +74,22 @@ NUMERIC_KEYS: dict[str, type] = {
     "session.idle_timeout_s": float,
     "session.idle_check_interval_s": float,
     "session.liveness_window_s": float,
+}
+
+# 数值 key 的合法上限：超出会让运行时溢出、OOM 分配或逻辑失效（#201 系列）。
+NUMERIC_MAX_VALUE: dict[str, int | float] = {
+    # 30 天 = 43200 分钟；access token TTL 业务上限（更长应用 refresh 机制）
+    "auth.jwt_expire_minutes": 30 * 24 * 60,
+    # 365 天；refresh token 撤销表可接受的"用户不登录"最长窗口
+    "auth.refresh_token_expire_days": 365,
+    # 1000；FunASR 单机房间容量上限
+    "session.max_concurrent": 1000,
+    # 1000；engine.py:277 用作 segment buffer 阈值，无上限会让兜底永远不命中
+    "coach.max_pending_segments": 1000,
+    # 192000；专业音频最大标准采样率。超限触发 funasr_server/doubao_stream 的
+    # silence_bytes 分配（sample_rate * 2 * tail_ms）OOM Killed，全站 ASR 中断
+    "asr.funasr_server.sample_rate": 192000,
+    "asr.doubao_stream.sample_rate": 192000,
 }
 
 # 枚举 key 的合法清单：写入前校验。坏值若落库，admin 配置页会把脏值
@@ -126,8 +141,7 @@ BOOL_KEYS: frozenset[str] = frozenset({
 
 # 必填鉴权字段：写入侧挡空白，避免首握失败时 admin 误判是服务挂。
 REQUIRED_STRING_KEYS: frozenset[str] = frozenset({
-    "asr.doubao_stream.appid",
-    "asr.doubao_stream.access_token",
+    "asr.doubao_stream.api_key",
 })
 
 
@@ -239,6 +253,16 @@ def validate_value(key: str, value: str) -> None:
             name=key,
             value=value,
         )
+    # 上限校验（#201）：仅作用于 NUMERIC_MAX_VALUE 列出的 key。
+    max_value = NUMERIC_MAX_VALUE.get(key)
+    if max_value is not None and v > max_value:
+        raise I18nError(
+            Keys.CONFIG_INVALID_NUMERIC_TOO_LARGE,
+            http_status=400,
+            name=key,
+            value=value,
+            max=max_value,
+        )
 
 
 # 默认值（首次 warm 时若 DB 缺则种入）
@@ -257,9 +281,8 @@ DEFAULTS: dict[str, str] = {
     # Doubao Stream
     "asr.doubao_stream.language": "zh-CN",
     "asr.doubao_stream.sample_rate": "16000",
-    "asr.doubao_stream.appid": "",
-    "asr.doubao_stream.access_token": "",
-    "asr.doubao_stream.resource_id": "volc.bigasr.sauc.duration",
+    "asr.doubao_stream.api_key": "",
+    "asr.doubao_stream.resource_id": "volc.seedasr.sauc.duration",
     "asr.doubao_stream.enable_multilingual": "false",
     "coach.pause_s": "5.0",
     "coach.max_pending_segments": "8",
@@ -283,10 +306,13 @@ DEFAULTS: dict[str, str] = {
 }
 
 
-def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
+def _sanitize_loaded_values(loaded: dict[str, str]) -> tuple[dict[str, str], list[str]]:
     """加载层兜底：DB 已有行里若有脏值（手动改 DB / 迁移脚本遗漏 / 镜像回放等历史脏值），
-    按 ENUM/BOOL/NUMERIC/URL 重新校验，命中失败回退到 DEFAULTS[k] 并 logger.warning——
-    避免脏 URL 在 warm 路径绕过写入校验静默进缓存，runtime websockets.connect 才抛 InvalidURI。
+    按 ENUM/BOOL/NUMERIC/URL 重新校验，命中失败回退到 DEFAULTS[k]。
+
+    返回 (sanitized, reverted_keys)：reverted_keys 是本次回退的 key 列表，供
+    warm() / _refresh_cache() 一次性打 banner 让 admin 部署后看到「哪些 key
+    偷偷改回默认」（#201 系列：仅 logger.warning 单条会被淹没在启动日志里）。
 
     必填鉴权字段（REQUIRED_STRING_KEYS）空值仅 warn、不回退（DEFAULTS 自身也是 ""，
     无有效回退目标），由 provider 构造路径的 ValueError 兜底——但要让 admin 可见。
@@ -296,6 +322,7 @@ def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
     """
     validated_keys = set(ENUM_KEYS) | set(BOOL_KEYS) | set(NUMERIC_KEYS) | set(URL_KEYS)
     sanitized: dict[str, str] = {}
+    reverted: list[str] = []
     for k, v in loaded.items():
         if k in validated_keys:
             try:
@@ -307,6 +334,7 @@ def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
                         k, v, DEFAULTS[k],
                     )
                     sanitized[k] = DEFAULTS[k]
+                    reverted.append(k)
                     continue
                 # 拿不到 DEFAULTS：跳过避免后续运行路径炸 500（理论上 ALL_B_KEYS
                 # 与 DEFAULTS key 一一对应，这里是兜底）。
@@ -325,7 +353,7 @@ def _sanitize_loaded_values(loaded: dict[str, str]) -> dict[str, str]:
                 k, v,
             )
         sanitized[k] = v
-    return sanitized
+    return sanitized, reverted
 
 
 class ConfigStore:
@@ -346,7 +374,7 @@ class ConfigStore:
     async def warm(self) -> None:
         """启动期一次性灌入内存；DB 缺失的 key 用 DEFAULTS 种入。
 
-        DEFAULTS 中若有空字符串类必填字段（如豆包 appid/access_token 没有合法
+        DEFAULTS 中若有空字符串类必填字段（如豆包 api_key 没有合法
         默认），validate_value 会拒——跳过种入并 warn，让 DB 留空由 admin 通过
         配置页补齐，避免无声写入"无效值"。其他 key 的脏 DEFAULTS（URL / ENUM /
         BOOL / NUMERIC 写错）属配置 bug，必须 fail-fast 抛出——首次启动通道与
@@ -357,6 +385,7 @@ class ConfigStore:
         并 logger.warning——避免首次 create_llm() 在 factory.py:54 抛 ValueError
         把全站 LLM 调打成 500（get_llm() 是 interviews.py / coaching/engine.py
         等热路径的必经节点）。老数据无需迁移脚本就能收敛。
+
         """
         async with SessionLocal() as session:
             existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
@@ -367,7 +396,7 @@ class ConfigStore:
                 try:
                     validate_value(k, v)
                 except I18nError:
-                    # 必填字段（豆包 appid/access_token 等）DEFAULTS 自身是 "" 无
+                    # 必填字段（豆包 api_key 等）DEFAULTS 自身是 "" 无
                     # 合法回退目标，跳过种入 + warn 让 admin 在配置页补齐；其他 key
                     # 的脏 DEFAULTS（如 URL 写错）属配置 bug，必须 fail-fast 抛出
                     # ——首次启动通道与 admin PUT 通道同等对待。
@@ -380,6 +409,7 @@ class ConfigStore:
                     )
                     continue
                 session.add(SystemConfig(key=k, value=v))
+
             if missing:
                 await session.commit()
                 logger.info("ConfigStore 种入 %d 个默认 key", len(missing))
@@ -390,7 +420,15 @@ class ConfigStore:
         async with SessionLocal() as session:
             existing = await session.execute(select(SystemConfig).where(SystemConfig.key.in_(ALL_B_KEYS)))
             loaded = {row.key: row.value for row in existing.scalars().all()}
-        self._cache = _sanitize_loaded_values(loaded)
+        sanitized, reverted = _sanitize_loaded_values(loaded)
+        self._cache = sanitized
+        # 一次性 banner：admin 部署后立刻看到「哪些 key 被偷偷改回默认」，
+        # 避免下次再写同一个错值。WARNING 而非 ERROR：sanitize 是恢复不是失败。
+        if reverted:
+            logger.warning(
+                "ConfigStore 加载时回退 %d 个 key 到 DEFAULTS：%s",
+                len(reverted), ", ".join(sorted(reverted)),
+            )
 
     async def get(self, key: str) -> Optional[str]:
         if key not in self._cache:
@@ -478,8 +516,8 @@ class ConfigStore:
             for key, value in items.items():
                 if key not in ALL_B_KEYS:
                     raise ValueError(f"unknown config key: {key}")
-                # 敏感字段空值跳过：仅当缓存里已有非空值时跳过（保留旧 token，
-                # 防 admin 表单"看似保存"实则没改）。access_token 同时属于
+                # 敏感字段空值跳过：仅当缓存里已有非空值时跳过（保留旧 API Key，
+                # 防 admin 表单"看似保存"实则没改）。api_key 同时属于
                 # REQUIRED_STRING_KEYS，若缓存值已为空必须走 validate_value 拦
                 # 下空提交，否则首握失败时 admin 看不出是"忘了填"还是"服务挂"。
                 if (
@@ -614,10 +652,13 @@ async def get_max_concurrent() -> int:
     """全局同时活跃访谈上限（= FunASR 房间容量）。
 
     读 session.max_concurrent；解析失败或 <1 一律钳到 1（否则谁也开不了访谈）。
+    上限钳到 NUMERIC_MAX_VALUE 兜底——validate_value 是写入侧唯一入口，
+    但 DB 直改 / 镜像回放 / 未来重构漏调校验时，运行时仍能自保。
     """
     s = get_config_store()
     try:
-        return max(1, int(await s.get("session.max_concurrent") or "10"))
+        v = max(1, int(await s.get("session.max_concurrent") or "10"))
     except (TypeError, ValueError):
         return 10
+    return min(v, NUMERIC_MAX_VALUE["session.max_concurrent"])
 

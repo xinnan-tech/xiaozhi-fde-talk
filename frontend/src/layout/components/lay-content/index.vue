@@ -151,6 +151,11 @@ const transitionMain = defineComponent({
 .content-wrapper {
   min-height: 0;
   min-width: 0;
+  height: 100%;
+}
+
+.main-content {
+  height: 100%;
 }
 
 .content-footer {

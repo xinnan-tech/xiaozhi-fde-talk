@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from app.core.i18n.errors import SessionIllegalTransitionError
 # Legacy alias still importable & is the SAME class.
 from app.core.exceptions import IllegalTransitionError  # noqa: F401
@@ -311,3 +313,44 @@ async def test_bad_handshake_wrong_type_closes_with_4000(monkeypatch):
 
     ws.close.assert_awaited_once()
     assert ws.close.call_args.kwargs["code"] == 4000
+
+
+@pytest.mark.parametrize(
+    "non_dict_msg",
+    [
+        [{"type": "listen"}],   # list
+        "hello",                # string
+        42,                     # number
+        None,                   # null
+        True,                   # bool
+        [1, 2, 3],              # array
+    ],
+)
+@pytest.mark.asyncio
+async def test_dispatch_non_dict_returns_bad_json(monkeypatch, non_dict_msg):
+    """post-hello _dispatch 收到非 dict → bad_json + 4411 而不是 ws.internal。
+
+    旧实现 msg.get("type") 在 list 上抛 AttributeError，被 run() 外层
+    except Exception 接住走 ws.internal — 把客户端输入错说成服务端 bug。
+    复用已有的 code="bad_json"（与 JSONDecodeError 同语义），不再加新
+    i18n key。
+    """
+    import app.transport.websocket.handler as h_mod
+
+    ws = MagicMock()
+    ws.send_json = AsyncMock()
+    ws.close = AsyncMock()
+    h = WSHandler(ws, "sid")
+    rt = MagicMock()
+    rt._send_fn = h._send
+    rt._bound_client_id = "clientA"
+    h.runtime = rt
+
+    fail_calls: list = []
+
+    async def fake_fail(ws, state=None, *, code, i18n_key=None, close_code=None, **params):
+        fail_calls.append((code, close_code))
+
+    monkeypatch.setattr(h_mod, "_fail", fake_fail)
+    await h._dispatch(non_dict_msg)
+    assert fail_calls == [("bad_json", 4411)]

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from app.core.i18n.errors import SessionIllegalTransitionError
 # Legacy alias still importable & is the SAME class.
 from app.core.exceptions import IllegalTransitionError  # noqa: F401
@@ -308,6 +310,60 @@ async def test_bad_handshake_wrong_type_closes_with_4000(monkeypatch):
     error_frames = [f for f in sent_frames if f.get("type") == "error"]
     assert len(error_frames) == 1
     assert error_frames[0]["code"] == "bad_handshake"
+
+    ws.close.assert_awaited_once()
+    assert ws.close.call_args.kwargs["code"] == 4000
+
+
+@pytest.mark.parametrize(
+    "non_dict_payload",
+    [
+        '[{"type": "hello"}]',   # list
+        '"hello"',                # string
+        '42',                     # number
+        'null',                   # null
+        'true',                   # bool
+        '[1, 2, 3]',              # array (重复 list 一类，回归覆盖)
+    ],
+)
+@pytest.mark.asyncio
+async def test_bad_handshake_non_dict_json_returns_not_object(monkeypatch, non_dict_payload):
+    """issue #210：合法 JSON 但不是 object → bad_handshake + not_object 文案 + 4000 关闭。
+
+    旧实现 `msg.get("type")` 在 list 上抛 AttributeError，被 run() 外层
+    except Exception 接住走 ws.internal——把客户端输入错位说成服务端 bug，
+    前端看到「服务内部错误」先去查后端。新实现加 isinstance(msg, dict)
+    校验，统一走 bad_handshake + not_object i18n key。
+    """
+    import app.transport.websocket.handler as h_mod
+    from app.core.i18n import Keys
+
+    ws = MagicMock()
+    ws.scope = {"subprotocols": ["bearer.t"]}
+    ws.accept = AsyncMock()
+    ws.receive_text = AsyncMock(return_value=non_dict_payload)
+    ws.send_json = AsyncMock()
+    ws.close = AsyncMock()
+    user = MagicMock()
+    user.user_id = "u1"
+    monkeypatch.setattr(h_mod, "extract_auth", AsyncMock(return_value=user))
+
+    h = WSHandler(ws, "s1")
+    await h.run()
+
+    sent_frames = []
+    for c in ws.send_json.call_args_list:
+        if not c.args:
+            continue
+        arg = c.args[0]
+        if isinstance(arg, str) and arg.lstrip().startswith("{"):
+            sent_frames.append(json.loads(arg))
+        elif isinstance(arg, dict):
+            sent_frames.append(arg)
+    error_frames = [f for f in sent_frames if f.get("type") == "error"]
+    assert len(error_frames) == 1
+    assert error_frames[0]["code"] == "bad_handshake"
+    assert error_frames[0]["i18n_key"] == Keys.WS_BAD_HANDSHAKE_NOT_OBJECT.value
 
     ws.close.assert_awaited_once()
     assert ws.close.call_args.kwargs["code"] == 4000

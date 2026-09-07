@@ -35,6 +35,7 @@
   "ws.bad_handshake.expect_json": "Expected JSON hello",
   "ws.bad_handshake.expect_hello_first": "Expected hello first",
   "ws.bad_handshake.invalid_json": "Invalid JSON frame",
+  "ws.bad_handshake.not_object": "First message must be a JSON object",
   "ws.auth.failed": "Authentication failed",
   "ws.frame.too_large": "Single frame exceeds {max_kb} KB",
   "ws.session.concurrent_limit": "Concurrent interview limit reached ({limit})",

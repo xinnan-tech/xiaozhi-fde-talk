@@ -203,6 +203,14 @@ class WSHandler:
                         i18n_key=Keys.WS_BAD_HANDSHAKE_JSON,
                         close_code=4000)
             return False
+        # JSON 合法但不是 object（list / string / number / null / bool）：
+        # 原来 `msg.get("type")` 在 list 上抛 AttributeError，被外层 except Exception
+        # 接住走 ws.internal——把客户端输入错位说成服务端 bug。issue #210
+        if not isinstance(msg, dict):
+            await _fail(self.ws, code="bad_handshake",
+                        i18n_key=Keys.WS_BAD_HANDSHAKE_NOT_OBJECT,
+                        close_code=4000)
+            return False
         if msg.get("type") != "hello":
             await _fail(self.ws, code="bad_handshake",
                         i18n_key=Keys.WS_BAD_HANDSHAKE_ORDER,

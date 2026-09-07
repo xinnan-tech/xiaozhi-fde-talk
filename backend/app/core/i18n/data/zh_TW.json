@@ -35,6 +35,7 @@
   "ws.bad_handshake.expect_json": "期望首則訊息為 JSON hello",
   "ws.bad_handshake.expect_hello_first": "期望先收到 hello",
   "ws.bad_handshake.invalid_json": "無效的 JSON 訊框",
+  "ws.bad_handshake.not_object": "首則訊息必須是 JSON 物件",
   "ws.auth.failed": "鑑權失敗",
   "ws.frame.too_large": "單一訊框超過 {max_kb} KB",
   "ws.session.concurrent_limit": "活躍訪談數已達上限（{limit}）",

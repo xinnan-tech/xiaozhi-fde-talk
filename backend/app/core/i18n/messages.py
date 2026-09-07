@@ -52,6 +52,7 @@ class Keys(StrEnum):
     WS_BAD_HANDSHAKE_JSON = "ws.bad_handshake.expect_json"
     WS_BAD_HANDSHAKE_ORDER = "ws.bad_handshake.expect_hello_first"
     WS_BAD_HANDSHAKE_INVALID_JSON = "ws.bad_handshake.invalid_json"
+    WS_BAD_HANDSHAKE_NOT_OBJECT = "ws.bad_handshake.not_object"
     WS_AUTH_FAILED = "ws.auth.failed"
     WS_FRAME_TOO_LARGE = "ws.frame.too_large"
     WS_SESSION_CONCURRENT_LIMIT = "ws.session.concurrent_limit"

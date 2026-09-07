@@ -33,7 +33,6 @@ import {
   suspendInterviewApi,
   unignoreInterviewItemApi
 } from "@/api/interview";
-import { useAudioRecorder } from "@/composables/useAudioRecorder";
 import { usePcmRecorder } from "@/composables/usePcmRecorder";
 import {
   useWebSocket,
@@ -394,7 +393,7 @@ const startInterviewTimer = (reset = true) => {
 };
 
 const showMicrophonePermissionGuide = () => {
-  const microphoneError = microphoneErrorState.value;
+  const microphoneError = pcmRecorder.error.value;
   // 只有非安全源需要 flags 指引，普通权限拒绝仍使用通用提示
   const isInsecureOrigin =
     microphoneError?.message === "mic_unavailable_insecure_origin";
@@ -620,10 +619,7 @@ const getInterviewSessionId = () =>
   interviewDetail.value?.id || (route.params.id as string);
 
 const AUDIO_PARAMS = {
-  format:
-    typeof window !== "undefined" && "AudioWorkletNode" in window
-      ? "pcm_s16le"
-      : "opus",
+  format: "pcm_s16le",
   sample_rate: 16000,
   channels: 1,
   frame_duration: 20
@@ -972,64 +968,11 @@ const pcmRecorder = usePcmRecorder({
   }
 });
 
-const {
-  isRecording: isMicrophoneEnabled,
-  error: microphoneErrorState,
-  acquireStream,
-  startRecording,
-  stopRecording
-} = useAudioRecorder({
-  audio: {
-    channelCount: 1,
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true
-  },
-  onAudioData: async audio => {
-    const payload = await audio.arrayBuffer();
-    console.info("[InterviewPage] 音频准备发送", {
-      size: payload.byteLength,
-      websocketState: websocketState.value,
-      microphoneEnabled: microphoneEnabled.value
-    });
-    if (!microphoneEnabled.value) return;
-    const sent = sendAudioFrame(payload);
-    console.info("[InterviewPage] 音频发送结果", {
-      sent,
-      size: payload.byteLength,
-      websocketState: websocketState.value
-    });
-    if (!sent) {
-      console.warn("[InterviewPage] 音频片段未发送", {
-        size: audio.size,
-        websocketState: websocketState.value
-      });
-    }
-  }
-});
-
-const microphoneEnabled = computed(
-  () => pcmRecorder.isRecording.value || isMicrophoneEnabled.value
-);
-const microphoneError = computed(
-  () => pcmRecorder.error.value || microphoneErrorState.value
-);
-const acquireMicrophone = async () => {
-  if (AUDIO_PARAMS.format === "pcm_s16le") {
-    return pcmRecorder.acquireStream();
-  }
-  return acquireStream();
-};
-const startMicrophone = async () => {
-  if (AUDIO_PARAMS.format === "pcm_s16le") {
-    return pcmRecorder.startRecording();
-  }
-  return startRecording();
-};
-const stopMicrophone = () => {
-  pcmRecorder.stopRecording();
-  stopRecording();
-};
+const microphoneEnabled = computed(() => pcmRecorder.isRecording.value);
+const microphoneError = computed(() => pcmRecorder.error.value);
+const acquireMicrophone = () => pcmRecorder.acquireStream();
+const startMicrophone = () => pcmRecorder.startRecording();
+const stopMicrophone = () => pcmRecorder.stopRecording();
 
 const openMicrophone = async () => {
   if (!isWebSocketConnected.value) {

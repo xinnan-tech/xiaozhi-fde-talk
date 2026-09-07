@@ -63,6 +63,7 @@ class Keys(StrEnum):
     WS_CONNECTION_CONFLICT = "ws.connection.conflict"
     WS_CONNECTION_KICKED = "ws.connection.kicked"
     WS_AUDIO_LOW_LEVEL = "ws.audio.low_level"
+    WS_AUDIO_FORMAT_UNSUPPORTED = "ws.audio.format_unsupported"
     WS_CLOSE_SESSION_ENDED = "ws.close.session_ended"
     WS_CLOSE_SUSPENDED = "ws.close.suspended"
 

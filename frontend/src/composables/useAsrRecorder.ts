@@ -1,5 +1,5 @@
 import { onBeforeUnmount, ref, shallowRef } from "vue";
-import { useAudioRecorder } from "@/composables/useAudioRecorder";
+import { usePcmRecorder } from "@/composables/usePcmRecorder";
 
 /** 停止后等待尾句转写到达的缓冲时间 */
 const TRAILING_RESULT_DELAY_MS = 800;
@@ -24,9 +24,9 @@ const getAsrWebSocketUrl = () => {
  * 创建访谈表单的语音转写录音。
  *
  * 协议（backend/app/transport/websocket/asr_handler.py）：
- *   连接即用——无 hello 握手、无鉴权子协议，客户端直发原始 WebM 二进制分片
- *   （无 4 字节 seq 头，区别于访谈会话 WS），服务端回推 {type:"asr",text} 与
- *   {type:"stopped"}（60s 上限自动停）。
+ *   连接即用——无 hello 握手、无鉴权子协议，客户端直发裸 PCM（int16 mono 16kHz）
+ *   二进制分片（无 4 字节 seq 头，区别于访谈会话 WS），服务端回推
+ *   {type:"asr",text} 与 {type:"stopped"}（60s 上限自动停）。
  */
 export function useAsrRecorder() {
   const state = ref<AsrRecorderState>("idle");
@@ -49,19 +49,18 @@ export function useAsrRecorder() {
     error: recorderError,
     startRecording,
     stopRecording
-  } = useAudioRecorder({
+  } = usePcmRecorder({
     audio: {
       channelCount: 1,
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true
     },
-    onAudioData: async audio => {
+    onAudioData: audio => {
       // 原始分片直发（无 seq 头）；仅在连接存活时发送
       if (!ws.value || ws.value.readyState !== WebSocket.OPEN) return;
-      const buffer = await audio.arrayBuffer();
-      if (ws.value?.readyState === WebSocket.OPEN) {
-        ws.value.send(buffer);
+      if (ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(audio);
       }
     }
   });
@@ -239,7 +238,7 @@ export function useAsrRecorder() {
       }
     }
   });
-  // useAudioRecorder 自带 onBeforeUnmount(stopRecording)，麦克风无需重复清理
+  // usePcmRecorder 自带 onBeforeUnmount(stopRecording)，麦克风无需重复清理
 
   return {
     mediaStream,

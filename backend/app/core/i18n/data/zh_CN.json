@@ -46,6 +46,7 @@
   "ws.connection.conflict": "该访谈已有另一个连接，是否接管？",
   "ws.connection.kicked": "连接已被另一个客户端接管",
   "ws.audio.low_level": "麦克风音量过低，请靠近麦克风",
+  "ws.audio.format_unsupported": "不支持的音频格式，请刷新浏览器后重试",
   "ws.close.session_ended": "访谈已结束",
   "ws.close.suspended": "访谈已挂起",
   "session.concurrent_limit": "活跃访谈数已达上限（{limit}）",

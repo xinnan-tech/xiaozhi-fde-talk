@@ -41,7 +41,8 @@ test("recording flow: create → navigate → start → recording status → sto
   // 4. 录音链路：点开始访谈。
   //    链路：handleStartInterview → acquireStream（mic 权限 + fake audio 跑通）
   //    → openWebSocket → onConnected 后 sendListenState('start') → startRecording。
-  //    fake audio 由 --use-file-for-fake-audio-capture 注入，MediaRecorder 会循环读 wav。
+  //    fake audio 由 --use-file-for-fake-audio-capture 注入，AudioContext +
+  //    AudioWorklet 从麦克风流持续抓 PCM 帧。
   await startBtn.click()
 
   // 5. 等 UI 状态翻：控制按钮变为「暂停访谈」/「Pause」。
@@ -51,10 +52,11 @@ test("recording flow: create → navigate → start → recording status → sto
     .first()
   await expect(controlBtn).toBeVisible({ timeout: 20_000 })
 
-  // 让录音链路跑几秒，浏览器持续录制 fake audio，opus 帧经 WebSocket 发到
-  // 后端，再被后端转送到真 FunASR 做识别。fake audio 是 backend/tests/e2e/audio/
-  // interview.webm（9min16s 真实访谈 opus32kbps）—— chromium --use-file-for-fake-audio-capture
-  // loop 播放，前 6s 内必有真语音段，FunASR 应返回 transcript 文本。
+  // 让录音链路跑几秒，浏览器 AudioContext + AudioWorklet 持续从 fake audio
+  // 流采样（320 sample / 20ms int16 mono PCM），经 WebSocket 发到后端做 FunASR
+  // 识别。fake audio 是 backend/tests/e2e/audio/interview.webm（opus 32kbps
+  // mono 16kHz）—— chromium --use-file-for-fake-audio-capture loop 播放，前
+  // 6s 内必有真语音段，FunASR 应返回 transcript 文本。
   await page.waitForTimeout(6_000)
 
   // 断言：右侧 transcript 面板结构已渲染（.transcript-card glass-card 在

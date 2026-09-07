@@ -140,7 +140,6 @@ class WSHandler:
         self._user: Optional[CurrentUser] = None
         self._handshake_timeout_s: float = 5.0   # 等首条 hello 的超时（避免客户端建连后不发 hello 永久挂住）
         self._max_frame_bytes: int = 64 * 1024   # 单帧大小上限（text/bytes 任一 payload）
-        self._audio_format = "opus"
 
     # ---- IO 辅助 ----
     async def _send(self, obj: dict) -> None:
@@ -219,10 +218,6 @@ class WSHandler:
             return False
 
         audio_params = msg.get("audio_params")
-        if isinstance(audio_params, dict) and audio_params.get("format") == "pcm_s16le":
-            self._audio_format = "pcm_s16le"
-        else:
-            self._audio_format = "opus"
 
         state = await manager.get(self.session_id)
         if state is None or state.session.user_id != self._user.user_id:
@@ -234,6 +229,23 @@ class WSHandler:
         # 路径也能拿到正确 locale（manager.start 抛 I18nError 时 state 未刷新）。
         state.locale = _resolve_hello_locale(msg, self.ws.scope)
         force_locale(state.locale)
+
+        # 旧前端缓存（曾走 MediaRecorder/WebM）仍声明 format=opus：现在后端
+        # 硬切 PCM 直通，老格式字节流会全乱码。直接拒握把错误抛回前端，让用户
+        # 看到明确提示去刷新，而不是无声吞下再产出一堆垃圾转写。locale 已上设，
+        # 错误消息会按客户端 Accept-Locale 渲染（zh-CN/zh-TW/en-US 各自正确）。
+        if isinstance(audio_params, dict) and audio_params.get("format") == "opus":
+            logger.warning(
+                "客户端发送了 legacy format=opus（疑似旧前端缓存），请刷新浏览器。session=%s",
+                self.session_id,
+            )
+            await _fail(
+                self.ws,
+                code="audio_format_unsupported",
+                i18n_key=Keys.WS_AUDIO_FORMAT_UNSUPPORTED,
+                close_code=4400,
+            )
+            return False
 
         try:
             is_reconnect = state.status in (SessionStatus.IN_PROGRESS, SessionStatus.SUSPENDED)
@@ -378,7 +390,7 @@ class WSHandler:
         if self.runtime._send_fn != self._send:
             return
         seq = int.from_bytes(frame[:4], "big")
-        await self.runtime.submit_audio(seq, frame[4:], self._audio_format)
+        await self.runtime.submit_audio(seq, frame[4:])
 
     async def _on_takeover(self) -> None:
         """pending 连接确认接管：踢旧 owner → 绑自己 → 回 hello 让前端开麦。

@@ -7,14 +7,17 @@
    标记（`context_length_exceeded` / `Range of input length` / `maximum
    context length` 等），命中则抛 `LLMContextOverflowError`（422）而非通用
    `LLM_NON_RETRYABLE`（502）
-3. /extract 路由 `except LLMContextOverflowError: raise` 让 422 透传给前端
-   （而不是被 except LLMError 静默 fallback 成 current_values），让用户区分
-   「请缩短 transcript」与「重试」
+3. /extract 路由去掉 `except LLMError` 整段，让所有 LLMError（= I18nError，
+   自带 http_status）透传给前端全局 handler：
+   - LLMContextOverflowError → 422（让前端区分「请缩短 transcript」与「重试」）
+   - 其他 LLMError（鉴权失败 / 服务挂 / JSON 解析失败）→ 502（与 OCR 路径对齐，
+     让前端区分「LLM 配置/服务问题」与「文本里没信息」）
 
 测试覆盖：
 - schema：boundary（200_000 通过 / 200_001 拒） + 端到端 422
 - adapter：marker 命中 + 4xx 路径
-- route：context overflow → 422（不被静默吞）；其它 LLMError → 保留 current_values
+- route：context overflow → 422（不被静默吞）；其他 LLMError → 502 透传
+  （issue #197 反例：鉴权失败必须向上抛，不能降级成 200 + 空 values）
 """
 from __future__ import annotations
 
@@ -130,6 +133,18 @@ def extract_client():
     return TestClient(app)
 
 
+@pytest.fixture
+def fake_config_store():
+    """get_config_store 的 MagicMock 替身：所有 key 返回 None。"""
+    fake_store = MagicMock()
+
+    async def fake_get(key):
+        return None
+
+    fake_store.get = fake_get
+    return fake_store
+
+
 def _post_extract(client, transcript: str = "客户是 ABC 公司 CEO 张三", fields: list[str] | None = None):
     return client.post(
         "/api/v1/interviews/extract",
@@ -140,6 +155,22 @@ def _post_extract(client, transcript: str = "客户是 ABC 公司 CEO 张三", f
             "field_labels": {"objective": "目标"},
             "field_types": {"objective": "text"},
             "current_values": {"objective": "已有值"},
+        },
+    )
+
+
+def _post_extract_with_empty_current(client):
+    """_post_extract 的伴生版本：current_values 故意为空，覆盖「文本里信息全
+    但 LLM 跑不通」的反例场景（issue #197）。"""
+    return client.post(
+        "/api/v1/interviews/extract",
+        json={
+            "transcript": "客户是 ABC 公司 CEO 张三，明天上午十点谈半小时",
+            "template_id": "pm-research",
+            "fields": ["objective"],
+            "field_labels": {"objective": "目标"},
+            "field_types": {"objective": "text"},
+            "current_values": {},
         },
     )
 
@@ -220,35 +251,51 @@ def test_extract_context_overflow_returns_422_not_silent_fallback(extract_client
     assert r.status_code != 200
 
 
-def test_extract_other_llm_error_still_falls_back_to_current_values(extract_client):
-    """其他 LLMError（非 context overflow）仍保留 current_values 兜底 —— 行为不变。
+def test_extract_non_overflow_llm_error_passes_through_502(extract_client, fake_config_store):
+    """非 context overflow 的 LLMError（鉴权失败 / 服务挂 / JSON 解析失败）→ 502 透传。
 
-    只 context overflow 单独 re-raise，其它错误（鉴权失败 / 服务挂 / JSON
-    解析失败）仍走原 fallback 路径，避免破坏 LLM 临时抖动的恢复体验。
+    issue #197：旧实现 `except LLMError: values = dict(req.current_values)` 把
+    LLM 鉴权失败静默降级成 200 + 空 values，前端提示「没提取到新字段」，把
+    配置问题误导成用户文本问题。现在路由层不再吞 LLMError，由 I18nError
+    全局 handler 转 502 响应。
     """
-    from unittest.mock import MagicMock
-
-    fake_store = MagicMock()
-
-    async def fake_get(key):
-        return None
-
-    fake_store.get = fake_get
-
     async def fake_chat_json(system, user):
-        # 非 context overflow 的 LLM 错误（鉴权失败 / 服务挂 / JSON 解析失败等）——
-        # 走 LLM_NON_RETRYABLE（502）。路由层应保留 current_values 兜底，不透传给用户。
         raise I18nError(
             Keys.LLM_NON_RETRYABLE.value, http_status=502,
             status=500, body="internal error",
         )
 
     with patch("app.adapters.llm.factory.get_llm") as mock_get_llm, \
-         patch("app.transport.http.routes.interviews.get_config_store", return_value=fake_store):
+         patch("app.transport.http.routes.interviews.get_config_store", return_value=fake_config_store):
         mock_get_llm.return_value.chat_json = fake_chat_json
         r = _post_extract(extract_client, transcript="正常长度" * 100)
 
-    assert r.status_code == 200, r.text
+    assert r.status_code == 502, r.text
     body = r.json()
-    # current_values 兜底：保留「已有值」
-    assert body["values"]["objective"] == "已有值", body
+    # I18nError 全局 handler 转译为 {detail, code}，code 是 i18n key
+    assert body["code"] == Keys.LLM_NON_RETRYABLE.value, body
+
+
+def test_extract_auth_failure_passes_through_502_not_200(extract_client, fake_config_store):
+    """复现 issue #197 的鉴权失败路径：LLM 返回 401 → 路由层透传 502。
+
+    反例：旧实现对 `LLMError` 静默 fallback，鉴权失败也返 200 + current_values，
+    前端 `filled === 0` 走「没提取到新字段」分支，把 LLM key 错配说成是
+    用户文本信息不足。
+    """
+    async def fake_chat_json(system, user):
+        # 模拟 OpenAI 兼容 provider 在 401 时抛 LLM_NON_RETRYABLE（502）。
+        raise I18nError(
+            Keys.LLM_NON_RETRYABLE.value, http_status=502,
+            status=401, body='{"error":{"message":"invalid api key"}}',
+        )
+
+    with patch("app.adapters.llm.factory.get_llm") as mock_get_llm, \
+         patch("app.transport.http.routes.interviews.get_config_store", return_value=fake_config_store):
+        mock_get_llm.return_value.chat_json = fake_chat_json
+        # current_values 故意为空，模拟「文本里信息很全但 LLM 跑不通」的反例场景
+        r = _post_extract_with_empty_current(extract_client)
+
+    assert r.status_code == 502, r.text
+    body = r.json()
+    assert body["code"] == Keys.LLM_NON_RETRYABLE.value, body

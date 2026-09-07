@@ -291,17 +291,25 @@ class WSHandler:
         return True
 
     async def _loop(self) -> None:
+        # 单 message 字节上限：text 按 UTF-8 字节、binary 按 bytes 长度；
+        # 超 _max_frame_bytes 立即 4410 关连接（兜底靠 Uvicorn ws_max_size）。
         while True:
             raw = await self.ws.receive()
             if raw["type"] == "websocket.disconnect":
                 logger.info("WebSocket 收到断开帧：session=%s code=%s reason=%r",
                             self.session_id, raw.get("code"), raw.get("reason"))
                 break
-            # 单帧大小上限（text/bytes 任一 payload）
-            payload = raw.get("bytes") or raw.get("text") or ""
-            if len(payload) > self._max_frame_bytes:
-                await _fail(self.ws, code="frame_too_large",
-                            close_code=4410, max_kb=64)
+            chunk_bytes = 0
+            if "text" in raw:
+                chunk_bytes = len(raw["text"].encode("utf-8"))
+            elif "bytes" in raw:
+                chunk_bytes = len(raw["bytes"])
+            if chunk_bytes > self._max_frame_bytes:
+                await _fail(
+                    self.ws, code="frame_too_large",
+                    close_code=4410,
+                    max_kb=max(1, self._max_frame_bytes // 1024),
+                )
                 return
             if "text" in raw:
                 try:

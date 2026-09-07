@@ -120,10 +120,12 @@ describe("SpectralEnergyVAD", () => {
       // 用低能量粉噪模拟"安静房间"——非零样本，避免纯零截断正弦带来的
       // 频谱泄漏干扰 spectral 判别
       const quietFrame = whiteNoiseFrame(0.001, 999);
-      const decisions = feedN(vad, quietFrame, 30);
-      // 关键断言：5 帧后稳态 silence（不关心具体哪一帧翻的，
-      // 只保证最终进入稳态 silence，不会被残余 speech 永远拖着）
-      const steady = decisions.slice(5);
+      // 50 帧以确保 padding 30 帧耗尽后还有富余帧可断言
+      const decisions = feedN(vad, quietFrame, 50);
+      // 关键断言：trailing padding 30 帧用完后，VAD 进入稳态 silence
+      //（不关心具体哪一帧翻的，只保证最终进入稳态 silence，不会被残余
+      // speech 永远拖着）。padding 由 speech 段 ≥ 30 帧触发（够格为一句）。
+      const steady = decisions.slice(40);
       expect(steady.every(d => !d)).toBe(true);
     });
   });

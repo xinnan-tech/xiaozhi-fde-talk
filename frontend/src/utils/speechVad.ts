@@ -10,6 +10,10 @@
  *   - 噪声地板用慢 EMA 跟踪（α=0.02），仅在判 silence 时更新——防止把语音当成底噪。
  *   - 状态机：开麦即假定语音（prevDecision = true），避免开麦后第一句被切；
  *     transition 帧（判别翻转）无条件放行，保证音节尾音不丢。
+ *   - 条件式 trailing padding：仅当上一段 speech ≥ 30 帧 (600ms) 时才在
+ *     speech→silence 后追加 30 帧静音送 ASR。600ms = FunASR 切句阈值，也
+ *     是"够格作为一句"的最小语音长度，避免把句中短停顿 / "嗯""啊"误送
+ *     padding（否则真实访谈音频误检会爆炸到 97%）。silence→speech 时撤销。
  *   - 暖启动：FFT 缓冲未满时直接沿用 prevDecision。
  *
  * 输入：16kHz mono Int16Array，每帧 320 样本（20ms）。
@@ -27,6 +31,16 @@ const ENERGY_ATTACK_FLOOR = 200; // 绝对下限，避免极低噪声地板下�
 const NOISE_FLOOR_ALPHA = 0.02;
 const NOISE_FLOOR_MIN = 50; // 噪声地板下限，避免纯静音（rms=0）时无限趋近 0
 const SPECTRAL_TOTAL_FLOOR = 0.01; // 总能量低于此值直接判 silence
+// trailing silence padding：仅当上一段 speech 长度 ≥ MIN_SPEECH_FRAMES_FOR_PADDING
+// 时才在 speech→silence 后追加 N 帧静音送 ASR，让 FunASR 内部 VAD 立即识别句尾
+//（FunASR 最短静音阈值 ≥600ms）。否则 VAD 把所有静音都砍掉后 FunASR 看不到句尾
+// 间隙、2pass 不切句 → 用户必须主动暂停才能拿到结果。
+//   - 30 帧 = 600ms @ 20ms/帧 = FunASR 切句阈值
+//   - MIN_SPEECH_FRAMES_FOR_PADDING = 30 也是「够格作为一句」的最小语音长度，
+//     避免把"嗯""啊"等短回复 / 句中短停顿误送 padding（否则真实访谈音频
+//     误检会从 ~50% 爆炸到 97%，见 review "fix-cross-browser-pcm-streaming"）。
+const TRAILING_PADDING_FRAMES = 30;
+const MIN_SPEECH_FRAMES_FOR_PADDING = 30;
 
 // 1024 点 Hann 窗（预计算）
 const HANN: Float32Array = (() => {
@@ -101,6 +115,14 @@ export class SpectralEnergyVAD {
   private filled = 0;
   private noiseFloor = 200;
   private prevDecision = true;
+  // speech→silence 翻转后追加的 trailing silence 倒计时（帧数）。
+  // > 0 时无论 VAD 判定如何都返回 true，让 ASR 看到句尾间隙。
+  // 仅在上一段 speech ≥ MIN_SPEECH_FRAMES_FOR_PADDING 时才启动，避免短
+  // 语音 / 句中停顿触发的 transition 也打 padding。
+  private trailingCountdown = 0;
+  // 当前 speech 段已连续多少帧。仅在判定 isSpeech=true 时累加，
+  // 用于在 speech→silence 翻转时判断本段是否够格触发 padding。
+  private speechSegmentFrames = 0;
 
   /** 当前判定的"语音"状态（外部调试用）。 */
   get isSpeech(): boolean {
@@ -188,10 +210,44 @@ export class SpectralEnergyVAD {
     // 5. 噪声地板仅在 silence 时更新
     this.updateNoiseFloor(rms, isSpeech);
 
-    // 6. 状态机：transition 帧无条件放行
+    // 6. 状态机：
+    //    - transition 帧无条件放行；
+    //    - speech→silence 时，若本段 speech ≥ MIN_SPEECH_FRAMES_FOR_PADDING，
+    //      启动 trailingCountdown 倒计时（让 FunASR 切句）；
+    //      否则只放 transition 帧本身，silence 立即丢弃（避免白送 ASR）。
+    //    - silence→speech 时撤销倒计时。
     const transition = isSpeech !== this.prevDecision;
     this.prevDecision = isSpeech;
-    return isSpeech || transition;
+
+    if (transition) {
+      if (isSpeech) {
+        // silence→speech：撤销 padding，speech 段重新计时
+        this.trailingCountdown = 0;
+        this.speechSegmentFrames = 1;
+      } else {
+        // speech→silence：先取本段长度，再视长度决定是否启动 padding
+        const speechWas = this.speechSegmentFrames;
+        this.speechSegmentFrames = 0;
+        if (speechWas >= MIN_SPEECH_FRAMES_FOR_PADDING) {
+          this.trailingCountdown = TRAILING_PADDING_FRAMES;
+        } else {
+          this.trailingCountdown = 0;
+        }
+      }
+      return true;
+    }
+
+    if (isSpeech) {
+      this.speechSegmentFrames += 1;
+      return true;
+    }
+
+    // 纯 silence（非 transition）：消耗 countdown；用完即停
+    if (this.trailingCountdown > 0) {
+      this.trailingCountdown -= 1;
+      return true;
+    }
+    return false;
   }
 
   private updateNoiseFloor(rms: number, isSpeech: boolean): void {
@@ -210,5 +266,7 @@ export class SpectralEnergyVAD {
     this.filled = 0;
     this.noiseFloor = 200;
     this.prevDecision = true;
+    this.trailingCountdown = 0;
+    this.speechSegmentFrames = 0;
   }
 }

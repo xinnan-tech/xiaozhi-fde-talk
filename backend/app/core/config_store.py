@@ -174,7 +174,10 @@ def validate_value(key: str, value: str) -> None:
         return
     if key in ENUM_KEYS:
         allowed = ENUM_KEYS[key]
-        if value not in allowed:
+        # 非字符串（list / dict / int / None）直接当非法值处理：`value not in set[str]`
+        # 对 unhashable 类型抛 TypeError，未捕获一路冒到 FastAPI 默认 handler 转 500；
+        # 显式 isinstance 检查后统一走 400 + invalid_enum_value 结构化反馈。
+        if not isinstance(value, str) or value not in allowed:
             raise I18nError(
                 Keys.CONFIG_INVALID_ENUM_VALUE,
                 http_status=400,

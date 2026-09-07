@@ -52,7 +52,10 @@ def _expand_asr(body: dict[str, Any]) -> dict[str, str]:
     存储：{ "asr.type": "doubao_stream", "asr.doubao_stream.language": "zh-CN", ... }
     """
     current_type = body.get("type", "funasr_server")
-    full_items: dict[str, str] = {"asr.type": current_type}
+    # str() 兜底：list / dict 直传会在 config_store 的 ENUM 校验 set 成员
+    # 检查时撞 unhashable → 500；与下方内层 str(v) 对齐，先把任何输入序列化成字符串，
+    # 让 ENUM 校验统一走 400 + invalid_enum_value 结构化反馈。
+    full_items: dict[str, str] = {"asr.type": str(current_type)}
     for prefix in _ASR_TYPE_PREFIXES:
         if prefix in body and isinstance(body[prefix], dict):
             for k, v in body[prefix].items():

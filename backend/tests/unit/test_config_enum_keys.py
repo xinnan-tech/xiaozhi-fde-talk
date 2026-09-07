@@ -160,3 +160,26 @@ def test_default_idle_timeout_is_30_minutes():
 def test_default_llm_base_url_is_dashscope():
     """用户原话：「llm.base_url 默认改成 https://dashscope.aliyuncs.com/compatible-mode/v1」。"""
     assert DEFAULTS["llm.base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+
+def test_validate_value_rejects_unhashable_enum_inputs():
+    """issue #209：asr.type 传 list / dict 撞 unhashable → 500 改为 400 + i18n。
+
+    旧实现 `value not in allowed`（set[str]）对 unhashable 类型直接抛 TypeError，
+    未捕获冒到 FastAPI 默认 handler 转 500；admin 看到 Internal Server Error 没法
+    定位。加 isinstance(value, str) 兜底，统一走 400 + invalid_enum_value。
+    """
+    for bad in (["funasr_server"], {"a": "b"}, [], {}):
+        with pytest.raises(I18nError) as ei:
+            validate_value("asr.type", bad)
+        assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+        assert ei.value.params["field"] == "asr.type"
+        assert ei.value.params["value"] == bad
+        assert ei.value.http_status == 400
+        assert ei.value.params["allowed"] == "doubao_stream / funasr_server"
+
+    # 同样保护对所有 ENUM key 都生效（不只是 asr.type）
+    with pytest.raises(I18nError) as ei:
+        validate_value("llm.type", ["openai"])
+    assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+    assert ei.value.http_status == 400

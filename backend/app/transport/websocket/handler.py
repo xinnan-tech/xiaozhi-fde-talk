@@ -28,20 +28,12 @@ from app.core.policies import get_policy
 from app.domain.session import SessionStatus
 from app.services.sessions.manager import ConcurrentLimitError, manager
 from app.services.sessions.runtime import SessionRuntime, registry
-from app.transport.base import extract_auth
+from app.transport.base import extract_auth, token_from_subprotocols
 
 logger = logging.getLogger(__name__)
 
 # WS 协议版本：hello 回包回显，客户端可据此判断协议面变更
 PROTOCOL_VERSION = 1
-
-
-def _token_from_subprotocols(subprotocols: list[str]) -> Optional[str]:
-    """从 Sec-WebSocket-Protocol 列表里挑出 bearer.<token>，无则 None。"""
-    for sp in subprotocols or []:
-        if sp.startswith("bearer."):
-            return sp[len("bearer."):]
-    return None
 
 
 def _ws_upgrade_accept_language(scope: dict) -> Optional[str]:
@@ -140,7 +132,6 @@ class WSHandler:
         self._user: Optional[CurrentUser] = None
         self._handshake_timeout_s: float = 5.0   # 等首条 hello 的超时（避免客户端建连后不发 hello 永久挂住）
         self._max_frame_bytes: int = 64 * 1024   # 单帧大小上限（text/bytes 任一 payload）
-        self._audio_format = "opus"
 
     # ---- IO 辅助 ----
     async def _send(self, obj: dict) -> None:
@@ -151,7 +142,7 @@ class WSHandler:
         # 鉴权在 accept 之前：token 只认子协议 bearer.<jwt>，缺失/无效直接拒绝握手
         # （uvicorn 回 HTTP 403），未认证连接连 WS 层都进不来。不读消息体 token——
         # 收消息必须先完成握手，accept-then-auth 会给无凭证连接留存活窗口。
-        token = _token_from_subprotocols(self.ws.scope.get("subprotocols"))
+        token = token_from_subprotocols(self.ws.scope.get("subprotocols"))
         try:
             self._user = await extract_auth(token)
         except AuthError as e:
@@ -212,6 +203,14 @@ class WSHandler:
                         i18n_key=Keys.WS_BAD_HANDSHAKE_JSON,
                         close_code=4000)
             return False
+        # JSON 合法但不是 object（list / string / number / null / bool）：
+        # 原来 `msg.get("type")` 在 list 上抛 AttributeError，被外层 except Exception
+        # 接住走 ws.internal——把客户端输入错位说成服务端 bug。issue #210
+        if not isinstance(msg, dict):
+            await _fail(self.ws, code="bad_handshake",
+                        i18n_key=Keys.WS_BAD_HANDSHAKE_NOT_OBJECT,
+                        close_code=4000)
+            return False
         if msg.get("type") != "hello":
             await _fail(self.ws, code="bad_handshake",
                         i18n_key=Keys.WS_BAD_HANDSHAKE_ORDER,
@@ -219,10 +218,6 @@ class WSHandler:
             return False
 
         audio_params = msg.get("audio_params")
-        if isinstance(audio_params, dict) and audio_params.get("format") == "pcm_s16le":
-            self._audio_format = "pcm_s16le"
-        else:
-            self._audio_format = "opus"
 
         state = await manager.get(self.session_id)
         if state is None or state.session.user_id != self._user.user_id:
@@ -234,6 +229,23 @@ class WSHandler:
         # 路径也能拿到正确 locale（manager.start 抛 I18nError 时 state 未刷新）。
         state.locale = _resolve_hello_locale(msg, self.ws.scope)
         force_locale(state.locale)
+
+        # 旧前端缓存（曾走 MediaRecorder/WebM）仍声明 format=opus：现在后端
+        # 硬切 PCM 直通，老格式字节流会全乱码。直接拒握把错误抛回前端，让用户
+        # 看到明确提示去刷新，而不是无声吞下再产出一堆垃圾转写。locale 已上设，
+        # 错误消息会按客户端 Accept-Locale 渲染（zh-CN/zh-TW/en-US 各自正确）。
+        if isinstance(audio_params, dict) and audio_params.get("format") == "opus":
+            logger.warning(
+                "客户端发送了 legacy format=opus（疑似旧前端缓存），请刷新浏览器。session=%s",
+                self.session_id,
+            )
+            await _fail(
+                self.ws,
+                code="audio_format_unsupported",
+                i18n_key=Keys.WS_AUDIO_FORMAT_UNSUPPORTED,
+                close_code=4400,
+            )
+            return False
 
         try:
             is_reconnect = state.status in (SessionStatus.IN_PROGRESS, SessionStatus.SUSPENDED)
@@ -306,17 +318,25 @@ class WSHandler:
         return True
 
     async def _loop(self) -> None:
+        # 单 message 字节上限：text 按 UTF-8 字节、binary 按 bytes 长度；
+        # 超 _max_frame_bytes 立即 4410 关连接（兜底靠 Uvicorn ws_max_size）。
         while True:
             raw = await self.ws.receive()
             if raw["type"] == "websocket.disconnect":
                 logger.info("WebSocket 收到断开帧：session=%s code=%s reason=%r",
                             self.session_id, raw.get("code"), raw.get("reason"))
                 break
-            # 单帧大小上限（text/bytes 任一 payload）
-            payload = raw.get("bytes") or raw.get("text") or ""
-            if len(payload) > self._max_frame_bytes:
-                await _fail(self.ws, code="frame_too_large",
-                            close_code=4410, max_kb=64)
+            chunk_bytes = 0
+            if "text" in raw:
+                chunk_bytes = len(raw["text"].encode("utf-8"))
+            elif "bytes" in raw:
+                chunk_bytes = len(raw["bytes"])
+            if chunk_bytes > self._max_frame_bytes:
+                await _fail(
+                    self.ws, code="frame_too_large",
+                    close_code=4410,
+                    max_kb=max(1, self._max_frame_bytes // 1024),
+                )
                 return
             if "text" in raw:
                 try:
@@ -337,6 +357,12 @@ class WSHandler:
     # ---- 消息路由 → Runtime 入站 API ----
     async def _dispatch(self, msg: dict) -> None:
         if self.runtime is None:
+            return
+        # msg 契约上是 dict，但 json.loads 对 list / 标量也合法，msg.get 在
+        # list 上抛 AttributeError 会被外层 except 当作服务端 bug。复用已有
+        # 的 code="bad_json"（4411）跟 JSONDecodeError 同语义。
+        if not isinstance(msg, dict):
+            await _fail(self.ws, code="bad_json", close_code=4411)
             return
         t = msg.get("type", "")
         # 接管确认：pending（尚未 bind）连接专属，须在 ownership 守卫之前放行
@@ -378,7 +404,7 @@ class WSHandler:
         if self.runtime._send_fn != self._send:
             return
         seq = int.from_bytes(frame[:4], "big")
-        await self.runtime.submit_audio(seq, frame[4:], self._audio_format)
+        await self.runtime.submit_audio(seq, frame[4:])
 
     async def _on_takeover(self) -> None:
         """pending 连接确认接管：踢旧 owner → 绑自己 → 回 hello 让前端开麦。

@@ -38,9 +38,9 @@ bleach==6.2.0
 markdown==3.7
 python-docx==1.1.2
 
-# 音频处理（WebM 解码）
+# 音频处理（PCM 直通，无解码依赖）：前端 AudioWorklet 推 16kHz s16 mono int16
+# 字节流到 WS，服务端直接送流式 ASR，不再需要 PyAV 也不需要 ffmpeg/libopus。
 # 历史曾锁 onnxruntime/llvmlite（funasr client SDK 间接依赖），但本仓走
 # WS 客户端（backend/app/adapters/asr/funasr_server.py），代码路径不 import；
 # 两个包都缺 musllinux wheel，python:3.12-alpine（musl）装必败——删。
 numpy==1.26.4
-av==12.3.0

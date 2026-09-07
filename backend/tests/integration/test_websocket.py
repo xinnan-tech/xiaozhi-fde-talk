@@ -28,7 +28,7 @@ async def test_ws_handshake_and_flow(client, login, create_session, end_session)
     uri = f"{WS_BASE}/ws/v1/interview/{sid}"
     hello = {
         "type": "hello",
-        "audio_params": {"format": "opus", "sample_rate": 16000, "channels": 1, "frame_duration": 60},
+        "audio_params": {"format": "pcm_s16le", "sample_rate": 16000, "channels": 1, "frame_duration": 20},
     }
 
     async with websockets.connect(uri, subprotocols=["bearer." + token]) as ws:
@@ -53,7 +53,7 @@ async def test_ws_bad_token(client, login, create_session):
     sid = await create_session(client, token)
     uri = f"{WS_BASE}/ws/v1/interview/{sid}"
     for subprotocols in (["bearer.bad.token"], []):
-        with pytest.raises(websockets.exceptions.InvalidStatus):
+        with pytest.raises(websockets.InvalidStatus):
             async with websockets.connect(uri, subprotocols=subprotocols):
                 pass
 
@@ -62,9 +62,28 @@ async def test_ws_token_in_hello_body_rejected(client, login, create_session):
     """token 只认子协议：放在 hello 消息体里不生效，握手照样被拒。"""
     token = await login(client)
     sid = await create_session(client, token)
-    with pytest.raises(websockets.exceptions.InvalidStatus):
+    with pytest.raises(websockets.InvalidStatus):
         async with websockets.connect(f"{WS_BASE}/ws/v1/interview/{sid}") as ws:
             await ws.send(json.dumps({"type": "hello", "token": f"Bearer {token}"}))
+
+
+async def test_ws_asr_bad_token():
+    """ASR WS 与 interview WS 同一鉴权规则：无 token / 坏 token 握手被拒（403）。
+
+    回归：/ws/v1/asr 曾完全无鉴权，匿名连接可白用上游 ASR（计费/算力）。
+    """
+    for subprotocols in (["bearer.bad.token"], []):
+        with pytest.raises(websockets.InvalidStatus):
+            async with websockets.connect(f"{WS_BASE}/ws/v1/asr", subprotocols=subprotocols):
+                pass
+
+
+async def test_ws_asr_valid_token_connects(client, login):
+    """合法 token 握手成功（子协议回显），鉴权不再挡住正常录音链路。"""
+    token = await login(client)
+    async with websockets.connect(f"{WS_BASE}/ws/v1/asr",
+                                   subprotocols=["bearer." + token]) as ws:
+        assert ws.subprotocol == "bearer." + token
 
 
 async def test_ws_resource_isolation(client, login, create_session, create_user):
@@ -116,8 +135,8 @@ async def test_ws_resume(client, login, create_session, end_session):
     await end_session(client, token, sid)
 
 
-async def test_ws_audio(client, login, create_session, end_session, zh_webm):
-    """端到端音频：WebM/Opus → WS 上行 → 服务器解码 → 流式 ASR → 收 asr 文本。
+async def test_ws_audio(client, login, create_session, end_session, zh_pcm):
+    """端到端音频：裸 PCM（int16 mono 16kHz）→ WS 上行 → 服务器直通 → 流式 ASR → 收 asr 文本。
 
     音频断句由流式 ASR 服务端处理。
     此测试依赖 FunASR 服务端运行，否则跳过。
@@ -136,7 +155,7 @@ async def test_ws_audio(client, login, create_session, end_session, zh_webm):
     uri = f"{WS_BASE}/ws/v1/interview/{sid}"
     hello = {
         "type": "hello",
-        "audio_params": {"format": "opus", "sample_rate": 16000, "channels": 1},
+        "audio_params": {"format": "pcm_s16le", "sample_rate": 16000, "channels": 1},
     }
 
     async with websockets.connect(uri, subprotocols=["bearer." + token]) as ws:
@@ -144,8 +163,8 @@ async def test_ws_audio(client, login, create_session, end_session, zh_webm):
         assert json.loads(await ws.recv())["type"] == "hello"
         await ws.send(json.dumps({"type": "listen", "state": "start"}))
         CHUNK = 4000
-        for i, off in enumerate(range(0, len(zh_webm), CHUNK)):
-            await ws.send(i.to_bytes(4, "big") + zh_webm[off:off + CHUNK])
+        for i, off in enumerate(range(0, len(zh_pcm), CHUNK)):
+            await ws.send(i.to_bytes(4, "big") + zh_pcm[off:off + CHUNK])
             await asyncio.sleep(0.02)
         await ws.send(json.dumps({"type": "listen", "state": "stop"}))
         for _ in range(30):
@@ -156,7 +175,7 @@ async def test_ws_audio(client, login, create_session, end_session, zh_webm):
     await end_session(client, token, sid)
 
 
-async def test_ws_coaching(client, login, create_session, end_session, zh_webm):
+async def test_ws_coaching(client, login, create_session, end_session, zh_pcm):
     """辅导引擎 WS 集成测试：验证首算推送 + 30s 计时器触发重算 + skip + end。
 
     辅导触发由会话内部 30s 计时器驱动。
@@ -176,7 +195,7 @@ async def test_ws_coaching(client, login, create_session, end_session, zh_webm):
     uri = f"{WS_BASE}/ws/v1/interview/{sid}"
     hello = {
         "type": "hello",
-        "audio_params": {"format": "opus", "sample_rate": 16000, "channels": 1},
+        "audio_params": {"format": "pcm_s16le", "sample_rate": 16000, "channels": 1},
     }
 
     async with websockets.connect(uri, subprotocols=["bearer." + token]) as ws:
@@ -206,8 +225,8 @@ async def test_ws_coaching(client, login, create_session, end_session, zh_webm):
 
         # 发音频 → 流式 ASR → 实时文本（辅导触发由 30s 计时器驱动，不再立即触发）
         CHUNK = 4000
-        for i, off in enumerate(range(0, len(zh_webm), CHUNK)):
-            await ws.send(i.to_bytes(4, "big") + zh_webm[off:off + CHUNK])
+        for i, off in enumerate(range(0, len(zh_pcm), CHUNK)):
+            await ws.send(i.to_bytes(4, "big") + zh_pcm[off:off + CHUNK])
             await asyncio.sleep(0.02)
         await ws.send(json.dumps({"type": "listen", "state": "stop"}))
 

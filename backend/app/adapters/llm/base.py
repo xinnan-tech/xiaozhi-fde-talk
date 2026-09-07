@@ -7,11 +7,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from app.core.i18n.errors import I18nError
+from app.core.i18n.errors import I18nError, LLMContextOverflowError
 
 # Aliased so existing call-sites (`raise LLMError(...)`, `except LLMError`,
 # `from app.adapters.llm.base import LLMError`) keep working after adoption.
 LLMError = I18nError
+
+__all__ = ["LLMProvider", "LLMError", "LLMContextOverflowError"]
 
 
 class LLMProvider(ABC):

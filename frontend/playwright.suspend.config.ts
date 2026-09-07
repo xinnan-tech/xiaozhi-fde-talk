@@ -20,8 +20,9 @@ export default defineConfig({
     video: "retain-on-failure",
     launchOptions: {
       // 关掉 --use-file-for-fake-audio-capture：循环 interview.webm 会让 server
-      // _touch 一直 fire、watchdog 永不触发。本测试用 MediaRecorder 静默 override
-      // 模拟「会话中突然没了语音」的 idle 状态，需要 server 端 _touch 不再发生。
+      // _touch 一直 fire、watchdog 永不触发。本测试用 pcm-processor.js fetch
+      // 拦截 override 模拟「会话中突然没了语音」的 idle 状态：worklet 加载的是
+      // 空 processor，process() 不 postMessage，客户端永远不发 PCM 帧。
       args: [
         "--use-fake-device-for-media-stream",
         "--use-fake-ui-for-media-stream"

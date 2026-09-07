@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import functools
 from typing import Optional
 
 from sqlalchemy import func, select, text
@@ -14,10 +15,16 @@ from app.core.config_store import get_config_store
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.core.password_policy import validate_password_strength
-from app.core.security import hash_password_async, verify_password_async
+from app.core.security import hash_password, hash_password_async, verify_password_async
 from app.domain.auth import CurrentUser
 from app.persistence.models import User
 from app.persistence.repositories.user import user_repo
+
+# lazy 计算的 dummy hash：bcrypt cost=12，首次调用时计算一次后缓存。
+# 避免模块导入期同步阻塞 ~1.2s（影响 uvicorn worker 启动、pytest collection）。
+@functools.lru_cache(maxsize=1)
+def _get_dummy_hash() -> str:
+    return hash_password("__timing_dummy_user_does_not_exist__")
 
 
 async def authenticate_user(
@@ -25,7 +32,15 @@ async def authenticate_user(
 ) -> Optional[CurrentUser]:
     # user_repo.get_by_username 内部已 .lower()，service 无需再归一
     user = await user_repo.get_by_username(db, username)
-    if user is None or not await verify_password_async(password, user.password_hash):
+    if user is None:
+        # 时序均衡：用户不存在时也跑一次 bcrypt，与「密码错误」路径对称，
+        # 使攻击者无法通过响应时间区分用户是否存在。
+        await verify_password_async(password, _get_dummy_hash())
+        return None
+    # 密码错误时也跑一次 bcrypt（与用户不存在路径对称的 1 次 bcrypt），
+    # verify_password_async 内部 catch ValueError/TypeError → return False，
+    # 异常路径极快但不影响均衡。
+    if not await verify_password_async(password, user.password_hash):
         return None
     return CurrentUser(user_id=user.id, username=user.username, role=user.role or "user")
 

@@ -7,7 +7,7 @@
   - WebSocket URL：wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async
     （多语种模式：bigmodel_nostream）
   - 二进制帧格式：4 字节头 + 4 字节长度 + gzip 压缩 payload
-  - 鉴权：Token Auth（X-Api-App-Key / X-Api-Access-Key / X-Api-Resource-Id）
+  - 鉴权：API Key（X-Api-Key / X-Api-Resource-Id / X-Api-Request-Id）
   - 停止：发送 message_type_specific_flags=0x02 的空音频帧
 """
 from __future__ import annotations
@@ -53,9 +53,8 @@ class DoubaoStreamProvider(ASRProvider):
     def __init__(self) -> None:
         store = get_config_store()
         P = "asr.doubao_stream."
-        self._appid: str = store.get_sync(f"{P}appid") or ""
-        self._access_token: str = store.get_sync(f"{P}access_token") or ""
-        self._resource_id: str = store.get_sync(f"{P}resource_id", "volc.bigasr.sauc.duration")
+        self._api_key: str = store.get_sync(f"{P}api_key") or ""
+        self._resource_id: str = store.get_sync(f"{P}resource_id", "volc.seedasr.sauc.duration")
         self._uid: str = store.get_sync(f"{P}uid", "streaming_asr_service")
         self._workflow: str = store.get_sync(
             f"{P}workflow",
@@ -63,11 +62,11 @@ class DoubaoStreamProvider(ASRProvider):
         )
         self._result_type: str = store.get_sync(f"{P}result_type", "single")
         self._format: str = store.get_sync(f"{P}format", "pcm")
-        self._codec: str = store.get_sync(f"{P}codec", "pcm")
+        self._codec: str = store.get_sync(f"{P}codec", "raw")
         self._sample_rate: int = int(store.get_sync(f"{P}sample_rate") or 16000)
         self._bits: int = int(store.get_sync(f"{P}bits") or 16)
         self._channel: int = int(store.get_sync(f"{P}channel") or 1)
-        self._end_window_size: int = int(store.get_sync(f"{P}end_window_size") or 200)
+        self._end_window_size: int = int(store.get_sync(f"{P}end_window_size") or 800)
         self._boosting_table: str = store.get_sync(f"{P}boosting_table_name", "")
         self._correct_table: str = store.get_sync(f"{P}correct_table_name", "")
 
@@ -100,14 +99,14 @@ class DoubaoStreamProvider(ASRProvider):
         self, on_utterance: Callable[[str, bool], Awaitable[None]]
     ) -> None:
         """连接 Doubao ASR 服务端 WS，发送初始化请求。"""
-        if not self._appid or not self._access_token:
-            raise ValueError("Doubao ASR appid/access_token 未配置")
+        if not self._api_key:
+            raise ValueError("Doubao ASR api_key 未配置")
 
         self._on_utterance = on_utterance
         self._is_stopping = False
         self._ws_dead = False
 
-        headers = self._token_auth()
+        headers = self._api_key_auth()
         try:
             self._ws = await websockets.connect(
                 self._ws_url,
@@ -309,23 +308,19 @@ class DoubaoStreamProvider(ASRProvider):
 
     # ── 协议工具 ─────────────────────────────────────────────
 
-    def _token_auth(self) -> dict[str, str]:
+    def _api_key_auth(self) -> dict[str, str]:
         return {
-            "X-Api-App-Key": self._appid,
-            "X-Api-Access-Key": self._access_token,
+            "X-Api-Key": self._api_key,
             "X-Api-Resource-Id": self._resource_id,
-            "X-Api-Connect-Id": str(uuid.uuid4()),
+            "X-Api-Request-Id": str(uuid.uuid4()),
         }
 
     def _construct_request(self, reqid: str) -> dict:
         req = {
-            "app": {
-                "appid": self._appid,
-                "token": self._access_token,
-            },
             "user": {"uid": self._uid},
             "request": {
                 "reqid": reqid,
+                "model_name": "bigmodel",
                 "workflow": self._workflow,
                 "show_utterances": True,
                 "result_type": self._result_type,

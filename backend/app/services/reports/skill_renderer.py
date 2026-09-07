@@ -160,7 +160,16 @@ async def render_skills(md: str) -> str:
         if not result.ok or result.artifact is None:
             parts.append(_fallback(skill_id, result.error or "unknown error"))
         elif result.artifact.content:
-            parts.append(result.artifact.content)
+            content = result.artifact.content
+            warnings = result.artifact.meta.get("warnings") or []
+            if isinstance(warnings, str):
+                warnings = [warnings]
+            if warnings:
+                warning_block = "\n".join(
+                    f"> Note: {warning}" for warning in warnings
+                )
+                content = f"{content}\n\n{warning_block}"
+            parts.append(content)
         elif result.artifact.url:
             parts.append(f"[{skill_id}]({result.artifact.url})")
         else:

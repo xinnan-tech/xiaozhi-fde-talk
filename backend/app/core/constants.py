@@ -84,4 +84,5 @@ _WS_ERROR_KEY: dict[str, str] = {
     "connection_conflict": Keys.WS_CONNECTION_CONFLICT.value,
     "connection_kicked":   Keys.WS_CONNECTION_KICKED.value,
     "audio_low_level":     Keys.WS_AUDIO_LOW_LEVEL.value,
+    "audio_format_unsupported": Keys.WS_AUDIO_FORMAT_UNSUPPORTED.value,
 }

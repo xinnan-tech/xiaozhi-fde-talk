@@ -1,8 +1,8 @@
 """ASR 专用 WebSocket 处理器（访谈创建时的录音转写，无需 session）。
 
 流程：
-  ws 连接 → 用户按按钮开始录音 → MediaRecorder 推 WebM 音频帧
-  → 本 handler 实时解码 + 送 FunASR 流式识别 → 实时推送 asr 文本给前端
+  ws 连接 → 用户按按钮开始录音 → AudioWorklet 推裸 PCM 音频帧（int16 mono 16kHz）
+  → 本 handler 直接转发给 FunASR 流式识别 → 实时推送 asr 文本给前端
   → 用户松手 / 超时 → 前端请求 /api/v1/interviews/extract 提取字段 → 自动填表
 
 生命周期与 session 无关：连接即用，断开即释放。
@@ -15,8 +15,9 @@ from typing import Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.adapters.asr.audio_decode import WebMDecoder
 from app.adapters.asr.factory import create_asr_provider
+from app.core.exceptions import AuthError
+from app.transport.base import extract_auth, token_from_subprotocols
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,26 @@ class ASRHandler:
 
     def __init__(self, ws: WebSocket) -> None:
         self.ws = ws
-        self._decoder: Optional[WebMDecoder] = None
         self._stream_provider = None
-        self._feed_lock = asyncio.Lock()
         self._stopped = False
         self._max_timer: Optional[asyncio.Task] = None
 
     async def run(self) -> None:
+        # 鉴权在 accept 之前：token 只认子协议 bearer.<jwt>，校验失败即拒握。
+        token = token_from_subprotocols(self.ws.scope.get("subprotocols"))
         try:
-            await self.ws.accept()
+            await extract_auth(token)
+        except AuthError as e:
+            # accept 之前 close = 拒绝握手：uvicorn 回 HTTP 403，浏览器 onclose code=1006。
+            peer = self.ws.scope.get("client")
+            await self.ws.close()
+            logger.info(
+                "ASR WS 握手被拒（鉴权失败）：peer=%s 原因=%s",
+                f"{peer[0]}:{peer[1]}" if peer else "?", e,
+            )
+            return
+        try:
+            await self.ws.accept(subprotocol="bearer." + token)
             await self._loop()
         except WebSocketDisconnect:
             pass
@@ -47,8 +59,7 @@ class ASRHandler:
             await self._cleanup()
 
     async def _loop(self) -> None:
-        """接收二进制音频帧，解码后送 ASR 流。"""
-        self._decoder = WebMDecoder()
+        """接收二进制 PCM 帧（int16 mono 16kHz）→ 直接送 ASR 流。"""
         self._stream_provider = create_asr_provider()
         self._stream_provider.on_dead = self._on_provider_dead
         await self._stream_provider.start_stream(self._on_utterance)
@@ -68,16 +79,26 @@ class ASRHandler:
             await self._on_audio(frame)
 
     async def _on_audio(self, frame: bytes) -> None:
-        """解码音频帧并送 ASR。"""
-        if self._stopped or self._stream_provider is None:
+        """喂入 PCM 帧 → ASR 流式识别。
+
+        PCM 字节流无共享可变状态（与 WebM cluster 累积缓冲相对），无需 to_thread
+        卸载解码。provider.feed_stream 自身保证并发安全。
+        """
+        if self._stopped or self._stream_provider is None or not frame:
             return
-        async with self._feed_lock:
-            pcm = await asyncio.to_thread(self._decoder.feed, frame)
-        if pcm and self._stream_provider is not None:
-            try:
-                await self._stream_provider.feed_stream(pcm)
-            except Exception:  # noqa: BLE001
-                pass
+        # s16 mono PCM 必须 2 字节对齐；奇数字节截断最后一字节避免 ASR 帧偏移。
+        if len(frame) % 2:
+            logger.warning(
+                "ASR PCM 帧奇数字节：bytes=%d 已截断最后 1B（协议错乱？）",
+                len(frame),
+            )
+            frame = frame[:-1]
+            if not frame:
+                return
+        try:
+            await self._stream_provider.feed_stream(frame)
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _on_utterance(self, text: str, is_final: bool) -> None:
         """ASR 返回一句转写结果 → 推给前端。"""

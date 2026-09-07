@@ -29,36 +29,24 @@ def test_enum_keys_exact_set():
     }
 
 
-def test_validate_value_rejects_doubao_appid_empty():
-    """#138: 切到 Doubao Stream 后 App ID 留空也能落库→ 首次握手才炸。
+def test_validate_value_rejects_doubao_api_key_empty():
+    """API Key 留空时不能落库，否则首次握手才会失败。
     写入侧必须拦：空白（含全空格）一律 400。
     """
     from app.core.config_store import REQUIRED_STRING_KEYS
-    assert "asr.doubao_stream.appid" in REQUIRED_STRING_KEYS
-    assert "asr.doubao_stream.access_token" in REQUIRED_STRING_KEYS
+    assert "asr.doubao_stream.api_key" in REQUIRED_STRING_KEYS
 
     for bad in ("", " ", "\t", "\n", "   \t\n"):
         with pytest.raises(I18nError) as ei:
-            validate_value("asr.doubao_stream.appid", bad)
+            validate_value("asr.doubao_stream.api_key", bad)
         assert ei.value.code == Keys.CONFIG_INVALID_REQUIRED_STRING.value
-        assert ei.value.params["name"] == "asr.doubao_stream.appid"
-        assert ei.value.http_status == 400
-
-
-def test_validate_value_rejects_doubao_access_token_empty():
-    """#138: 同款，access_token 留空也得拦。"""
-    for bad in ("", " ", "\t", "  \t"):
-        with pytest.raises(I18nError) as ei:
-            validate_value("asr.doubao_stream.access_token", bad)
-        assert ei.value.code == Keys.CONFIG_INVALID_REQUIRED_STRING.value
-        assert ei.value.params["name"] == "asr.doubao_stream.access_token"
+        assert ei.value.params["name"] == "asr.doubao_stream.api_key"
         assert ei.value.http_status == 400
 
 
 def test_validate_value_accepts_doubao_required_strings_non_empty():
-    """#138 正向：合法非空值放行。覆盖 REQUIRED_STRING_KEYS 两个 key。"""
-    validate_value("asr.doubao_stream.appid", "1234567890")
-    validate_value("asr.doubao_stream.access_token", "abc-def_token_123")
+    """API Key 非空时放行。"""
+    validate_value("asr.doubao_stream.api_key", "ak-1234567890")
 
 
 def test_enum_keys_values_are_correct_sets():
@@ -172,3 +160,26 @@ def test_default_idle_timeout_is_30_minutes():
 def test_default_llm_base_url_is_dashscope():
     """用户原话：「llm.base_url 默认改成 https://dashscope.aliyuncs.com/compatible-mode/v1」。"""
     assert DEFAULTS["llm.base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+
+def test_validate_value_rejects_unhashable_enum_inputs():
+    """issue #209：asr.type 传 list / dict 撞 unhashable → 500 改为 400 + i18n。
+
+    旧实现 `value not in allowed`（set[str]）对 unhashable 类型直接抛 TypeError，
+    未捕获冒到 FastAPI 默认 handler 转 500；admin 看到 Internal Server Error 没法
+    定位。加 isinstance(value, str) 兜底，统一走 400 + invalid_enum_value。
+    """
+    for bad in (["funasr_server"], {"a": "b"}, [], {}):
+        with pytest.raises(I18nError) as ei:
+            validate_value("asr.type", bad)
+        assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+        assert ei.value.params["field"] == "asr.type"
+        assert ei.value.params["value"] == bad
+        assert ei.value.http_status == 400
+        assert ei.value.params["allowed"] == "doubao_stream / funasr_server"
+
+    # 同样保护对所有 ENUM key 都生效（不只是 asr.type）
+    with pytest.raises(I18nError) as ei:
+        validate_value("llm.type", ["openai"])
+    assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+    assert ei.value.http_status == 400

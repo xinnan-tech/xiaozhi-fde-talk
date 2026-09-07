@@ -1,4 +1,4 @@
-"""集成测试公共 fixture：HTTP 客户端 / 登录 / 建会话 / WebM 编码。
+"""集成测试公共 fixture：HTTP 客户端 / 登录 / 建会话 / 裸 PCM 编码。
 
 服务未运行时整体跳过（pytest_collection_modifyitems 钩子）。
 对应 design §10 PR2：集成测试 DB 隔离 + 演示账号 + 模型可用性探测。
@@ -11,7 +11,6 @@ E2E_PASSWORD='<服务实际密码>'（用户名仍是 admin）。
 """
 from __future__ import annotations
 
-import io as _io
 import os
 import uuid
 
@@ -133,34 +132,16 @@ def end_session():
 
 
 @pytest.fixture
-def zh_webm() -> bytes:
-    """生成内嵌测试音频：静音 + 正弦波 → WebM/Opus（模拟浏览器 MediaRecorder 上行）。"""
-    import av
+def zh_pcm() -> bytes:
+    """生成内嵌测试音频：静音 + 正弦波 → 16kHz s16 mono int16 PCM bytes
+    （模拟浏览器 AudioWorklet 上行的字节流）。"""
     import numpy as np
 
     # 生成 1 秒测试音频：500ms 静音 + 500ms 正弦波（模拟语音）
     sample_rate = 16000
     duration = 1.0
     t = np.linspace(0, duration, int(sample_rate * duration), dtype=np.float32)
-    # 500ms 静音 + 500ms 1000Hz 正弦波
     silence = np.zeros(sample_rate // 2, dtype=np.int16)
     tone = (np.sin(2 * np.pi * 1000 * t[sample_rate // 2:]) * 8000).astype(np.int16)
     pcm = np.concatenate([silence, tone])
-
-    out = _io.BytesIO()
-    cont = av.open(out, mode="w", format="webm")
-    stream = cont.add_stream("libopus", rate=sample_rate)
-    stream.layout = "mono"
-    fsz = 320
-    a = pcm.copy()
-    if len(a) % fsz:
-        a = np.pad(a, (0, fsz - len(a) % fsz))
-    for i in range(0, len(a), fsz):
-        fr = av.AudioFrame.from_ndarray(a[i:i + fsz].reshape(1, -1), format="s16", layout="mono")
-        fr.sample_rate = sample_rate
-        for p in stream.encode(fr):
-            cont.mux(p)
-    for p in stream.encode(None):
-        cont.mux(p)
-    cont.close()
-    return out.getvalue()
+    return pcm.tobytes()

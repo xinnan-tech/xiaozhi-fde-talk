@@ -62,6 +62,20 @@ class SessionDeleteForbiddenError(I18nError):
         super().__init__(Keys.SESSION_DELETE_FORBIDDEN, http_status=409, state=state)
 
 
+class LLMContextOverflowError(I18nError):
+    """LLM 输入超出 context window 上限。
+
+    4xx 但属于客户端问题（输入太长），按 422 抛出而非 5xx——前端能区分
+    「请缩短 transcript」与「重试」。由 OpenAI 兼容 adapter 在 _request
+    检测响应体的 context overflow 标记后抛出（issue #207）。
+    """
+    def __init__(self, *, status: int, snippet: str):
+        super().__init__(
+            Keys.LLM_CONTEXT_OVERFLOW, http_status=422,
+            status=status, snippet=snippet,
+        )
+
+
 # ---- Adapter aliases (existing call-sites use these names; preserve import compat) ----
 # These get rebound to I18nError at the end of this task after adoption rewrites; until
 # then, classes are declared in their original modules.

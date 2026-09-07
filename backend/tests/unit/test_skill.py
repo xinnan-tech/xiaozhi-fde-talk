@@ -5,8 +5,8 @@
 from __future__ import annotations
 
 from app.services.reports.skill_renderer import render_skills
-from app.services.skill.executor import invoke_skill
-from app.services.skill.registry import list_public_skills
+from app.services.skill.executor import SkillResult, invoke_skill
+from app.services.skill.registry import SkillArtifact, list_public_skills
 
 
 def test_skill_registry_list():
@@ -34,3 +34,21 @@ async def test_skill_renderer_replace_marker():
 async def test_skill_renderer_bad_inputs_fallback():
     rendered = await render_skills("{{skill: echo, inputs: [1, 2]}}")
     assert "JSON object" in rendered
+
+
+async def test_skill_renderer_includes_artifact_warnings(monkeypatch):
+    """技能产物中的 warnings 应出现在最终报告 Markdown 中。"""
+    artifact = SkillArtifact(
+        mime="text/markdown",
+        content="### T\n\n| a |\n| --- |\n| x |",
+        meta={"warnings": ["row 0: trailing 1 cell dropped"]},
+    )
+
+    async def fake_invoke(*_args, **_kwargs):
+        return SkillResult(ok=True, artifact=artifact)
+
+    monkeypatch.setattr(
+        "app.services.reports.skill_renderer.invoke_skill", fake_invoke
+    )
+    rendered = await render_skills("{{skill: markdown-table, inputs: {}}}")
+    assert "> Note: row 0: trailing 1 cell dropped" in rendered

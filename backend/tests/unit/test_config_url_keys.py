@@ -20,7 +20,7 @@ def test_url_keys_exact_set():
 
 
 def test_url_keys_ws_url_allowed_schemes():
-    """funasr_server 是 ws/wss；doubao_stream 走 appid 不进表。"""
+    """funasr_server 是 ws/wss；doubao_stream 使用 API Key，不进表。"""
     assert URL_KEYS["asr.funasr_server.ws_url"] == {"ws", "wss"}
 
 
@@ -199,12 +199,12 @@ def test_sanitize_loaded_values_reverts_bad_url():
     websockets.connect 才抛 InvalidURI。"""
     from app.core import config_store as cs
 
-    sanitized = cs._sanitize_loaded_values({"asr.funasr_server.ws_url": "not-a-url"})
+    sanitized, _ = cs._sanitize_loaded_values({"asr.funasr_server.ws_url": "not-a-url"})
     assert sanitized["asr.funasr_server.ws_url"] == DEFAULTS["asr.funasr_server.ws_url"]
     # llm.base_url / ocr.base_url 同理
-    sanitized = cs._sanitize_loaded_values({"llm.base_url": "ftp://x"})
+    sanitized, _ = cs._sanitize_loaded_values({"llm.base_url": "ftp://x"})
     assert sanitized["llm.base_url"] == DEFAULTS["llm.base_url"]
-    sanitized = cs._sanitize_loaded_values({"ocr.base_url": "  https://x  "})
+    sanitized, _ = cs._sanitize_loaded_values({"ocr.base_url": "  https://x  "})
     assert sanitized["ocr.base_url"] == DEFAULTS["ocr.base_url"]
 
 
@@ -213,5 +213,5 @@ def test_sanitize_loaded_values_keeps_valid_url():
     from app.core import config_store as cs
 
     loaded = {"asr.funasr_server.ws_url": "wss://asr.example.com/ws"}
-    sanitized = cs._sanitize_loaded_values(loaded)
+    sanitized, _ = cs._sanitize_loaded_values(loaded)
     assert sanitized == loaded

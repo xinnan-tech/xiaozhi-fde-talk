@@ -16,10 +16,10 @@ import uuid
 import httpx
 import websockets
 
-AUDIO = pathlib.Path(__file__).parent / "audio" / "interview.webm"  # 9m16s 真实访谈录音
+AUDIO = pathlib.Path(__file__).parent / "audio" / "interview.pcm"  # 45s 真实访谈（修剪自 interview.webm）
 
-AUDIO_PARAMS = {"format": "opus", "sample_rate": 16000, "channels": 1, "frame_duration": 60}
-CHUNK_BYTES = 800          # ~200ms 的 32kbps opus
+AUDIO_PARAMS = {"format": "pcm_s16le", "sample_rate": 16000, "channels": 1, "frame_duration": 20}
+CHUNK_BYTES = 6400         # 200ms × 16kHz × 2B（int16 mono PCM）
 CHUNK_INTERVAL = 0.2       # 与前端麦克风的到包节奏一致
 HANDSHAKE_TIMEOUT = 15
 TEMPLATE_ID = "pm-research"

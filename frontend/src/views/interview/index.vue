@@ -1691,7 +1691,7 @@ onMounted(() => {
       </main>
     </div>
     <LayFooter />
-    <el-backtop title="回到顶部">
+    <el-backtop>
       <BackTopIcon />
     </el-backtop>
   </div>
@@ -2223,15 +2223,12 @@ onMounted(() => {
   }
 
   .session-bar {
-    flex-shrink: 0;
-    gap: 18px;
     min-width: 0;
     padding: 18px 22px 8px 22px;
   }
 
   .session-meta {
     display: flex;
-    flex: 1;
     gap: 0;
     align-items: stretch;
     margin-bottom: 10px;
@@ -2254,10 +2251,6 @@ onMounted(() => {
   .session-meta-item:last-child {
     padding-right: 0;
     border-right: 0;
-  }
-
-  .session-meta-field {
-    width: 128px;
   }
 
   .session-meta-time {
@@ -2319,9 +2312,6 @@ onMounted(() => {
     display: -webkit-box;
     overflow: hidden;
     white-space: normal;
-    -webkit-box-orient: vertical;
-    line-clamp: 2;
-    -webkit-line-clamp: 2;
   }
 
   .session-meta-interviewee .session-meta-copy strong {
@@ -2932,10 +2922,6 @@ onMounted(() => {
     min-width: 40px;
     padding: 8px 10px;
   }
-
-  .interview-page .session-meta-field {
-    width: 116px;
-  }
 }
 
 @media (max-width: 1080px) {
@@ -3126,16 +3112,5 @@ onMounted(() => {
   :deep(.session-action-button.el-button [class*="el-icon"] + span) {
     display: none;
   }
-
-  // :deep(.interview-page .session-action-button.el-button) {
-  //   display: flex;
-  //   justify-content: center;
-  //   height: 40px;
-  //   padding: 0;
-
-  //   & > span {
-  //     display: none;
-  //   }
-  // }
 }
 </style>

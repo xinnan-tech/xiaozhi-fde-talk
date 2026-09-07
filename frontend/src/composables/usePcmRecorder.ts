@@ -3,7 +3,7 @@ import { SpectralEnergyVAD } from "@/utils/speechVad";
 
 export interface UsePcmRecorderOptions {
   audio?: MediaTrackConstraints;
-  onAudioData?: (audio: ArrayBufferLike) => void;
+  onAudioData?: (audio: ArrayBuffer) => void;
   /**
    * 是否对 PCM 帧做语音活动检测（VAD）。开启后静音/纯噪声帧不会调用
    * onAudioData，从而避免火山引擎 ASR（按音频时长计费）在用户沉默/思考时
@@ -129,7 +129,7 @@ export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
       if (vad && !vad.feed(frame)) continue;
       // Int16Array.buffer 在 TS 里是 ArrayBufferLike（含 SharedArrayBuffer），
       // 但 takeFrame() 是用 new Int16Array(FRAME_SAMPLES) 新建的，普通 ArrayBuffer。
-      onAudioData?.(frame.buffer);
+      onAudioData?.(frame.buffer as ArrayBuffer);
     }
   };
 

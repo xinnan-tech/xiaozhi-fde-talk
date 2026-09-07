@@ -950,6 +950,9 @@ const isWebSocketConnected = computed(
 );
 
 const pcmRecorder = usePcmRecorder({
+  // 访谈 ASR 需要持续收到语音后的静音帧，才能实时完成 VAD 断句。
+  // 这里不能启用前端 VAD 丢帧，否则只能在暂停时由后端补静音并 flush。
+  enableVad: false,
   audio: {
     channelCount: 1,
     echoCancellation: true,

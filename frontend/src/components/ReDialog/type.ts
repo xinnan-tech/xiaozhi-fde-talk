@@ -22,7 +22,7 @@ type DialogProps = {
   fullscreen?: boolean;
   /** 是否显示全屏操作图标，默认 `false`，`fullscreen` 和 `fullscreenIcon` 都传时只有 `fullscreen` 会生效 */
   fullscreenIcon?: boolean;
-  /** `Dialog CSS` 中的 `margin-top` 值，默认 `15vh` */
+  /** `Dialog CSS` 中的 `margin-top` 值 */
   top?: string;
   /** 是否需要遮罩层，默认 `true` */
   modal?: boolean;

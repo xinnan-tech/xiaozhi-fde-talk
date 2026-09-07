@@ -47,7 +47,7 @@ def test_create_base_info_single_field_too_long_raises():
         )
     assert ei.value.code == Keys.SESSION_BASE_INFO_VALUE_TOO_LONG
     assert ei.value.http_status == 422
-    assert ei.value.params["key"] == "title"
+    assert ei.value.params["field"] == "title"
     assert ei.value.params["byte_len"] == 5007  # 5 (key) + 5002 (json.dumps)
     assert ei.value.params["max_bytes"] == BASE_INFO_VALUE_MAX_BYTES
 
@@ -58,7 +58,7 @@ def test_update_base_info_single_field_too_long_raises():
     with pytest.raises(I18nError) as ei:
         UpdateInterviewRequest(base_info={"memo": huge})
     assert ei.value.code == Keys.SESSION_BASE_INFO_VALUE_TOO_LONG
-    assert ei.value.params["key"] == "memo"
+    assert ei.value.params["field"] == "memo"
     # key "memo" = 4 bytes；json.dumps(value) = 4097 + 2 引号 = 4099 → 4103
     assert ei.value.params["byte_len"] == 4103
 
@@ -118,7 +118,7 @@ def test_create_base_info_long_key_short_value_blocked_by_per_field():
             base_info={huge_key: 0},  # value=0 经 json.dumps = 1 字节
         )
     assert ei.value.code == Keys.SESSION_BASE_INFO_VALUE_TOO_LONG
-    assert ei.value.params["key"] == huge_key
+    assert ei.value.params["field"] == huge_key
 
 
 def test_create_base_info_non_json_native_value_serialized_via_str():

@@ -48,6 +48,12 @@ def _build_config(workers: int, https_port: int) -> uvicorn.Config:
         proxy_headers=True,
         forwarded_allow_ips=forwarded_allow_ips,
         log_level=os.getenv("LOG_LEVEL", "info").lower(),
+        # 与 backend/app/main.py 对齐：WS keepalive + 单帧字节上限。
+        # 64–128 KB 区间落到 handler._loop 的 4410 + i18n `ws.frame.too_large`；
+        # > 128 KB 才被 protocol 层 1009 直接断开。
+        ws_ping_interval=20.0,
+        ws_ping_timeout=20.0,
+        ws_max_size=128 * 1024,
     )
 
 

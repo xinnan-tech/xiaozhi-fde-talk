@@ -1684,11 +1684,10 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .interview-page {
-  min-height: 100vh;
-  padding: 38px 16px 0;
+  height: 100%;
+  padding: 38px 16px 24px;
   background: url("@/assets/images/bg.webp") no-repeat;
   background-size: cover;
-  overflow: hidden;
 }
 
 .interview-page {
@@ -1696,8 +1695,8 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     width: 100%;
-    height: calc(100vh - 56px);
-    min-height: calc(100vh - 56px);
+    height: 100%;
+    min-height: 0;
   }
 
   .page-header {
@@ -1762,7 +1761,6 @@ onMounted(() => {
     grid-template-columns: 480px minmax(0, 1fr);
     gap: 16px;
     align-items: stretch;
-    margin-bottom: 6px;
     width: 100%;
     min-height: 0;
   }
@@ -2916,7 +2914,7 @@ onMounted(() => {
 @media (max-width: 1080px) {
   .interview-page .page-shell {
     height: auto;
-    min-height: calc(100vh - 46px);
+    min-height: calc(100% - 46px);
   }
 
   .interview-page .workspace {
@@ -2929,7 +2927,7 @@ onMounted(() => {
   }
 
   .interview-page .left-panel {
-    max-height: 58vh;
+    max-height: 100%;
   }
 
   .interview-page .right-panel {
@@ -2938,7 +2936,7 @@ onMounted(() => {
   }
 
   .interview-page .transcript-card {
-    max-height: 62vh;
+    max-height: 100%;
     flex: initial;
   }
 }
@@ -2993,7 +2991,7 @@ onMounted(() => {
   }
 
   .interview-page .page-shell {
-    min-height: calc(100vh - 20px);
+    min-height: calc(100% - 20px);
   }
 
   .interview-page .page-header {

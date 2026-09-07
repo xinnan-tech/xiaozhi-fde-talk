@@ -1,8 +1,8 @@
 """system saveConfig + 同源 view catch 不再独立 toast 后端 detail。
 
-issue #177 反馈：ASR 保存留空 appid，弹出**两条**提示：
-  - 「asr.doubao_stream.appid 为必填项，请填写后保存」（拦截器）
-  - 「保存 语音识别 配置失败：asr.doubao_stream.appid 为必填项，请填写后保存」（view catch）
+issue #177 反馈：ASR 保存留空 api_key，弹出**两条**提示：
+  - 「asr.doubao_stream.api_key 为必填项，请填写后保存」（拦截器）
+  - 「保存 语音识别 配置失败：asr.doubao_stream.api_key 为必填项，请填写后保存」（view catch）
 
 根因：全局 http 响应拦截器已对 4xx/5xx 自动 toast，view catch 又独立
 ElMessage.error(extractBackendError(...))，两条同时弹出。修复方式与 #62

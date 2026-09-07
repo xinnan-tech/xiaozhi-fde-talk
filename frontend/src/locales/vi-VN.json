@@ -39,8 +39,6 @@
   "system.field.sample_rate": "Tần số lấy mẫu",
   "system.field.ws_url": "WebSocket URL",
   "system.field.ws_verify_ssl": "Xác minh SSL",
-  "system.field.appid": "App ID",
-  "system.field.access_token": "Access Token",
   "system.field.resource_id": "Resource ID",
   "system.field.enable_multilingual": "Chế độ đa ngôn ngữ",
   "system.field.pause_s": "Tạm dừng (giây)",

@@ -96,7 +96,6 @@ const translateGroupTitle = (groupKey: string): string => {
 const icons = {
   llm: useRenderIcon("tabler:robot"),
   asr: useRenderIcon("tabler:link"),
-  vad: useRenderIcon("tabler:adjustments"),
   coach: useRenderIcon("tabler:school"),
   auth: useRenderIcon("tabler:lock"),
   session: useRenderIcon("tabler:clock"),

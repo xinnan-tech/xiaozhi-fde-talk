@@ -950,12 +950,6 @@ const isWebSocketConnected = computed(
 );
 
 const pcmRecorder = usePcmRecorder({
-  // VAD 默认开，省火山引擎 ASR 静音时段计费。
-  // speechVad 内部已有条件式 trailing silence padding：当上一段 speech
-  // ≥ 30 帧 (600ms) 时才在 speech→silence 后追加 30 帧静音送 ASR，让
-  // FunASR 内部 VAD 能立即识别句尾→实时返回结果，不再退化成「必须暂停
-  // 才一次性 ASR」。短语音（"嗯""啊"）/ 句中短停顿不触发 padding，
-  // 避免误检爆涨。详见 speechVad.ts 类注释。
   audio: {
     channelCount: 1,
     echoCancellation: true,

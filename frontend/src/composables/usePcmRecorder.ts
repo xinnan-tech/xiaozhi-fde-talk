@@ -1,15 +1,8 @@
 import { onBeforeUnmount, ref, shallowRef } from "vue";
-import { SpectralEnergyVAD } from "@/utils/speechVad";
 
 export interface UsePcmRecorderOptions {
   audio?: MediaTrackConstraints;
   onAudioData?: (audio: ArrayBuffer) => void;
-  /**
-   * 是否对 PCM 帧做语音活动检测（VAD）。开启后静音/纯噪声帧不会调用
-   * onAudioData，从而避免火山引擎 ASR（按音频时长计费）在用户沉默/思考时
-   * 持续累加时长。默认开启。
-   */
-  enableVad?: boolean;
 }
 
 const TARGET_SAMPLE_RATE = 16000;
@@ -29,7 +22,7 @@ const PCM_BUF_CAP = 2048;
 
 /** Captures microphone audio as stable 16kHz mono PCM for streaming ASR. */
 export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
-  const { enableVad = true, onAudioData } = options;
+  const { onAudioData } = options;
   const mediaStream = shallowRef<MediaStream | null>(null);
   const audioContext = shallowRef<AudioContext | null>(null);
   const audioSource = shallowRef<MediaStreamAudioSourceNode | null>(null);
@@ -49,11 +42,6 @@ export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
   const pcmBuf = new Int16Array(PCM_BUF_CAP);
   let pcmStart = 0;
   let pcmAvailable = 0;
-
-  // VAD 状态在 startRecording 中创建、在 stopRecording 中释放；enableVad=false 时为 null
-  const vad: SpectralEnergyVAD | null = enableVad
-    ? new SpectralEnergyVAD()
-    : null;
 
   const resetRingBuffers = () => {
     resampleStart = 0;
@@ -125,8 +113,6 @@ export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
   const flushFrames = (): void => {
     while (pcmAvailable >= FRAME_SAMPLES) {
       const frame = takeFrame();
-      // VAD 决策：仅在判定为语音（或状态翻转）时下发，避免静音帧持续计费
-      if (vad && !vad.feed(frame)) continue;
       // Int16Array.buffer 在 TS 里是 ArrayBufferLike（含 SharedArrayBuffer），
       // 但 takeFrame() 是用 new Int16Array(FRAME_SAMPLES) 新建的，普通 ArrayBuffer。
       onAudioData?.(frame.buffer as ArrayBuffer);
@@ -222,8 +208,6 @@ export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
     if (context) void context.close();
     mediaStream.value?.getTracks().forEach(track => track.stop());
     mediaStream.value = null;
-    // 重置 VAD 状态，下个会话开麦时按"开麦即假定语音"策略从 0 开始
-    vad?.reset();
     resetRingBuffers();
   };
 

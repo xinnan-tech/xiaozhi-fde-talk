@@ -1,3 +1,4 @@
+import { ref } from "vue";
 import { meApi } from "@/api/user";
 import { useUserStoreHook } from "@/store/modules/user";
 import { storageLocal } from "@pureadmin/utils";
@@ -30,14 +31,19 @@ function migrateStaleStorage(): void {
 
 /** 当前会话是否已登录。乐观判断——只表示 bootstrapSession() 已成功调过
  *  /auth/me。真实态以后端为准；axios 401 拦截器会在 cookie 失效时清空
- *  Pinia + 跳登录。 */
-let bootstrapped = false;
+ *  Pinia + 跳登录。
+ *
+ * 必须是 ref 不是 plain let：home 视图的 ``isLoggedIn = computed(() =>
+ * isBootstrapped() && ...)`` 要靠 .value 访问追踪响应式依赖。改回 let
+ * 会让 computed 算过一次 false 后不再追，登录后 ``.user-avatar.online``
+ * 永远不出现——见 e2e 场景 A / D-1 / incognito-login 三处同时翻车。*/
+const bootstrapped = ref(false);
 export function isBootstrapped(): boolean {
-  return bootstrapped;
+  return bootstrapped.value;
 }
 
 export function setBootstrapped(v: boolean): void {
-  bootstrapped = v;
+  bootstrapped.value = v;
 }
 
 /** 从 cookie 重建当前用户信息。调 /auth/me（cookie 自动附）；失败抛异常，

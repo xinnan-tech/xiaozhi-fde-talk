@@ -126,3 +126,37 @@ describe("utils/auth — hasPerms 语义", () => {
     expect(hasPerms("anything-else")).toBe(true);
   });
 });
+
+/** e2e 回归钉死：isBootstrapped() 必须是响应式（Vue ref）而不是普通 let。
+ *
+ * 失败原因（修复前）：utils/auth.ts 用 ``let bootstrapped = false``，home 视图
+ * 的 ``isLoggedIn = computed(() => isBootstrapped() && ...)`` 第一次算过后
+ * 不再追依赖；登录成功后 setBootstrapped(true) 改了普通 let，computed 不重算，
+ * ``.user-avatar.online`` 永远不出现——e2e 场景 A / D-1 / incognito-login 三
+ * 处同时翻车。改为 ref 后 .value 访问被 Vue 追踪，computed 重新求值。
+ */
+describe("utils/auth — isBootstrapped 响应式（e2e 翻车回归）", () => {
+  beforeEach(clearAll);
+  afterEach(clearAll);
+
+  it("computed(() => isBootstrapped() && user.username) 在 setBootstrapped(true) 后重算为 true", async () => {
+    const { computed, ref, effectScope } = await import("vue");
+    const scope = effectScope();
+    const username = ref("");
+    const isLoggedIn = computed(() => isBootstrapped() && Boolean(username.value));
+    scope.run(() => {
+      // 初始：未 bootstrap，isLoggedIn = false
+      expect(isLoggedIn.value).toBe(false);
+      // 只设 username：依赖 username 但 bootstrapped 仍 false，computed 重算后仍 false
+      username.value = "alice";
+      expect(isLoggedIn.value).toBe(false);
+      // 设 setBootstrapped(true)：必须触发 computed 重算，且重算后读到新值
+      setBootstrapped(true);
+      expect(isLoggedIn.value).toBe(true);
+      // 反向：清回 false 也必须重算
+      setBootstrapped(false);
+      expect(isLoggedIn.value).toBe(false);
+    });
+    scope.stop();
+  });
+});

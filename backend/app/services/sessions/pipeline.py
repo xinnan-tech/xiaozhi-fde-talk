@@ -29,18 +29,23 @@ class AudioPipeline:
         self,
         on_utterance: OnUtterance,
         on_dead: Optional[Callable[[], Awaitable[None]]] = None,
-        on_overflow: Optional[Callable[[], Awaitable[None]]] = None,
         on_low_level: Optional[Callable[[LevelReading], Awaitable[None]]] = None,
+        on_misaligned: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> None:
         self._on_utterance = on_utterance
         self._on_dead = on_dead
-        self._on_overflow = on_overflow
         self._on_low_level = on_low_level
+        self._on_misaligned = on_misaligned
         self._level_monitor = LevelMonitor()
         self._is_stream = is_stream_asr()
         # 流式 provider（每会话一个实例，各自 WS）
         self._stream_provider = None
         self._pcm_samples = 0
+        # 连续奇数字节帧计数：协议错乱（中间代理截断 / 前端 bug）下持续
+        # 出现 odd-byte 帧，单次截断 1B 不会污染后续，但累计起来是协议层面
+        # 异常——到阈值后通过 _on_misaligned 通知前端走 audio_format_unsupported
+        # 错误帧提示刷新。偶数字节帧出现即重置，避免抖动期间误触发。
+        self._misaligned_streak = 0
 
     # ── 生命周期 ──────────────────────────────────────────────
 
@@ -63,6 +68,7 @@ class AudioPipeline:
             await self._stream_provider.start_stream(self._on_stream_utterance)
         self._level_monitor.reset()
         self._pcm_samples = 0
+        self._misaligned_streak = 0
         logger.info("音频管线开始监听：stream=%s provider_alive=%s",
                     self._is_stream, provider_alive)
 
@@ -72,19 +78,31 @@ class AudioPipeline:
         PCM 字节流无共享可变状态（与 WebM cluster 累积缓冲相对），并发 feed 由
         provider.send_lock 自带，本管线无需额外的 feed 锁。
         """
-        # 协议错乱 / 旧前端残留可能发奇数字节：截断会丢一字节、ASR 帧偏移。
-        # s16 mono PCM 必须按 2 字节对齐，截断最后 1B 比喂错位数据给 ASR 安全。
+        # 协议错乱 / 旧前端残留可能发奇数字节：截断 1B 比喂错位数据给 ASR 安全。
+        # 连续 ≥3 次出现视为协议层异常——单次抖动不必打扰用户，持续出现说明
+        # 中间代理截断 / 前端 bug / 网络层错位，靠 _on_misaligned 通知前端走
+        # audio_format_unsupported 错误帧提示刷新。偶数字节帧立即清零计数。
+        _MISALIGNED_THRESHOLD = 3
         if audio and len(audio) % 2:
+            self._misaligned_streak += 1
             logger.warning(
-                "PCM 帧奇数字节：bytes=%d 已截断最后 1B（协议错乱？）",
-                len(audio),
+                "PCM 帧奇数字节：bytes=%d 已截断最后 1B（streak=%d）",
+                len(audio), self._misaligned_streak,
             )
             audio = audio[:-1]
+            if (
+                self._misaligned_streak >= _MISALIGNED_THRESHOLD
+                and self._on_misaligned is not None
+            ):
+                # fire-once：触发后清零，避免每帧重复打扰；偶数字节帧来时也会清零
+                self._misaligned_streak = 0
+                await self._on_misaligned()
+        else:
+            self._misaligned_streak = 0
         pcm_new = audio
         low = self._level_monitor.feed(pcm_new) if pcm_new else None
         if pcm_new:
             self._pcm_samples += len(pcm_new) // 2
-        logger.debug("收到 PCM 音频帧：pcm_bytes=%d", len(pcm_new))
         if low is not None and self._on_low_level is not None:
             await self._on_low_level(low)
         if pcm_new and self._stream_provider is not None:

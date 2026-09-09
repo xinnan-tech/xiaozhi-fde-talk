@@ -1,4 +1,4 @@
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 /**
  * 对比 usePcmRecorder 旧版（累积拷贝）vs 新版（环形缓冲）的分配开销。
@@ -150,6 +150,10 @@ describe("usePcmRecorder 预分配开销对比", () => {
     console.log(
       `  旧版: ${(r.allocBytes / 1024 / 1024).toFixed(2)}MB / ${r.sentFrames}帧 / ${elapsed.toFixed(0)}ms CPU`
     );
+    // 基线：1 分钟 16kHz 音频按 20ms 切帧 ≈ 3000 帧。至少产出 > 2000 帧
+    // 证明模拟有效，旧版累积拷贝分配应远超环形缓冲（> 5MB）。
+    expect(r.sentFrames).toBeGreaterThan(2000);
+    expect(r.allocBytes).toBeGreaterThan(5 * 1024 * 1024);
   });
 
   it("新版：1 分钟模拟分配量（环形缓冲）", () => {
@@ -160,6 +164,24 @@ describe("usePcmRecorder 预分配开销对比", () => {
     console.log(
       `  新版: ${(r.allocBytes / 1024 / 1024).toFixed(2)}MB / ${r.sentFrames}帧 / ${elapsed.toFixed(0)}ms CPU`
     );
+    // 环形缓冲的固定分配：仅每帧 new Int16Array(320) = 640B
+    // 1 分钟 3000 帧 ≈ 1.9MB 上限，实际测约 1.4MB。
+    // 阈值 3MB 留余量；若超过说明新版退化成累积拷贝。
+    expect(r.allocBytes).toBeLessThan(3 * 1024 * 1024);
+    expect(r.sentFrames).toBeGreaterThan(2000);
+  });
+
+  it("新版相对旧版的分配量级显著降低（环形缓冲零拷贝收益）", () => {
+    const old = runOld();
+    const newR = runNew();
+    const reduction = old.allocBytes / newR.allocBytes;
+    // eslint-disable-next-line no-console
+    console.log(
+      `  收益: 旧 ${(old.allocBytes / 1024 / 1024).toFixed(2)}MB → 新 ${(newR.allocBytes / 1024 / 1024).toFixed(2)}MB（${reduction.toFixed(1)}× 降低）`
+    );
+    // 实测降低约 6.7×。阈值 ≥3× 留余量；低于此阈值说明新版退化成
+    // 累积拷贝（new Float32Array + set 整段），回归报警。
+    expect(reduction).toBeGreaterThan(3);
   });
 
   it("行为等价性：两版发出的 PCM 帧数应相同", () => {

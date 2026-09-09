@@ -71,6 +71,7 @@ class SessionRuntime:
         self.pipeline = AudioPipeline(
             self._on_utterance, on_dead=self._on_asr_dead,
             on_low_level=self._on_low_level,
+            on_misaligned=self._on_misaligned,
         )
         self._utterance_lock = asyncio.Lock()
         self._first_computed = False
@@ -371,6 +372,24 @@ class SessionRuntime:
             "message": i18n_t(Keys.WS_ASR_DISCONNECTED, locale=self.state.locale),
         })
         logger.warning("ASR 连接已标记失效：session=%s", self.state.session.id)
+
+    async def _on_misaligned(self) -> None:
+        """连续 ≥3 次收到奇数字节 PCM 帧：协议层异常，推错误帧提示用户刷新。
+
+        管线 fire-once 后会清零 streak，但本方法不主动标记 _send_dead——前端刷新
+        重建连接后会发新 audio_params（pcm_s16le），握手阶段就被 hello 拒握逻辑
+        拦下（audio_format_unsupported），不会反复触发此回调。
+        """
+        logger.warning("PCM 持续错位，疑似协议层异常：session=%s",
+                       self.state.session.id)
+        await self._send({
+            "type": "error",
+            "code": "audio_format_unsupported",
+            "i18n_key": Keys.WS_AUDIO_FORMAT_UNSUPPORTED.value,
+            "i18n_params": {},
+            "message": i18n_t(Keys.WS_AUDIO_FORMAT_UNSUPPORTED,
+                              locale=self.state.locale),
+        })
 
     async def _on_low_level(self, reading: LevelReading) -> None:
         """开麦周期内解码 PCM 电平持续过低（窗口读数 reading）：提示用户。

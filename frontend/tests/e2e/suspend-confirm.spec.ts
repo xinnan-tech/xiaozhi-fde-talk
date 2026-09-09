@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test"
 import { fillCreateInterviewForm } from "./fixtures/create-interview"
+import { loginAsAdmin } from "./fixtures/admin"
 
 // 复现并验证 fix/issue-13-suspend-confirm-dialog 的核心契约：
 // 1. 后端 watchdog 在 idle 超时后真的推 session.suspended 给前端 WS
@@ -8,6 +9,10 @@ import { fillCreateInterviewForm } from "./fixtures/create-interview"
 //
 // 前置：backend 8181 + frontend 4174 + admin storageState。系统配置 idle_timeout_s=20s、
 // idle_check_interval_s=5s，ASR=funasr_mock，LLM=stub（无需真实密钥）。
+//
+// HttpOnly cookie 由 storageState 直接持久 + 浏览器自动
+// 带；F5 / 进程退出再开仍持登录态。loginAsAdmin() 兼容幂等（已登录态
+// .online 直接 return）。下同（pause-status.spec.ts）。
 
 test("suspend confirm dialog: idle → suspend → dialog → continue → in_progress", async ({
   page
@@ -37,9 +42,9 @@ test("suspend confirm dialog: idle → suspend → dialog → continue → in_pr
   })
 
   await page.goto("/")
-  await page
-    .locator(".user-avatar.online")
-    .waitFor({ state: "visible", timeout: 15_000 })
+  // HttpOnly cookie 由 storageState 持久 + 浏览器自动带。
+  // loginAsAdmin() 兼容幂等（已登录态 .online 直接 return）。
+  await loginAsAdmin(page)
 
   // 1. 创建访谈
   await page

@@ -89,6 +89,10 @@ const i18n = createI18n({
       "system.template.save": "保存",
       "system.template.json_errors": "JSON 错误",
       "system.template.json_apply_blocked": "JSON 有错误，修正后才能切回表单模式",
+      // 第二条用例会触发 formatStructError → t("struct_error_with_path", { path, message: t(e.key) })
+      // 这两个 key 缺一，vue-i18n 会回退成字面量字符串，断言匹配不到中文
+      "system.template.struct_error_with_path": "「{path}」：{message}",
+      "system.template.err_root_not_object": "根节点必须是对象",
       "system.template.save_json_parse_failed": "保存失败：JSON 解析错误（第 {line} 行 第 {column} 列）：{message}",
       "system.template.save_json_struct_invalid": "保存失败：JSON 结构校验未通过：{details}"
     }

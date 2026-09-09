@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, shallowRef } from "vue";
 import { useAudioRecorder } from "@/composables/useAudioRecorder";
-import { useUserStoreHook } from "@/store/modules/user";
+import { isBootstrapped } from "@/utils/auth";
 
 /** 停止后等待尾句转写到达的缓冲时间 */
 const TRAILING_RESULT_DELAY_MS = 800;
@@ -165,9 +165,11 @@ export function useAsrRecorder() {
       return false;
     }
 
-    // token 走子协议 bearer.<jwt>，服务端在 accept 前校验
-    const token = useUserStoreHook().accessToken;
-    if (!token) {
+    // HttpOnly cookie 由浏览器在 WS upgrade 时自动带——服务端
+    // transport/websocket/handler.py 优先读 cookie 鉴权；前端不传 token 也可。
+    // isBootstrapped() 是「曾成功调过 /auth/me」的乐观判断，cookie 真失效会由
+    // 服务端 WS handshake 返 401 / 403 时再处理（前端会拿到 close event）。
+    if (!isBootstrapped()) {
       error.value = new Error("Not authenticated");
       return false;
     }
@@ -180,8 +182,9 @@ export function useAsrRecorder() {
     everRecorded.value = false;
     error.value = null;
 
-    // 先建 WS，等 onopen 再开麦，避免开头音频帧被丢掉
-    const socket = new WebSocket(url, [`bearer.${token}`]);
+    // 先建 WS，等 onopen 再开麦，避免开头音频帧被丢掉。无 subprotocol——
+    // cookie 自动附。
+    const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
     ws.value = socket;
 

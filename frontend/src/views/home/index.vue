@@ -21,6 +21,7 @@ import {
   getInterviewsApi
 } from "@/api/interview";
 import { interviewRouteTarget } from "@/utils/interview";
+import { isBootstrapped } from "@/utils/auth";
 
 defineOptions({
   name: "Home"
@@ -120,7 +121,7 @@ const statusList = ref([
 const interviewList = ref<InterviewItem[]>([]);
 
 /** 是否已登录 */
-const isLoggedIn = computed(() => Boolean(userStore.accessToken));
+const isLoggedIn = computed(() => isBootstrapped() && Boolean(userStore.username));
 
 const filteredInterviewList = computed(() => {
   const keyword = debouncedSearchKeyword.value.trim().toLowerCase();

@@ -1,6 +1,6 @@
 import { computed, ref, toValue, type MaybeRefOrGetter } from "vue";
 import { useWebSocket as useVueUseWebSocket } from "@vueuse/core";
-import { useUserStoreHook } from "@/store/modules/user";
+import { isBootstrapped } from "@/utils/auth";
 
 export const INTERVIEW_PROTOCOL_VERSION = 1;
 export const MAX_WEBSOCKET_FRAME_SIZE = 64 * 1024;
@@ -139,9 +139,14 @@ const isInterviewServerMessage = (
 };
 
 export function useWebSocket(options: useWebSocketOptions) {
-  const userStore = useUserStoreHook();
+  // HttpOnly cookie 由浏览器在 WS upgrade 时自动带——无须显式
+  // 读 token。允许调用方通过 options.token 显式传（脚本 / 测试 / 跨域降级），
+  // 走 subprotocol bearer.<token> 兜底；同源生产路径直接走 cookie，token
+  // 字段为空时 protocols 数组也为空。是否「可连」取决于 isBootstrapped()，
+  // 不再读 userStore.accessToken（字段已删）。
   const clientId = toValue(options.clientId) || createClientId();
-  const token = toValue(options.token) ?? userStore.accessToken;
+  const explicitToken = toValue(options.token);
+  const hasToken = Boolean(explicitToken) || isBootstrapped();
   const isReconnectAllowed = ref(options.autoReconnect !== false);
   const isHandshakeComplete = ref(false);
   const isPendingTakeover = ref(false);
@@ -151,7 +156,7 @@ export function useWebSocket(options: useWebSocketOptions) {
 
   const url = computed(() => {
     const interviewId = toValue(options.interviewId);
-    return interviewId && token
+    return interviewId && hasToken
       ? getInterviewWebSocketUrl(interviewId, toValue(options.wsBaseUrl))
       : undefined;
   });
@@ -160,7 +165,7 @@ export function useWebSocket(options: useWebSocketOptions) {
     immediate: options.immediate ?? true,
     autoConnect: true,
     autoClose: true,
-    protocols: token ? [`bearer.${token}`] : [],
+    protocols: explicitToken ? [`bearer.${explicitToken}`] : [],
     autoReconnect: {
       retries: (retried: number) => isReconnectAllowed.value && retried < 5,
       delay: (retried: number) => Math.min(1000 * 2 ** retried, 10000)

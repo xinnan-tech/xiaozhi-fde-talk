@@ -1,82 +1,89 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { useUserStoreHook } from "@/store/modules/user";
 import router from "@/router";
+import { setBootstrapped } from "@/utils/auth";
 
-const userKey = "user-info";
+// /auth/me 走 http.request，mock 避免 axios 打到 localhost。
+// vi.mock factory 会被 hoisted，引用顶层 const 会"Cannot access before init"。
+// 用 vi.hoisted 把句柄提到 factory 之上。
+const { meApiMock } = vi.hoisted(() => ({ meApiMock: vi.fn() }));
+vi.mock("@/api/user", async () => {
+  const actual = await vi.importActual<typeof import("@/api/user")>("@/api/user");
+  return { ...actual, meApi: meApiMock };
+});
 
-type TokenShape = {
-  accessToken: string;
+type SessionShape = {
   username: string;
   userId: string;
   role: "admin" | "user";
 };
 
-/** getToken()（src/router/index.ts:128 调用）从 localStorage 读；
- * 不能只 SET_ACCESS_TOKEN——那样只动 Pinia state，guard 仍然判未登录。
- * setToken 走 storageLocal()，但 storageLocal 在 vitest+happy-dom 下
- * isClient()=false 走内存空 storage，绕开它直接写 localStorage。 */
-function setTokenInStorage(token: TokenShape) {
-  window.localStorage.setItem(userKey, JSON.stringify(token));
+/** HttpOnly 模型下「登录态」由 isBootstrapped() + Pinia user
+ *  字段组成。守卫不再读 localStorage / cookie。直接调 Pinia actions 注入
+ *  + setBootstrapped(true) 模拟已登录会话。 */
+function seedLogin(session: SessionShape) {
+  const store = useUserStoreHook();
+  store.SET_USERNAME(session.username);
+  store.SET_USER_ID(session.userId);
+  store.SET_ROLE(session.role);
+  setBootstrapped(true);
 }
 
-function clearToken() {
-  window.localStorage.removeItem(userKey);
+function clearLogin() {
+  const store = useUserStoreHook();
+  store.SET_USERNAME("");
+  store.SET_USER_ID("");
+  store.SET_ROLE("user");
+  setBootstrapped(false);
+  window.localStorage.clear();
 }
 
-describe("router guards", () => {
+describe("router guards (HttpOnly cookie 模型)", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
-    clearToken();
+    clearLogin();
   });
 
   afterEach(() => {
-    clearToken();
+    clearLogin();
   });
 
   it("普通用户访问 /system 被重定向到 /error/403", async () => {
-    setTokenInStorage({
-      accessToken: "dummy.token.value",
+    seedLogin({
       username: "alice",
       userId: "u-1",
       role: "user"
     });
-    useUserStoreHook().SET_ROLE("user");
 
     await router.push("/system").catch(() => {});
     expect(router.currentRoute.value.path).toMatch(/\/error\/403/);
   });
 
   it("admin 访问 /system 不会被角色守卫拦截", async () => {
-    setTokenInStorage({
-      accessToken: "admin.token.value",
+    seedLogin({
       username: "root",
       userId: "u-0",
       role: "admin"
     });
-    useUserStoreHook().SET_ROLE("admin");
 
     await router.push("/system").catch(() => {});
-    // /system 重定向到 /system/config；二者都标 roles:["admin"]，guard 放行后
-    // 落点要么是 /system/config（redirect 命中）要么是 /system（声明本身）。
     expect(router.currentRoute.value.path).not.toMatch(/\/error\/403/);
   });
 
   it("admin 访问 /admin/users 不会被角色守卫拦截", async () => {
-    setTokenInStorage({
-      accessToken: "admin.token.value",
+    seedLogin({
       username: "root",
       userId: "u-0",
       role: "admin"
     });
-    useUserStoreHook().SET_ROLE("admin");
 
     await router.push("/admin/users").catch(() => {});
     expect(router.currentRoute.value.path).not.toMatch(/\/error\/403/);
   });
 
   it("guest 访问 /system（不在白名单）被重定向到 /home", async () => {
-    // 未登录 → getToken() 返回 null → 走白名单分支 → /system 不在白名单 → /home
+    // 未登录 → isBootstrapped() false → 走白名单分支 → /system 不在白名单 → /home
     await router.push("/system").catch(() => {});
     expect(router.currentRoute.value.path).toBe("/home");
   });
@@ -96,18 +103,11 @@ describe("router guards", () => {
     expect(router.currentRoute.value.path).toBe("/about");
   });
 
-  it("旧 token 缺 role 字段 → getToken 视作未登录 → 被踢回 /home", async () => {
-    // 模拟「升级前留下的旧 token」：只有 accessToken+username，缺 role/userId
-    window.localStorage.setItem(
-      userKey,
-      JSON.stringify({
-        accessToken: "legacy.token",
-        username: "alice"
-      })
-    );
+  it("isBootstrapped=true 但 role 字段缺失 → 走角色守卫 → /error/403", async () => {
+    // 守卫两层校验：isBootstrapped=false → 未登录 → /home；isBootstrapped=true
+    // 但 role 不匹配 → 角色守卫 → /error/403。这两条分支独立，不能混淆。
+    setBootstrapped(true);
     await router.push("/system").catch(() => {});
-    expect(router.currentRoute.value.path).toBe("/home");
-    // 同时旧 token 已被 removeToken() 清掉
-    expect(window.localStorage.getItem(userKey)).toBeNull();
+    expect(router.currentRoute.value.path).toMatch(/\/error\/403/);
   });
 });

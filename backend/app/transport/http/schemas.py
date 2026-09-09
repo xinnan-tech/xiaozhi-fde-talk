@@ -71,26 +71,54 @@ class UserInfo(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    # 双 token 模型：access 短 TTL 用于业务鉴权，refresh 长 TTL 用于换 access。
-    # 前端当前只解 access；refresh 等前端迁移到 httpOnly cookie 时再上。
-    access_token: str
+    """登录 / 注册响应。
+
+    access / refresh token 主要通过 HttpOnly cookie 下发
+    （``authorized-token`` / ``refresh-token``，JS 物理不可读）。同时保留
+    ``access_token`` / ``refresh_token`` 在 body 里：
+
+    - 兼容路径：scripts / chaos 客户端 / 集成测试走 Authorization: Bearer header
+      调业务接口，body token 是唯一无需 cookie jar 即可继续的方式。
+    - 前端主路径走 cookie，**不读取** body 里的 token 字段。Pinia 也不再持有
+      token 明文，body token 落进 JS 堆后随变量作用域结束被 GC 回收。
+
+    严格 XSS 威胁模型下：可被早注入的 fetch patch 拦截 body token。
+    这是已知妥协，与「HttpOnly cookie 是 XSS 防御主路径」共存——权衡由 PR 文本
+    与代码注释维护。
+    """
+    user: UserInfo
+    # 兼容路径字段（scripts / chaos.py / Authorization Bearer）。前端不读。
+    access_token: str = ""
     refresh_token: str = ""
     token_type: str = "bearer"
-    user: UserInfo
 
 
 class RefreshRequest(BaseModel):
-    # extra="forbid" 防 access token 被误投到 refresh 字段、其它字段被注入形成静默越权路径
+    """兼容保留：旧版本 body 传 refresh_token。
+
+    现在 /auth/refresh 完全走 cookie（``refresh-token``），body 为空也允许。
+    保留类型让迁移期的客户端 / 测试不立刻报 AttributeError，路由层已不再消费。
+    """
     model_config = ConfigDict(extra="forbid")
     refresh_token: str = Field(min_length=1)
 
 
 class RefreshResponse(BaseModel):
-    access_token: str
+    """/auth/refresh 响应。
+
+    新 access 主要通过 HttpOnly Set-Cookie 写入 ``authorized-token``，body
+    里同时返 access_token 给兼容路径使用（scripts / 测试）。
+    """
+    access_token: str = ""
     token_type: str = "bearer"
 
 
 class LogoutRequest(BaseModel):
+    """兼容保留：旧版本 body 传 refresh_token。
+
+    现在 logout 走 cookie（``refresh-token``），body 也允许携带 refresh_token
+    用于脚本 / 测试。路由层若 cookie 与 body 同时存在，优先 cookie。
+    """
     model_config = ConfigDict(extra="forbid")
     refresh_token: str = Field(min_length=1)
 

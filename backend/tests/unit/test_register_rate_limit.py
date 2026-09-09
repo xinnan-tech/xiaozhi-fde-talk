@@ -54,13 +54,13 @@ async def test_register_allows_burst_then_returns_429():
         for _ in range(rl.capacity):
             req, request = _req_and_request()
             with pytest.raises(Exception) as ei:
-                await auth_route.register(req, request, db=MagicMock())
+                await auth_route.register(req, request, db=MagicMock(), response=MagicMock())
             # 失败路径走完限流，状态码应是 500（I18nError 伪造）而不是 429
             assert getattr(ei.value, "http_status", None) != 429
         # 第 4 次：限流先于 svc_register → 429
         req, request = _req_and_request()
         with pytest.raises(Exception) as ei:
-            await auth_route.register(req, request, db=MagicMock())
+            await auth_route.register(req, request, db=MagicMock(), response=MagicMock())
         assert getattr(ei.value, "http_status", None) == 429
     finally:
         auth_module.svc_register = original_svc
@@ -85,16 +85,16 @@ async def test_register_limiter_separate_buckets_per_username():
         for _ in range(rl.capacity):
             req, request = _req_and_request("alice")
             with pytest.raises(Exception):
-                await auth_route.register(req, request, db=MagicMock())
+                await auth_route.register(req, request, db=MagicMock(), response=MagicMock())
         # "alice" 第 4 次：429
         req, request = _req_and_request("alice")
         with pytest.raises(Exception) as ei:
-            await auth_route.register(req, request, db=MagicMock())
+            await auth_route.register(req, request, db=MagicMock(), response=MagicMock())
         assert getattr(ei.value, "http_status", None) == 429
         # "bob" 全新桶：放行
         req, request = _req_and_request("bob")
         with pytest.raises(Exception) as ei:
-            await auth_route.register(req, request, db=MagicMock())
+            await auth_route.register(req, request, db=MagicMock(), response=MagicMock())
         assert getattr(ei.value, "http_status", None) != 429
     finally:
         auth_module.svc_register = original_svc
@@ -112,7 +112,7 @@ async def test_register_limiter_and_login_limiter_are_independent():
     for _ in range(rl_reg.capacity):
         req, request = _req_and_request()
         try:
-            await auth_route.register(req, request, db=MagicMock())
+            await auth_route.register(req, request, db=MagicMock(), response=MagicMock())
         except Exception:
             pass
     # login 桶应仍是初始满状态：随便试一次 login 应该不撞 429
@@ -128,7 +128,7 @@ async def test_register_limiter_and_login_limiter_are_independent():
     auth_module.authenticate_user = fake_auth
     try:
         with pytest.raises(Exception) as ei:
-            await auth_route.login(login_req, request, db=MagicMock())
+            await auth_route.login(login_req, request, db=MagicMock(), response=MagicMock())
         assert getattr(ei.value, "http_status", None) == 401, (
             f"login 桶不应被注册桶污染，应 401，实际 {getattr(ei.value, 'http_status', None)}"
         )

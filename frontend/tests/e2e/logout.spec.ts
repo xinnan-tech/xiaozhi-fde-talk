@@ -1,16 +1,21 @@
 import { test, expect } from "@playwright/test"
 
 // 已登录 → hover 头像外层 BaseSelect 容器 .user-avatar-dropdown
-// （home/index.vue:339，BaseSelect 把 @mouseenter 绑在最外层 .base-select 上，
+// （home/index.vue，BaseSelect 把 @mouseenter 绑在最外层 .base-select 上，
 // hover 内层 .user-avatar 不会冒泡触发）→ 菜单 BaseSelect 渲染 role="option"
-// 列表（home/index.vue:69 userOperationOptions 含 change_password / logout）→
-// 点 label 为「退出」/「Sign out」的 option → handleAvatarSelectChange('logout')
-// → userStore.logOut() + ElMessage.success（无中间 ElMessageBox 确认）
-// → removeToken() 清 localStorage[user-info] 与 cookie[authorized-token]
-// → 再 hover avatar 触发 login-dialog（home 视图不自动弹登录框，见 redirect.spec.ts）
+// 列表 → 点 label 为「退出」/「Sign out」的 option → handleAvatarSelectChange('logout')
+// → userStore.logOut() → POST /auth/logout（cookie 自动附）→ 后端撤销 jti +
+// Set-Cookie Max-Age=0 清两个 cookie + 浏览器清 cookie + 前端清 Pinia。
 //
-// 默认 chromium project 带 storageState（global-setup 写入）
-test("已登录用户点登出后 token 清掉、再点 avatar 弹登录框", async ({ page }) => {
+// HttpOnly cookie 由浏览器管理，document.cookie 看不到
+// HttpOnly 项（这是 XSS 防御契约）。登出后用 context.cookies() 直接查
+// Playwright 持有的 cookie 列表应不包含 authorized-token / refresh-token。
+//
+// 默认 chromium project 带 storageState（global-setup 写入 HttpOnly cookie）
+test("已登录用户点登出后 cookie 清掉、avatar 掉线、再点 avatar 弹登录框", async ({
+  page,
+  context
+}) => {
   test.setTimeout(30_000)
 
   await page.goto("/")
@@ -28,18 +33,12 @@ test("已登录用户点登出后 token 清掉、再点 avatar 弹登录框", as
   // 登出后：avatar 不再带 .online
   await expect(page.locator(".user-avatar.online")).toHaveCount(0, { timeout: 10_000 })
 
-  // localStorage[user-info] 已清（storageLocal.removeItem(userKey)）
-  const userInfo = await page.evaluate(() => localStorage.getItem("user-info"))
-  expect(userInfo).toBeNull()
-
-  // cookie[authorized-token] 已清（auth.ts:40 Cookies.remove(TokenKey)）
-  const tokenCookie = await page.evaluate(() =>
-    document.cookie
-      .split(";")
-      .map(s => s.trim())
-      .find(s => s.startsWith("authorized-token="))
-  )
-  expect(tokenCookie === undefined || tokenCookie === "authorized-token=").toBe(true)
+  // HttpOnly cookie 由浏览器管，logout API 返 Set-Cookie Max-Age=0 后
+  // Playwright 持有的 cookie 列表里这两个应被移除。
+  const cookiesAfter = await context.cookies()
+  const cookieMap = Object.fromEntries(cookiesAfter.map(c => [c.name, c]))
+  expect(cookieMap["authorized-token"]).toBeUndefined()
+  expect(cookieMap["refresh-token"]).toBeUndefined()
 
   // 再点 avatar（未登录态）触发 dialogStore.openLogin() → .login-dialog 弹出
   await page.locator(".user-avatar").click()

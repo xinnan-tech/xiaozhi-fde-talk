@@ -1,14 +1,17 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { useDialogStoreHook } from "@/store/modules/dialog";
 import { useUserStoreHook } from "@/store/modules/user";
+import { setBootstrapped } from "@/utils/auth";
 
 // 源码 dialog.ts 用 useDialogStoreHook() / useUserStoreHook()（单例 pinia）。
 // 测试也走单例，避免 active pinia 改动不到 source 的读路径。
+// isBootstrapped() 是模块级状态，beforeEach 复位。
 
 describe("stores/DialogStore — state init", () => {
   beforeEach(() => {
     useDialogStoreHook().$reset();
     useUserStoreHook().$reset();
+    setBootstrapped(false);
   });
 
   it("默认 createInterviewVisible=false, loginVisible=false", () => {
@@ -18,16 +21,15 @@ describe("stores/DialogStore — state init", () => {
   });
 });
 
-describe("stores/DialogStore — openCreateInterview 路由分支", () => {
+describe("stores/DialogStore — openCreateInterview 路由分支（HttpOnly）", () => {
   beforeEach(() => {
     useDialogStoreHook().$reset();
     useUserStoreHook().$reset();
+    setBootstrapped(false);
   });
 
-  it("无 accessToken 时：跳到 openLogin()，不打开 createInterview", () => {
-    const user = useUserStoreHook();
-    user.accessToken = "";
-
+  it("isBootstrapped=false 时：跳到 openLogin()，不打开 createInterview", () => {
+    setBootstrapped(false);
     const dlg = useDialogStoreHook();
     dlg.openCreateInterview();
 
@@ -35,10 +37,8 @@ describe("stores/DialogStore — openCreateInterview 路由分支", () => {
     expect(dlg.createInterviewVisible).toBe(false);
   });
 
-  it("有 accessToken 时：打开 createInterview，loginVisible 不变", () => {
-    const user = useUserStoreHook();
-    user.SET_ACCESS_TOKEN("tok");
-
+  it("isBootstrapped=true 时：打开 createInterview，loginVisible 不变", () => {
+    setBootstrapped(true);
     const dlg = useDialogStoreHook();
     dlg.openCreateInterview();
 

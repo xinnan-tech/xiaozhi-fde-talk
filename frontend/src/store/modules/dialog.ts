@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { store } from "../utils";
-import { useUserStoreHook } from "./user";
+import { isBootstrapped } from "@/utils/auth";
 
 export const useDialogStore = defineStore("intv-dialog", {
   state: () => ({
@@ -9,7 +9,10 @@ export const useDialogStore = defineStore("intv-dialog", {
   }),
   actions: {
     openCreateInterview() {
-      if (!useUserStoreHook().accessToken) {
+      // HttpOnly cookie 由浏览器管，前端 JS 看不出是否「持 token」。
+      // 用 isBootstrapped() 作判据——F5 后 /auth/me 调通即为登录态，未调通即
+      // 未登录。前端没必要再读 userStore.accessToken（字段已删）。
+      if (!isBootstrapped()) {
         this.openLogin();
         return;
       }

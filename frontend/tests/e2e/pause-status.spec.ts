@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test"
 import { fillCreateInterviewForm } from "./fixtures/create-interview"
+import { loginAsAdmin } from "./fixtures/admin"
 
 // 验证 PR #105（fix-web-status）对 issue 91 的修复：
 // - 点暂停按钮：DB status=suspended 立即落盘，列表页不依赖 WS 异步更新
@@ -33,7 +34,10 @@ async function createInterviewAndStart(page: Page, locale: Locale, title: string
   // Chrome 会用 440Hz tone 喂 MediaRecorder，正常产出 dataavailable 事件。
 
   await page.goto("/")
-  await page.locator(".user-avatar.online").waitFor({ state: "visible", timeout: 15_000 })
+  // HttpOnly cookie 模型下 storageState 直接持久 cookie，
+  // F5 后浏览器自动带。前端 bootstrap 调 /auth/me 重建 Pinia——多数 e2e
+  // 场景不需要再调 loginAsAdmin。loginAsAdmin() 仍兼容（幂等跳过已登录态）。
+  await loginAsAdmin(page)
 
   // 创建访谈
   await page.getByRole("button", { name: /新建访谈|New interview/i }).first().click()

@@ -8,6 +8,7 @@ import { useDialogStoreHook } from "@/store/modules/dialog";
 import { usePermissionStoreHook } from "@/store/modules/permission";
 import { registrationStatusApi } from "@/api/user";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
+import { isBootstrapped } from "@/utils/auth";
 import {
   systemConfigApi,
   type SystemConfig,
@@ -170,7 +171,7 @@ const visibleAsrFieldKeys = computed(() => {
 });
 
 /** 是否已登录 */
-const isLoggedIn = computed(() => Boolean(userStore.accessToken));
+const isLoggedIn = computed(() => isBootstrapped() && Boolean(userStore.username));
 
 /** 是否为配置分组 */
 const isConfigSection = (
@@ -498,7 +499,7 @@ const selectGroup = async (key: string) => {
 };
 
 const saveConfig = async (group: ConfigGroup) => {
-  if (!userStore.accessToken) {
+  if (!isBootstrapped()) {
     ElMessage.warning("请先登录");
     useDialogStoreHook().openLogin();
     return;
@@ -650,7 +651,7 @@ const handleSaveClick = async (group: ConfigGroup) => {
 };
 
 const openSelfCheck = () => {
-  if (!userStore.accessToken) {
+  if (!isBootstrapped()) {
     useDialogStoreHook().openLogin();
     return;
   }
@@ -748,7 +749,7 @@ const setRunningState = (target: CheckTarget, status: CheckStatus) => {
 
 /** 运行自检 */
 const runSelfCheck = async (target: CheckTarget) => {
-  if (selfCheckRunning.value || !userStore.accessToken) return;
+  if (selfCheckRunning.value || !isBootstrapped()) return;
 
   selfCheckTarget.value = target;
   selfCheckRunning.value = true;

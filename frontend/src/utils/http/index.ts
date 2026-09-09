@@ -10,8 +10,7 @@ import type {
   PureHttpRequestConfig
 } from "./types.d";
 import { stringify } from "qs";
-import { getToken, setToken, formatToken, removeToken } from "@/utils/auth";
-import { useUserStoreHook } from "@/store/modules/user";
+import { clearSession } from "@/utils/auth";
 import { message } from "@/utils/message";
 import { getCurrentLocale, i18n } from "@/i18n";
 import { extractDetailText } from "@/utils/error";
@@ -21,6 +20,12 @@ import { refreshApi } from "@/api/user";
 const defaultConfig: AxiosRequestConfig = {
   // 请求超时时间
   timeout: 60000,
+  // HttpOnly cookie 由浏览器自动附带——同源请求无须任何 JS 介入。
+  // withCredentials:true 让 axios 不在前端拦截器手动注入 cookie（其实它本来也不
+  // 会，但显式声明确保后续切 XMLHttpRequest / fetch 仍按 cookie 模式工作）。
+  // CORS 跨域时还要求后端 Access-Control-Allow-Credentials: true 与显式 origin
+  // 白名单（app/app.py allow_credentials 开关）。
+  withCredentials: true,
   headers: {
     Accept: "application/json, text/plain, */*",
     "Content-Type": "application/json",
@@ -70,6 +75,9 @@ class PureHttp {
         config.headers["X-Lang"] = locale;
         config.headers["Accept-Language"] = locale;
 
+        // accessToken 不再走 Authorization 头——HttpOnly cookie
+        // 由浏览器在 withCredentials:true 时自动附。无须在拦截器手动加。
+
         // 优先判断post/get等方法是否传入回调，否则执行初始化设置等回调
         if (typeof config.beforeRequestCallback === "function") {
           config.beforeRequestCallback(config);
@@ -79,22 +87,7 @@ class PureHttp {
           PureHttp.initConfig.beforeRequestCallback(config);
           return config;
         }
-        /** 请求白名单，放置一些不需要`token`的接口（通过设置请求白名单，防止`token`过期后再请求造成的死循环问题） */
-        const whiteList = ["/api/v1/auth/login"];
-        return whiteList.some(url => config.url?.endsWith(url) ?? false)
-          ? config
-          : new Promise(resolve => {
-              const data = getToken();
-              if (data) {
-                if (config.headers)
-                  config.headers["Authorization"] = formatToken(
-                    data.accessToken
-                  );
-                resolve(config);
-              } else {
-                resolve(config);
-              }
-            });
+        return config;
       },
       error => {
         return Promise.reject(error);
@@ -142,23 +135,23 @@ class PureHttp {
         const isRetry = originalConfig?._refreshRetried === true;
 
         if (isExpiredSession && !isRefreshCall && !isRetry) {
-          const token = getToken();
+          // HttpOnly cookie 由浏览器自动带 refresh——无须判断
+          // 是否「持 refreshToken」（前端不可见），直接发起 refresh：
+          // - refresh-token cookie 仍在 → 后端换新 access → 重放原请求；
+          // - cookie 已被清 / 过期 → 后端 401 → 走 catch 分支统一清前端态。
 
-          if (token?.refreshToken && originalConfig) {
+          if (originalConfig) {
             // 共享一次 refresh：第一个 401 触发 refreshApi，后续 401 等同一 promise。
             // refreshApi 走 http.request 套上请求拦截器（自动注入 X-Lang 等），同时
             // config 上挂 _refreshRequest: true 让响应拦截器看到 401 不再二次递归。
             if (!PureHttp.refreshing) {
-              PureHttp.refreshing = refreshApi({
-                refresh_token: token.refreshToken
-              })
+              PureHttp.refreshing = refreshApi()
                 .then(res => {
                   PureHttp.refreshing = null;
                   const newAccess = res?.access_token;
                   if (newAccess) {
-                    // 把新 access 写回 store + localStorage；refresh 自身保留。
-                    const refreshed = { ...token, accessToken: newAccess };
-                    setToken(refreshed);
+                    // cookie 模式：access 不在 JS 堆——浏览器已通过 Set-Cookie
+                    // HttpOnly 持有，前端拦截器不接管 token 注入。
                     return newAccess;
                   }
                   // refresh 返回 200 但 access_token 缺失（极少见，业务异常）：
@@ -196,16 +189,16 @@ class PureHttp {
               }
               // 标记已重试，避免重放后再 401 触发第二次 refresh。
               originalConfig._refreshRetried = true;
-              // request 拦截器会按 setToken(refreshed) 后最新的 accessToken 重写
-              // Authorization header，无需在这里手动覆写。
+              // cookie 模式：新 access 已由 Set-Cookie 写回浏览器，下一次
+              // axios.request 会自动带新 access——无须手动改 header。
               return PureHttp.axiosInstance.request(originalConfig);
             }
             // refresh 失败 → 走到下面 toast（已经在 refreshing.then 里弹过）。
             return Promise.reject($error);
           }
 
-          // 无 refresh token（旧的登录会话 / 已主动登出），按老路径清 + 提示。
-          if (token) PureHttp.clearSession();
+          // 无 originalConfig（极少数边缘）：按清 + 提示兜底。
+          PureHttp.clearSession();
           message(i18n.global.t("msg.session_expired"), {
             type: "warning",
             grouping: true
@@ -239,13 +232,14 @@ class PureHttp {
     );
   }
 
-  /** 清掉本端持有的会话：本地存储 + store。供 401 路径复用。 */
+  /** 清掉本端持有的会话：Pinia store + bootstrap 标志。供 401 路径复用。
+
+   * HttpOnly cookie 由后端清，浏览器收到 Set-Cookie Max-Age=0 后自动移除。
+   * 前端不接管 cookie；只清 Pinia 的 user 元数据 + bootstrap 标志。
+   * isBootstrapped() 在 main.ts / Router 守卫里作为「是否调用 /auth/me
+   * 重建会话」的判据。*/
   private static clearSession() {
-    removeToken();
-    const userStore = useUserStoreHook();
-    userStore.SET_ACCESS_TOKEN("");
-    userStore.SET_REFRESH_TOKEN("");
-    userStore.SET_USERNAME("");
+    clearSession();
   }
 
   /** 通用请求工具函数 */

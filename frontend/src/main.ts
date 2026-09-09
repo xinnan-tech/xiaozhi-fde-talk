@@ -56,5 +56,11 @@ getPlatformConfig(app).then(async config => {
   await router.isReady();
   injectResponsiveStorage(app, config);
   app.use(MotionPlugin).use(Vue3Signature);
+  // F5 后 HttpOnly cookie 仍在但 Pinia 已空。启动前 bootstrap
+  // 一次：从 /auth/me 重建 user 字段（username / role / userId）。
+  // 失败（cookie 失效 / 首次访问）即未登录态，路由守卫会兜底跳 /home。
+  // await 让 router.beforeEach 看到最新 isBootstrapped()，避免首屏闪登录框。
+  const { bootstrapSession } = await import("@/utils/auth");
+  await bootstrapSession();
   app.mount("#app");
 });

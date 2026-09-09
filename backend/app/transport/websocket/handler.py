@@ -137,12 +137,29 @@ class WSHandler:
     async def _send(self, obj: dict) -> None:
         await self.ws.send_json(obj)
 
+    def _extract_token_for_handshake(self) -> Optional[str]:
+        """从 cookie（首选）或 Sec-WebSocket-Protocol 取 access_token。
+
+        cookie 路径：HttpOnly cookie 由浏览器在 WS upgrade 时自动附在 Cookie 头，
+        FastAPI 把它解析到 ``ws.cookies``。前端主路径走这条。
+
+        subprotocol 路径：``bearer.<jwt>`` 子协议（兼容 chaos.py / 外部脚本）。
+        """
+        cookie_token = self.ws.cookies.get("authorized-token")
+        if cookie_token:
+            return cookie_token
+        return token_from_subprotocols(self.ws.scope.get("subprotocols"))
+
     # ---- 生命周期 ----
     async def run(self) -> None:
-        # 鉴权在 accept 之前：token 只认子协议 bearer.<jwt>，缺失/无效直接拒绝握手
-        # （uvicorn 回 HTTP 403），未认证连接连 WS 层都进不来。不读消息体 token——
-        # 收消息必须先完成握手，accept-then-auth 会给无凭证连接留存活窗口。
-        token = token_from_subprotocols(self.ws.scope.get("subprotocols"))
+        # 鉴权在 accept 之前：缺失/无效直接拒绝握手（uvicorn 回 HTTP 403），
+        # 未认证连接连 WS 层都进不来。不读消息体 token——收消息必须先完成握手，
+        # accept-then-auth 会给无凭证连接留存活窗口。
+        #
+        # 优先级：HttpOnly cookie ``authorized-token`` >
+        # Sec-WebSocket-Protocol ``bearer.<token>``。前端主路径走 cookie
+        # （浏览器自动带上）；保留 subprotocol 作为脚本 / chaos 客户端兜底。
+        token = self._extract_token_for_handshake()
         try:
             self._user = await extract_auth(token)
         except AuthError as e:
@@ -152,7 +169,16 @@ class WSHandler:
             await self.ws.close()
             logger.info("WS 握手被拒（鉴权失败）：session=%s 原因=%s", self.session_id, e)
             return
-        await self.ws.accept(subprotocol="bearer." + token)
+        # 仅当客户端发送了 ``bearer.*`` subprotocol 时才回应同款 subprotocol。
+        # cookie 路径下客户端没发 subprotocol，服务器若强行 accept 一个未请求的
+        # subprotocol 会被浏览器以协议违规关闭连接。空 subprotocol 即无 subprotocol。
+        client_subprotocols = self.ws.scope.get("subprotocols") or []
+        offered_subprotocol = (
+            "bearer." + token if any(
+                sp.startswith("bearer.") for sp in client_subprotocols
+            ) else None
+        )
+        await self.ws.accept(subprotocol=offered_subprotocol)
         try:
             if not await self._handshake():
                 return

@@ -168,12 +168,13 @@ describe("LoginDialog", () => {
     expect(emitted?.[0]?.[0]).toBe(false);
   });
 
-  it("登录返回无 access_token 时不关闭弹框", async () => {
+  it("登录返回无 user 时不关闭弹框（HttpOnly 模型下判定 user 字段）", async () => {
+    // HttpOnly cookie 由后端 Set-Cookie 下发，前端 JS 看不到
+    // access_token。LoginDialog 改判 user 字段——后端 login 失败时 response
+    // body 不含 user。
     vi.spyOn(useUserStoreHook(), "loginByUsername").mockResolvedValue({
-      access_token: "" as unknown as string,
-      token_type: "",
-      user: { id: "", username: "", role: "user" }
-    });
+      user: undefined
+    } as unknown as Awaited<ReturnType<typeof useUserStoreHook>["loginByUsername"]>);
     const wrapper = mountDialog();
     await flushPromises();
     const inputs = wrapper.findAll("input");

@@ -346,13 +346,13 @@ class SessionRuntime:
 
     async def skip(self, item_id: Optional[str]) -> None:
         if item_id:
-            self.state.skipped_ids.add(item_id)
+            self.state.set_item_filtered(item_id, kind="skipped")
             await self._save_state()
         _touch(self.state.session.id)
 
     async def ignore(self, item_id: Optional[str]) -> None:
         if item_id:
-            self.state.ignored_ids.add(item_id)
+            self.state.set_item_filtered(item_id, kind="ignored")
             await self._save_state()
         _touch(self.state.session.id)
 

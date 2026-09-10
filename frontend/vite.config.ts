@@ -37,12 +37,30 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       }
     : undefined;
 
-  // vite preview 代理按 base 动态剥前缀（见下方 preview.proxy 注释）
+  // vite server / preview 代理按 base 动态剥前缀：默认 base="/" 时 key 退化为
+  // /api / /ws，rewrite 空跑不剥；非默认 base 时（如 /xiaozhi-fde-talk），把
+  // 前端子路径在转发前去掉，否则请求会被 vite 的 SPA 兜底回 HTML
   const baseNoSlash = (VITE_PUBLIC_PATH || "/").replace(/\/$/, "");
   const stripBase = (path: string) =>
     baseNoSlash && path.startsWith(baseNoSlash)
       ? path.slice(baseNoSlash.length) || "/"
       : path;
+  const buildBaseProxyEntries = (
+    apiTarget: string,
+    wsTarget: string
+  ): Record<string, unknown> => ({
+    [`${baseNoSlash}/api`]: {
+      target: apiTarget,
+      changeOrigin: true,
+      rewrite: stripBase
+    },
+    [`${baseNoSlash}/ws`]: {
+      target: wsTarget,
+      changeOrigin: true,
+      ws: true,
+      rewrite: stripBase
+    }
+  });
 
   return {
     base: VITE_PUBLIC_PATH,
@@ -57,18 +75,7 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       host: "0.0.0.0",
       https,
       // 本地跨域代理 https://cn.vitejs.dev/config/server-options.html#server-proxy
-      proxy: {
-        "/api": {
-          // 这里填写后端地址
-          target: VITE_API_URL,
-          changeOrigin: true
-        },
-        "/ws": {
-          target: VITE_WS_BASE_URL,
-          changeOrigin: true,
-          ws: true
-        }
-      },
+      proxy: buildBaseProxyEntries(VITE_API_URL, VITE_WS_BASE_URL),
       // 预热文件以提前转换和缓存结果，降低启动期间的初始页面加载时长并防止转换瀑布
       warmup: {
         clientFiles: ["./index.html", "./src/{views,components}/*"]
@@ -81,22 +88,10 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       port: 4173,
       host: "0.0.0.0",
       strictPort: true,
-      // 按 base 动态生成代理 key（默认 "/" 时等价于 /api / /ws），
-      // 转发前把前端子路径剥掉，否则子路径构建产物的 /xiaozhi-fde-talk/api
-      // 进来会被 vite preview 的 SPA 兜底回 HTML
-      proxy: {
-        [`${baseNoSlash}/api`]: {
-          target: process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
-          changeOrigin: true,
-          rewrite: stripBase
-        },
-        [`${baseNoSlash}/ws`]: {
-          target: process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
-          changeOrigin: true,
-          ws: true,
-          rewrite: stripBase
-        }
-      }
+      proxy: buildBaseProxyEntries(
+        process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
+        process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000"
+      )
     },
     plugins: [
       VueI18nPlugin({

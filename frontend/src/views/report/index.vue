@@ -61,28 +61,42 @@ const moreOptions = computed(() => [
   {
     value: "md-md",
     label: t("report.export", { extension: "md" }),
-    icon: downloadIcon
+    icon: downloadIcon,
+    disabled: !isReportReady.value
   },
   {
     value: "html-html",
     label: t("report.export", { extension: "html" }),
-    icon: downloadIcon
+    icon: downloadIcon,
+    disabled: !isReportReady.value
   },
   {
     value: "word-docx",
     label: t("report.export", { extension: "docx" }),
-    icon: downloadIcon
+    icon: downloadIcon,
+    disabled: !isReportReady.value
   },
   {
     value: "delete",
     label: t("report.delete"),
-    icon: deleteIcon
+    icon: deleteIcon,
+    disabled: !isReportReady.value
   }
 ]);
 
 const tabValue = ref(0);
 const interviewDetail = ref<InterviewDetailType>();
 const suggestions = ref<InterviewDetailItem[]>([]);
+
+// 报告可用闸门：访谈须已结束（ended）或已完成报告生成（extracting/done）。
+// 与后端 _REPORT_READY_STATUSES（backend/app/transport/http/routes/reports.py:25）
+// 同口径——早期状态（created/setting_up/in_progress/suspended）下 /report 与
+// /export 都会 409 http.report.not_ready，页面的导出/重新生成/删除按钮提前禁用，
+// 避免点了才收到报错 toast。与访谈页 isTerminalStatus 的终态集合一致。
+const isReportReady = computed(() => {
+  const status = interviewDetail.value?.status;
+  return status === "ended" || status === "extracting" || status === "done";
+});
 
 // 派生报告页左上 3 块指标。
 // 不走新接口——interviewDetail 里已经带了 transcript + items 完整数据，
@@ -179,6 +193,13 @@ const getInterviewReport = async () => {
     return;
   }
 
+  // 访谈未结束：不请求 /report（后端必 409），直接走错误视图。
+  if (!isReportReady.value) {
+    reportLoading.value = false;
+    reportError.value = true;
+    return;
+  }
+
   reportLoading.value = true;
   reportError.value = false;
 
@@ -205,6 +226,9 @@ const getInterviewDetail = async () => {
 const getInterviewId = () => route.params.id as string;
 
 const handleMoreChange = (option: SelectOption) => {
+  // 未到终态时导出/删除均不可用（后端 _REPORT_READY_STATUSES 守卫 / 访谈
+  // 进行中不允许删），选项已禁用，此处兜底。
+  if (!isReportReady.value) return;
   if (option.value === "delete") {
     handleDeleteInterview();
   } else {
@@ -224,6 +248,7 @@ const handleExportReport = async (
 ) => {
   const id = getInterviewId();
   if (!id || !canExportReport.value) return;
+  if (!isReportReady.value) return;
 
   try {
     const report = await exportInterviewReportApi(id, format);
@@ -251,6 +276,8 @@ const handleExportReport = async (
 const handleDeleteInterview = async () => {
   const id = getInterviewId();
   if (!id) return;
+  // 未结束的访谈不可删除：菜单项已禁用，此处兜底。
+  if (!isReportReady.value) return;
 
   try {
     await ElMessageBox.confirm(
@@ -286,6 +313,8 @@ const handleDeleteInterview = async () => {
  */
 const handleRegenerateReport = async () => {
   if (reportLoading.value) return; // 防双击：loading 中直接吞掉点击
+  // 未结束访谈无报告可重生，按钮已禁用，此处兜底键盘 Tab+Enter 等路径。
+  if (!isReportReady.value) return;
   try {
     await ElMessageBox.confirm(
       t("report.regenerate_message"),
@@ -338,10 +367,11 @@ onMounted(async () => {
         </div>
         <div
           class="round-box regen-action"
-          :class="{ 'is-loading': reportLoading }"
+          :class="{
+            'is-loading': reportLoading,
+            'not-allowed': !isReportReady
+          }"
           :title="t('report.regenerate')"
-          role="button"
-          tabindex="0"
           @click="handleRegenerateReport"
         >
           <component :is="refreshIcon" />
@@ -531,6 +561,10 @@ onMounted(async () => {
     &.regen-action.is-loading {
       cursor: not-allowed;
       opacity: 0.6;
+    }
+
+    &.not-allowed {
+      cursor: not-allowed;
     }
   }
 

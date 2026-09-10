@@ -10,22 +10,29 @@ token 明文——同源 XSS 即便拿到执行权，也无法 ``document.cookie
 
 Secure 与 SameSite 选择：
   - Secure：prod 强制 true（HTTPS only）；dev/test 关闭（http://localhost 不支持）。
-  - SameSite=Lax：access token 允许顶层 GET / 表单提交；让浏览器 WS upgrade /
-    POST 也能带上 cookie。WS 是浏览器自动发起的「同源请求」，从同源 origin
-    发起到同源 backend → SameSite=Lax 不挡。
-  - SameSite=Strict：refresh token 仅 axios 拦截器同源调用；禁掉任何跨站请求
-    自动带 cookie，留一道额外防御（即便 HttpOnly 被绕，跨站也偷不到）。
+  - SameSite=Lax：access cookie，宽松策略下也禁掉任何跨站请求自动附；
+    顶层 GET 仍然带，但跨站 POST / iframe / 第三方子资源不带。
+  - SameSite=Strict：refresh cookie 最严，禁掉所有跨站请求自动附。
 
 max_age：access cookie 走 jwt_expire_minutes，refresh cookie 走
 refresh_token_expire_days。配置变更后用配置值，覆盖默认 cookie 寿命——保证
 后端 TTL 与 cookie 寿命对齐，避免 cookie 还在但 token 已过期（或反之）。
+
+config_store 异常兜底：get_auth_runtime_config() 走 DB 查询，DB 短暂不可用
+或 lifespan warm 未完成会抛错。config_store 抛错时回退到 settings 直读
+env 默认值——保证 Set-Cookie 仍能正常下发（否则 login/register/refresh
+会被炸 500，refresh 死循环）。
 """
 from __future__ import annotations
+
+import logging
 
 from fastapi import Response
 
 from app.core.config_store import get_auth_runtime_config
 from app.core.settings import get_settings
+
+_log = logging.getLogger(__name__)
 
 # Cookie 名：与前端保持一致（前端通过 ``document.cookie`` 看不到 HttpOnly 内容，
 # 但 logout / login 后端清 cookie 时仍走同 key）。
@@ -43,15 +50,31 @@ def _secure_flag() -> bool:
 async def _refresh_cookie_max_age() -> int:
     """refresh cookie max_age，按 refresh_token_expire_days 配置（秒）。
     async 因为 config_store 是异步接口。
+
+    config_store 抛错时回退到 settings 默认值——保证 Set-Cookie 不被炸 500。
     """
-    cfg = await get_auth_runtime_config()
-    return cfg["refresh_token_expire_days"] * 24 * 60 * 60
+    try:
+        cfg = await get_auth_runtime_config()
+        return cfg["refresh_token_expire_days"] * 24 * 60 * 60
+    except Exception:
+        _log.warning(
+            "config_store 不可用，refresh cookie max_age 退化到 settings 默认值",
+            exc_info=True,
+        )
+        return get_settings().refresh_token_expire_days * 24 * 60 * 60
 
 
 async def set_access_cookie(response: Response, access_token: str) -> None:
     """只写 access_token cookie（/auth/refresh 后用）。max_age 跟 access TTL。"""
-    cfg = await get_auth_runtime_config()
-    max_age = cfg["jwt_expire_minutes"] * 60
+    try:
+        cfg = await get_auth_runtime_config()
+        max_age = cfg["jwt_expire_minutes"] * 60
+    except Exception:
+        _log.warning(
+            "config_store 不可用，access cookie max_age 退化到 settings 默认值",
+            exc_info=True,
+        )
+        max_age = get_settings().jwt_expire_minutes * 60
     response.set_cookie(
         ACCESS_TOKEN_COOKIE,
         access_token,

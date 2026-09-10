@@ -70,16 +70,16 @@ describe("utils/auth — bootstrapSession / isBootstrapped", () => {
       username: "alice",
       role: "admin"
     });
-    const ok = await bootstrapSession();
-    expect(ok).toBe(true);
+    const result = await bootstrapSession();
+    expect(result).toBe("authenticated");
     expect(isBootstrapped()).toBe(true);
     expect(hasPerms("any")).toBe(true);
   });
 
   it("bootstrapSession 失败（cookie 失效 / 401）→ isBootstrapped false", async () => {
     meApiMock.mockRejectedValue(new Error("401"));
-    const ok = await bootstrapSession();
-    expect(ok).toBe(false);
+    const result = await bootstrapSession();
+    expect(result).toBe("unauthenticated");
     expect(isBootstrapped()).toBe(false);
   });
 

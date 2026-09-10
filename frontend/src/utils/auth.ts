@@ -22,9 +22,9 @@ import { storageLocal } from "@pureadmin/utils";
  * 再持任何 token。
  */
 
-/** 旧版一次性清理：从 #212 之前的版本升级上来的用户，localStorage 里残留
- *  的 user-info（含 accessToken / refreshToken 明文）必须立即删掉，避免
- *  XSS 一次拿到执行权就把 token 偷走。F5 / 启动会调一次，幂等。 */
+/** 旧版一次性清理：迁移前版本残留的 localStorage user-info（含 accessToken
+ *  / refreshToken 明文）必须立即删掉，避免 XSS 一次拿到执行权就把 token 偷走。
+ *  F5 / 启动会调一次，幂等。 */
 function migrateStaleStorage(): void {
   storageLocal().removeItem("user-info");
 }
@@ -33,11 +33,10 @@ function migrateStaleStorage(): void {
  *  /auth/me。真实态以后端为准；axios 401 拦截器会在 cookie 失效时清空
  *  Pinia + 跳登录。
  *
- * 必须是 ref 不是 plain let：home 视图的 ``isLoggedIn = computed(() =>
- * isBootstrapped() && ...)`` 要靠 .value 访问追踪响应式依赖。改回 let
- * 会让 computed 算过一次 false 后不再追，登录后 ``.user-avatar.online``
- * 永远不出现——见 e2e 场景 A / D-1 / incognito-login 三处同时翻车。*/
+ * 必须是 ref（不是 plain let）：home 视图 ``isLoggedIn = computed(() =>
+ *  isBootstrapped() && ...)`` 靠 .value 访问让 Vue 追踪响应式依赖。*/
 const bootstrapped = ref(false);
+
 export function isBootstrapped(): boolean {
   return bootstrapped.value;
 }
@@ -46,13 +45,24 @@ export function setBootstrapped(v: boolean): void {
   bootstrapped.value = v;
 }
 
-/** 从 cookie 重建当前用户信息。调 /auth/me（cookie 自动附）；失败抛异常，
- *  由调用方走「未登录」分支。成功则把 user 字段写进 Pinia store 并标记
- *  已 bootstrap，避免后续路由切换重复调。
+/** bootstrap 结果分类——告诉调用方为什么失败，路由守卫据此决定是否清 session。
+ *
+ *  - ``authenticated``：cookie 有效 + /auth/me 返 user；Pinia 已写入。
+ *  - ``unauthenticated``：cookie 缺失 / 过期 / /auth/me 401；应清 session。
+ *  - ``transient_error``：后端 5xx / 网络错；保留 Pinia 当前态，避免后端
+ *    短暂抽风时被误判未登录踢出。F5 后下一次 bootstrap 会再尝试。 */
+export type BootstrapResult =
+  "authenticated" | "unauthenticated" | "transient_error";
+
+/** 从 cookie 重建当前用户信息。调 /auth/me（cookie 自动附）。
+ *
+ * 失败分两类：
+ *  - 401 / cookie 缺失：bootstrapResult = "unauthenticated"，应清 session。
+ *  - 5xx / 网络错：bootstrapResult = "transient_error"，保留 Pinia 当前态。
  *
  * 必须在 main.ts 启动 + Router 守卫里各调一次：main.ts 启动时建立首屏态，
- * 守卫负责 F5 后首跳。 */
-export async function bootstrapSession(): Promise<boolean> {
+ *  守卫负责 F5 后首跳。 */
+export async function bootstrapSession(): Promise<BootstrapResult> {
   migrateStaleStorage();
   try {
     const me = await meApi();
@@ -61,10 +71,26 @@ export async function bootstrapSession(): Promise<boolean> {
     store.SET_USER_ID(me.id);
     store.SET_ROLE(me.role);
     setBootstrapped(true);
-    return true;
-  } catch {
-    setBootstrapped(false);
-    return false;
+    return "authenticated";
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response
+      ?.status;
+    if (
+      status === 401 ||
+      (status === undefined &&
+        (err as { message?: string })?.message?.includes("401"))
+    ) {
+      // 401：cookie 真过期或被吊销，清 session。
+      // 兜底分：network error 时 status 也是 undefined，但 message 含 401 字符串。
+      setBootstrapped(false);
+      return "unauthenticated";
+    }
+    // 5xx / 网络错 / 其他：保留 Pinia 当前态，仅记 warn。
+    console.warn(
+      "[bootstrapSession] transient error, keeping session:",
+      status ?? (err as Error)?.message
+    );
+    return "transient_error";
   }
 }
 

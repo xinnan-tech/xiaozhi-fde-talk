@@ -93,16 +93,6 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class RefreshRequest(BaseModel):
-    """兼容保留：旧版本 body 传 refresh_token。
-
-    现在 /auth/refresh 完全走 cookie（``refresh-token``），body 为空也允许。
-    保留类型让迁移期的客户端 / 测试不立刻报 AttributeError，路由层已不再消费。
-    """
-    model_config = ConfigDict(extra="forbid")
-    refresh_token: str = Field(min_length=1)
-
-
 class RefreshResponse(BaseModel):
     """/auth/refresh 响应。
 

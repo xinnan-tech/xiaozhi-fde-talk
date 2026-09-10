@@ -21,6 +21,7 @@ import {
   createRouter
 } from "vue-router";
 import { bootstrapSession, isBootstrapped, clearSession } from "@/utils/auth";
+import type { BootstrapResult } from "@/utils/auth";
 
 /** 自动导入全部静态路由，无需再手动引入！匹配 src/router/modules 目录（任何嵌套级别）中具有 .ts 扩展名的所有文件，除了 remaining.ts 文件
  * 如何匹配所有文件请参考 fast-glob 的通配规则说明。
@@ -126,11 +127,26 @@ router.beforeEach(async (to: ToRouteType, _from, next) => {
     to.path === "/login" ? next(_from.fullPath || "/home") : next();
   }
 
-  // F5 后 cookie 仍在但内存态已清。守卫首跳前先调
-  // /auth/me 重建 isBootstrapped() 与 Pinia user 字段。bootstrap 失败（cookie
-  // 已过期 / 首次访问）即按未登录处理：跳 /home 让登录 dialog 接手。
+  // F5 后 cookie 仍在但内存态已清。守卫首跳前先调 /auth/me 重建
+  // isBootstrapped() 与 Pinia user 字段。三种返回：
+  //   - "authenticated"：cookie 有效，已写 Pinia，isBootstrapped = true → 走下分支
+  //   - "unauthenticated"：cookie 过期 / 缺失，bootstrapSession 已 setBootstrapped(false)
+  //                      → 落到未登录分支跳 /home（登录 dialog 接手）
+  //   - "transient_error"：5xx / 网络错，bootstrapSession 不动 bootstrapped；
+  //                      守卫条件 ``!isBootstrapped()`` 仍为 false（F5 已清 Pinia）
+  //                      → 与 unauthenticated 同分支落 /home；用户看到登录页时
+  //                      下一次进守卫会再试。本路径不清 Pinia 是有意的：
+  //                      后端短暂抽风不应把已登录用户的内存态擦掉（虽然本守卫
+  //                      路径上 isBootstrapped() 已是 false，保留 Pinia 是给
+  //                      后续其他调用方如 useAsrRecorder 留余地）。
   if (!isBootstrapped() && to.path !== "/home") {
-    await bootstrapSession();
+    const result: BootstrapResult = await bootstrapSession();
+    if (result === "transient_error") {
+      // 仅记录，不强制清 Pinia（让 axios 401 拦截器按真实态决定）
+      console.warn(
+        "[router] bootstrapSession returned transient_error, falling back to /home; Pinia preserved"
+      );
+    }
   }
 
   if (isBootstrapped()) {

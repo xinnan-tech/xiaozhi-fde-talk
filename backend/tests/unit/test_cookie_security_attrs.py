@@ -32,16 +32,22 @@ from app.persistence.models import User
 
 
 def _cookie_attrs(raw_set_cookie: str) -> dict[str, bool]:
-    """解析 Set-Cookie 头里的属性标记。SameSite 值大小写不敏感。"""
+    """解析 Set-Cookie 头里的属性标记。SameSite 值大小写不敏感。
+
+    Secure 必须按 ``; *secure *(?:;|$)`` 严格匹配：旧实现 ``"secure;" in
+    lower.replace(" ", ";")`` 会在 ``Path=/Secure`` 这种边角误判为 Secure
+    子串命中——Set-Cookie 属性都是 ``name=value; attr; attr`` 形式，必须
+    看分号边界。"""
+    import re
     lower = raw_set_cookie.lower()
+    secure_pat = re.compile(r";\s*secure\s*(?:;|$)")
     return {
         "name": raw_set_cookie.split("=", 1)[0].strip(),
-        "httponly": "httponly" in lower,
-        "samesite_lax": "samesite=lax" in lower,
-        "samesite_strict": "samesite=strict" in lower,
-        "path_root": "path=/" in lower,
-        "secure": "secure;" in lower.replace(" ", ";")
-        or lower.rstrip().endswith("; secure"),
+        "httponly": bool(re.search(r";\s*httponly\s*(?:;|$)", lower)),
+        "samesite_lax": bool(re.search(r";\s*samesite=lax\s*(?:;|$)", lower)),
+        "samesite_strict": bool(re.search(r";\s*samesite=strict\s*(?:;|$)", lower)),
+        "path_root": bool(re.search(r";\s*path=/\s*(?:;|$)", lower)),
+        "secure": bool(secure_pat.search(lower)),
     }
 
 
@@ -245,3 +251,45 @@ async def test_login_response_body_does_not_force_token_use(reset_state):
     # 兼容路径字段存在（scripts 还要读），前端 main 路径不读
     assert "access_token" in body
     assert "refresh_token" in body
+
+
+class TestCookieAttrsParser:
+    """_cookie_attrs 解析器回归。"""
+
+    def test_httponly_recognized(self):
+        line = "k=v; Path=/; HttpOnly"
+        attrs = _cookie_attrs(line)
+        assert attrs["httponly"] is True
+        assert attrs["path_root"] is True
+        assert attrs["secure"] is False
+
+    def test_secure_at_end_recognized(self):
+        line = "k=v; Path=/; Secure"
+        attrs = _cookie_attrs(line)
+        assert attrs["secure"] is True
+
+    def test_secure_in_middle_recognized(self):
+        line = "k=v; Secure; Path=/"
+        attrs = _cookie_attrs(line)
+        assert attrs["secure"] is True
+        assert attrs["path_root"] is True
+
+    def test_path_equals_secure_is_NOT_secure_attr(self):
+        """`Path=/Secure` 这种边角：旧实现 ``"secure;" in ...`` 会误判为 Secure 子串命中。
+        修复后 Secure 必须按 ``;\\s*secure\\s*(?:;|$)`` 严格匹配分号边界。"""
+        line = "k=v; Path=/Secure; HttpOnly"
+        attrs = _cookie_attrs(line)
+        assert attrs["secure"] is False, \
+            f"Path=/Secure 不应被误判为 Secure 属性: {line}"
+
+    def test_samesite_lax_lowercase_recognized(self):
+        line = "k=v; Path=/; SameSite=lax"
+        attrs = _cookie_attrs(line)
+        assert attrs["samesite_lax"] is True
+        assert attrs["samesite_strict"] is False
+
+    def test_samesite_strict_recognized(self):
+        line = "k=v; Path=/; SameSite=strict"
+        attrs = _cookie_attrs(line)
+        assert attrs["samesite_strict"] is True
+        assert attrs["samesite_lax"] is False

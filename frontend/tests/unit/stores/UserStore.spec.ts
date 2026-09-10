@@ -235,15 +235,15 @@ describe("stores/UserStore — bootstrapSession 暴露", () => {
       username: "alice",
       role: "admin"
     });
-    const ok = await bootstrapSession();
-    expect(ok).toBe(true);
+    const result = await bootstrapSession();
+    expect(result).toBe("authenticated");
     expect(isBootstrapped()).toBe(true);
   });
 
   it("bootstrapSession 失败（meApi 抛）→ isBootstrapped false", async () => {
     mocks.meApi.mockRejectedValue(new Error("401"));
-    const ok = await bootstrapSession();
-    expect(ok).toBe(false);
+    const result = await bootstrapSession();
+    expect(result).toBe("unauthenticated");
     expect(isBootstrapped()).toBe(false);
   });
 });

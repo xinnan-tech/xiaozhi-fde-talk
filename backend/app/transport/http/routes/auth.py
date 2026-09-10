@@ -48,7 +48,6 @@ from app.transport.http.schemas import (
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
-    RefreshRequest,
     RegisterRequest,
     RegistrationStatusResponse,
     UserInfo,
@@ -63,13 +62,15 @@ _login_limiter = RateLimiter(capacity=5, refill_per_hour=300)
 # （弱密码 / 两次密码不一致 / 重复 username）也消耗令牌——避免暴力扫 username
 # 与弱密码走绕过路径。
 _register_limiter = RateLimiter(capacity=3, refill_per_hour=60)
-# /auth/refresh 限流与 login 同款 bucket 大小，但不限 (ip, username) 而只按 ip——
-# refresh 通常由前端 axios 拦截器自动触发，频繁度高于登录；按用户限会把自动刷新
-# 路径锁死。纯 ip 限足够挡住外网滥用。
+# /auth/refresh 限流按 ip 单桶：refresh 通常由前端 axios 拦截器自动触发，
+# 频繁度高于登录；按用户限会把自动刷新路径锁死。纯 ip 限足够挡住外网滥用。
 _refresh_limiter = RateLimiter(capacity=30, refill_per_hour=600)
 # change-password 复用与 login 同款限流参数：capacity=5, refill_per_hour=300。
 # 按 (client_ip + user_id) 做 key，与 login 的 (client_ip + username) 错开但体量对等。
 _change_pwd_limiter = RateLimiter(capacity=5, refill_per_hour=300)
+# /auth/me 限流：main.ts 启动 + router.beforeEach 首跳 + 401 重试都会调。
+# 缺桶的话攻击者可枚举用户（端点返 username + role）或对 DB 施压。
+_auth_me_limiter = RateLimiter(capacity=60, refill_per_hour=3600)
 
 
 def _reset_for_test() -> None:
@@ -87,6 +88,7 @@ def _reset_for_test() -> None:
     _register_limiter._buckets.clear()
     _refresh_limiter._buckets.clear()
     _change_pwd_limiter._buckets.clear()
+    _auth_me_limiter._buckets.clear()
     from app.services.auth import token as _tok
     _tok._reset_revoked_for_test()
 
@@ -329,11 +331,11 @@ async def logout(
     （refresh 与 access 一起下发）。refresh 自身过期 / 非法也返 200，避免
     用 freshness 探查内部状态。
 
-    限流：refresh 桶 30/h，try_acquire 返 False 必 429——之前返值被丢弃，
-    攻击者可无限刷吃 jti 撤销资源（每次成功撤销 add 一个 set entry，无上限增长）。
+    不限流：端点幂等（无 cookie / 过期 / 非法一律 200），无任何成功语义
+    可被滥用。曾与 refresh 共享 _refresh_limiter IP 桶，攻击者对单 IP
+    高频刷 logout 即可耗尽桶并挤掉该 IP 合法用户 axios 拦截器自动触发的
+    401→refresh 路径——这是 DoS，删桶彻底封堵。
     """
-    if not _refresh_limiter.try_acquire(_client_ip(request)):
-        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
     refresh_token = _read_refresh_cookie(request)
     if refresh_token:
         try:
@@ -346,11 +348,6 @@ async def logout(
             pass
     clear_auth_cookies(response)
     return {"ok": True}
-
-
-# 保留 RefreshRequest 类型导入占位，避免被依赖方报 unused import；下游如有
-# 客户端仍走 body 传 refresh_token 的路径，由 transport 层再行迁移。
-_ = RefreshRequest
 
 
 @router.post("/auth/change-password", status_code=200)
@@ -392,7 +389,13 @@ async def me(
     浏览器 F5 后 cookie 仍在但内存已清，前端调本接口从 cookie 重建 Pinia 状态。
 
     鉴权：从 cookie 取 access_token；缺失 / 无效 → 401（前端按未登录走）。
+
+    限流：按 IP（capacity=60/h）。main.ts 启动 + router.beforeEach 首跳 +
+    401 重试都会调一次，缺桶的话攻击者可枚举用户（端点返 username + role）
+    或对 DB 施压。
     """
+    if not _auth_me_limiter.try_acquire(_client_ip(request)):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
     access_token = request.cookies.get("authorized-token")
     if not access_token:
         raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)

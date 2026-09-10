@@ -979,6 +979,16 @@ const openMicrophone = async () => {
     ElMessage.warning(t("interview.runtime.ws_not_connected"));
     return false;
   }
+  // acquireMicrophone 是 pcmRecorder.acquireStream 的薄包装，内部
+  // `if (mediaStream.value) return true` 幂等保护：handleStartInterview 已
+  // 先调过的路径走这里就是 no-op，未调过的路径（resumeInterviewAfterReload /
+  // onConnected）在此补上。startMicrophone 内部守卫会因 context 为 null
+  // 直接拒握，所以 acquireMicrophone 必须前置。
+  const streamAcquired = await acquireMicrophone();
+  if (!streamAcquired) {
+    ElMessage.warning(t("interview.runtime.mic_acquire_failed"));
+    return false;
+  }
   if (!sendListenState("start")) {
     ElMessage.warning(t("interview.runtime.listen_failed"));
     return false;

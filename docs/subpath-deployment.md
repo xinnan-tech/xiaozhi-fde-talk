@@ -13,7 +13,12 @@
 
 ## 1. 配置文件（前后端必须一致）
 
-**前后端各有一个字段，值必须一字不差**（例如都写 `/xiaozhi-fde-talk`，结尾**不带**斜杠）。任一处不配 → 两边默认空 → 走根路径部署，前后端互通，不会有任何副作用。
+子路径前后端各有一个字段：前端 `VITE_PUBLIC_PATH`、后端 `SUBPATH`。**单进程模式下两边要么都配且子路径一致，要么都不配**（默认空 → 根路径部署，前后端互通，无副作用）。只配一边、或值不一致 → 前端请求路径和后端路由对不上，404 / 白屏。反代模式是例外：前缀在反代侧剥离，后端不配 `SUBPATH`（见 3.2）。
+
+书写格式略有差异，属正常现象：
+
+- 前端 `VITE_PUBLIC_PATH` 以**斜杠结尾**：`/xiaozhi-fde-talk/`
+- 后端 `SUBPATH` 结尾带不带斜杠均可：`/xiaozhi-fde-talk`（启动时归一化）
 
 ### 前端：`frontend/.env.production`
 
@@ -23,27 +28,36 @@
 VITE_PUBLIC_PATH = /xiaozhi-fde-talk/
 ```
 
-值以**斜杠结尾**。恢复根路径部署时改回 `/`。
+恢复根路径部署时改回 `/`。
 
-> **`.env.development` 同步改**（如果你也想在 `pnpm dev` 子路径下访问）：把 `VITE_PUBLIC_PATH` 改成 `/xiaozhi-fde-talk/` 即可。**`VITE_API_URL` / `VITE_WS_BASE_URL` 不需要改**，保持默认 `127.0.0.1:8000`：
->
-> - 前端 bundle 全部用相对路径（`src/api/utils.ts` 里写明了「不嵌入任何后端 host」），请求里没有 host
-> - vite dev 的 server.proxy 只把浏览器请求剥前缀后转给 `VITE_API_URL` / `VITE_WS_BASE_URL` 指向的目标，默认就是 127.0.0.1:8000
-> - 只有当 dev 后端不在本地 8000 端口（比如跑在 docker 容器或同事机器）才需要改这两个值
+### 后端：`backend/data/.env` 或环境变量
 
-### 后端：`backend/.env` 或环境变量
-
-后端用 pydantic-settings 读取 `SUBPATH` 环境变量，配置写在 `backend/.env` 里：
+后端用 pydantic-settings 读取 `SUBPATH`，配置写在 `backend/data/.env`（首次部署先在 `backend/` 下执行 `cp .env.example data/.env`）：
 
 ```env
 SUBPATH=/xiaozhi-fde-talk
 ```
 
-值以**斜杠结尾或不带**均可（启动时会归一化）。也可用环境变量直接覆盖：
+也可用环境变量直接覆盖：
 
 ```bash
 SUBPATH=/xiaozhi-fde-talk python main.py
 ```
+
+### 本地开发（`pnpm dev`）也想走子路径时
+
+`.env.development` 里把 `VITE_PUBLIC_PATH` 改成 `/xiaozhi-fde-talk/`，浏览器访问 `http://127.0.0.1:8848/xiaozhi-fde-talk/`。
+
+**`VITE_API_URL` / `VITE_WS_BASE_URL` 是否要带子路径，取决于 dev 后端有没有配 `SUBPATH`，两边必须对齐，否则 API / WS 全部打不通：**
+
+| dev 后端 `SUBPATH` | 这两个值怎么写 |
+|---|---|
+| 空（默认） | 保持默认：`http://127.0.0.1:8000`、`ws://127.0.0.1:8000` |
+| `/xiaozhi-fde-talk` | 带上同一子路径：`http://127.0.0.1:8000/xiaozhi-fde-talk`、`ws://127.0.0.1:8000/xiaozhi-fde-talk` |
+
+原理：前端 bundle 全部用相对路径（`src/api/utils.ts` 写明了「不嵌入任何后端 host」），请求里没有 host，只有 `/xiaozhi-fde-talk/api/...` 这样的路径。vite dev 的 server.proxy 会先剥掉请求里的 `/xiaozhi-fde-talk` 前缀，再把 `VITE_API_URL` / `VITE_WS_BASE_URL` 自带的路径拼回去转发——所以这两个值里带不带子路径，直接决定后端收到的请求带不带前缀。而后端配了 `SUBPATH` 后，所有 API / WS 路由都挂在前缀下（`/xiaozhi-fde-talk/api/...`），少一个前缀就 404；没配 `SUBPATH` 时路由在根路径，多一个前缀同样打不通。
+
+dev 后端不在本地 8000 端口（docker 容器、同事机器）时，把 host:port 换掉即可，是否带子路径的规则同上。
 
 ## 2. 重新构建
 
@@ -118,6 +132,6 @@ location /xiaozhi-fde-talk/ {
 单进程模式下可直接查看后端日志确认前缀生效：
 
 ```
-127.0.0.1:xxxxx - "GET /api/v1/auth/registration-status HTTP/1.1" 200       # 业务 API 已被 SUBPATH 剥离
-127.0.0.1:xxxxx - "GET /static/js/index-xxxxx.js HTTP/1.1" 200              # 静态资源已被剥离
+127.0.0.1:xxxxx - "GET /xiaozhi-fde-talk/api/v1/auth/registration-status HTTP/1.1" 200  # 业务 API 带前缀命中路由（不剥）
+127.0.0.1:xxxxx - "GET /static/js/index-xxxxx.js HTTP/1.1" 200                           # 静态资源已被剥掉前缀
 ```

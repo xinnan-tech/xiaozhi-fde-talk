@@ -52,6 +52,12 @@ export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
   const pcmBuf = new Int16Array(PCM_BUF_CAP);
   let pcmStart = 0;
   let pcmAvailable = 0;
+  // silentGain 由 startRecording 创建、stopRecording 拆 + 置 null。
+  // 提到模块级闭包是因为：stopRecording / 异常 catch 路径都需要拿到引用。
+  // 之前 inline const 的话，stopRecording 拿不到、silentGain → destination
+  // 链路拆不掉，旧 context 的音频线程被这条链拉住、永不释放（具体见 commit
+  // 内的「AudioContext 6 上限泄漏复现」一节）。
+  let silentGain: GainNode | null = null;
 
   const resetRingBuffers = () => {
     resampleStart = 0;
@@ -82,7 +88,40 @@ export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
    * 期望不一致时明确提示或拒握（当前静默回退到硬件率，协议边界模糊）。
    */
   const acquireStream = async () => {
-    if (mediaStream.value) return true;
+    // 复用路径：audioContext 已存在且未关闭（unmount 时才 close，平时 stop
+    // 只 suspend），跳过构造 + addModule（已加载），只 resume + 必要时重新
+    // getUserMedia。修资源泄漏：之前每轮 pause/resume 都新建 context，
+    // 旧 context 因 silentGain → destination 链路仍连着、不被 GC，反复几轮
+    // 撞 Chrome 单页 AudioContext 6 上限。
+    const existing = audioContext.value;
+    if (existing && existing.state !== "closed") {
+      try {
+        if (existing.state === "suspended") {
+          await existing.resume();
+        }
+        if (!mediaStream.value) {
+          if (!navigator.mediaDevices?.getUserMedia) {
+            error.value = new Error("mic_unavailable_insecure_origin");
+            return false;
+          }
+          mediaStream.value = await navigator.mediaDevices.getUserMedia({
+            audio: options.audio ?? true,
+            video: false
+          });
+        }
+        error.value = null;
+        return true;
+      } catch (cause) {
+        error.value =
+          cause instanceof Error ||
+          (typeof DOMException !== "undefined" && cause instanceof DOMException)
+            ? cause
+            : new Error("无法复用 AudioContext");
+        return false;
+      }
+    }
+
+    // 首次或旧 context 已关闭：完整创建流程
     if (!navigator.mediaDevices?.getUserMedia) {
       error.value = new Error("mic_unavailable_insecure_origin");
       return false;
@@ -260,7 +299,7 @@ export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
     try {
       const source = context.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(context, "pcm-capture-processor");
-      const silentGain = context.createGain();
+      silentGain = context.createGain();
       silentGain.gain.value = 0;
       source.connect(node).connect(silentGain).connect(context.destination);
       // onmessage 内的异常冒到 message handler 边界被浏览器 console.error
@@ -284,7 +323,8 @@ export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
           try {
             node.disconnect();
             source.disconnect();
-            silentGain.disconnect();
+            silentGain?.disconnect();
+            silentGain = null;
             stream.getTracks().forEach(t => t.stop());
             mediaStream.value = null;
           } catch {
@@ -310,20 +350,44 @@ export function usePcmRecorder(options: UsePcmRecorderOptions = {}) {
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     isRecording.value = false;
     audioNode.value?.disconnect();
     audioSource.value?.disconnect();
     audioNode.value = null;
     audioSource.value = null;
-    // context 留作下次复用：acquireStream 拿过，stopRecording 不应 close。
-    // 真正 close 在组件 unmount 或显式 teardown。
+    // 拆 silentGain → destination 链路。
+    silentGain?.disconnect();
+    silentGain = null;
+    // context 留作下次复用（acquireStream 走「复用路径」只 resume 不重建），
+    // 但要 suspend 掉音频线程——否则 running 状态的 context 即使没音频流出
+    // 也在空转、占 Chrome 实时音频 slot。
+    if (audioContext.value && audioContext.value.state === "running") {
+      try {
+        await audioContext.value.suspend();
+      } catch {
+        // best-effort：suspend 失败不影响 stopRecording 主路径
+      }
+    }
     mediaStream.value?.getTracks().forEach(track => track.stop());
     mediaStream.value = null;
     resetRingBuffers();
   };
 
-  onBeforeUnmount(stopRecording);
+  onBeforeUnmount(async () => {
+    // 组件销毁时彻底释放：先停录音（suspend context、不关），再 close 释放
+    // Chrome 实时音频 slot。下次组件重建时 audioContext.value 为空，触发
+    // acquireStream 的「首次创建路径」走完整构造。
+    await stopRecording();
+    if (audioContext.value && audioContext.value.state !== "closed") {
+      try {
+        await audioContext.value.close();
+      } catch {
+        // best-effort
+      }
+    }
+    audioContext.value = null;
+  });
 
   return {
     mediaStream,

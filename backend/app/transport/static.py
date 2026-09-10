@@ -53,6 +53,12 @@ def mount(app: FastAPI, subpath: str = "") -> None:
     if not static_dir.is_dir():
         return
 
+    if not subpath:
+        # SUBPATH 为空时直接挂 /，不走中间件；否则 /static 与 /platform-config.json
+        # 会被 spa_fallback 兜底回 HTML，前端拿 HTML 当 JS/JSON 解析，整站白屏
+        app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
+        return
+
     static_app = StaticFiles(directory=str(static_dir), html=True)
     # add_middleware LIFO 顺序：最后一个 add 的最外层。其他 middleware 在 app.py 之前
     # 已 add（CORS、request-id 等），这里 add 的会跑在最外层——这正是我们想要的：

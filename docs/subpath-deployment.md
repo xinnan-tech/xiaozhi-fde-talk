@@ -25,6 +25,12 @@ VITE_PUBLIC_PATH = /xiaozhi-fde-talk/
 
 值以**斜杠结尾**。恢复根路径部署时改回 `/`。
 
+> **`.env.development` 同步改**（如果你也想在 `pnpm dev` 子路径下访问）：把 `VITE_PUBLIC_PATH` 改成 `/xiaozhi-fde-talk/` 即可。**`VITE_API_URL` / `VITE_WS_BASE_URL` 不需要改**，保持默认 `127.0.0.1:8000`：
+>
+> - 前端 bundle 全部用相对路径（`src/api/utils.ts` 里写明了「不嵌入任何后端 host」），请求里没有 host
+> - vite dev 的 server.proxy 只把浏览器请求剥前缀后转给 `VITE_API_URL` / `VITE_WS_BASE_URL` 指向的目标，默认就是 127.0.0.1:8000
+> - 只有当 dev 后端不在本地 8000 端口（比如跑在 docker 容器或同事机器）才需要改这两个值
+
 ### 后端：`backend/.env` 或环境变量
 
 后端用 pydantic-settings 读取 `SUBPATH` 环境变量，配置写在 `backend/.env` 里：

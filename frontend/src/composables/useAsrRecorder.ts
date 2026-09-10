@@ -1,5 +1,5 @@
 import { onBeforeUnmount, ref, shallowRef } from "vue";
-import { useAudioRecorder } from "@/composables/useAudioRecorder";
+import { usePcmRecorder } from "@/composables/usePcmRecorder";
 import { useUserStoreHook } from "@/store/modules/user";
 
 /** 停止后等待尾句转写到达的缓冲时间 */
@@ -27,7 +27,7 @@ const getAsrWebSocketUrl = () => {
  * 协议（backend/app/transport/websocket/asr_handler.py）：
  *   鉴权与访谈会话 WS 同款——token 走 Sec-WebSocket-Protocol 子协议
  *   bearer.<jwt>，缺失/无效握手被 403 拒绝；无 hello 握手，客户端直发原始
- *   WebM 二进制分片（无 4 字节 seq 头，区别于访谈会话 WS），服务端回推
+ *   裸 PCM（int16 mono 16kHz）（无 4 字节 seq 头，区别于访谈会话 WS），服务端回推
  *   {type:"asr",text} 与 {type:"stopped"}（60s 上限自动停）。
  */
 export function useAsrRecorder() {
@@ -49,21 +49,21 @@ export function useAsrRecorder() {
     mediaStream,
     isRecording,
     error: recorderError,
+    acquireStream,
     startRecording,
     stopRecording
-  } = useAudioRecorder({
+  } = usePcmRecorder({
     audio: {
       channelCount: 1,
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true
     },
-    onAudioData: async audio => {
+    onAudioData: audio => {
       // 原始分片直发（无 seq 头）；仅在连接存活时发送
       if (!ws.value || ws.value.readyState !== WebSocket.OPEN) return;
-      const buffer = await audio.arrayBuffer();
-      if (ws.value?.readyState === WebSocket.OPEN) {
-        ws.value.send(buffer);
+      if (ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(audio);
       }
     }
   });
@@ -212,6 +212,19 @@ export function useAsrRecorder() {
       }
     };
 
+    // 先 acquireStream（getUserMedia + AudioContext + worklet + resume，
+    // 全部需在用户手势栈内）再 startRecording。acquireStream 内部
+    // `if (mediaStream.value) return true` 幂等保护，多次调用安全。
+    const streamAcquired = await acquireStream();
+    if (!streamAcquired) {
+      error.value = recorderError.value ?? new Error("麦克风初始化失败");
+      if (ws.value === socket) {
+        socket.onclose = null;
+        socket.close();
+        ws.value = null;
+      }
+      return false;
+    }
     const started = await startRecording();
     if (!started || ws.value !== socket) {
       // 开麦失败，或开麦期间连接已被服务端关闭（如 ASR 服务未启动）
@@ -248,7 +261,7 @@ export function useAsrRecorder() {
       }
     }
   });
-  // useAudioRecorder 自带 onBeforeUnmount(stopRecording)，麦克风无需重复清理
+  // usePcmRecorder 自带 onBeforeUnmount(stopRecording)，麦克风无需重复清理
 
   return {
     mediaStream,

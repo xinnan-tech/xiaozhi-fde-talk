@@ -412,6 +412,7 @@
   "interview.runtime.mic_permission_guide": "🎤 Không thể sử dụng micro: trang hiện dùng HTTP với IP mạng cục bộ (nguồn không an toàn). Hãy dùng HTTPS; hoặc mở chrome://flags/#unsafely-treat-insecure-origin-as-secure trong Chrome/Edge, nhập {origin} → bật tùy chọn → khởi động lại trình duyệt.",
   "interview.runtime.mic_permission_confirm": "Đã hiểu",
   "interview.runtime.ws_not_connected": "WebSocket chưa kết nối",
+  "interview.runtime.mic_acquire_failed": "Không thể khởi tạo ghi âm. Vui lòng kiểm tra quyền truy cập micro.",
   "interview.runtime.listen_failed": "Không thể bắt đầu nghe. Vui lòng thử lại sau.",
   "interview.runtime.connection_conflict": "Phỏng vấn này đang mở ở trang khác. Tiếp quản kết nối?",
   "interview.runtime.connection_conflict_title": "Xung đột kết nối phỏng vấn",

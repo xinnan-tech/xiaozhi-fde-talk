@@ -34,7 +34,7 @@ import {
   suspendInterviewApi,
   unignoreInterviewItemApi
 } from "@/api/interview";
-import { useAudioRecorder } from "@/composables/useAudioRecorder";
+import { usePcmRecorder } from "@/composables/usePcmRecorder";
 import {
   useWebSocket,
   type InterviewServerMessage
@@ -394,7 +394,7 @@ const startInterviewTimer = (reset = true) => {
 };
 
 const showMicrophonePermissionGuide = () => {
-  const microphoneError = microphoneErrorState.value;
+  const microphoneError = pcmRecorder.error.value;
   // 只有非安全源需要 flags 指引，普通权限拒绝仍使用通用提示
   const isInsecureOrigin =
     microphoneError?.message === "mic_unavailable_insecure_origin";
@@ -430,7 +430,7 @@ const handleStartInterview = async () => {
 
   // 在点击事件中立即请求权限，避免等待 WebSocket 握手后丢失浏览器用户手势。
   shouldResumeMicrophone.value = true;
-  const microphoneStarted = await acquireStream();
+  const microphoneStarted = await acquireMicrophone();
   // 显式标注 string | undefined，避免 TS 沿入口守卫控制流把 ended /
   // suspended 收窄掉——handleServerMessage 在 await 期间可异步改写 status。
   const statusAfterAcquire: string | undefined = interviewDetail.value?.status;
@@ -509,7 +509,7 @@ const handlePauseInterview = async () => {
     }
   }
   sendListenState("stop");
-  stopRecording();
+  stopMicrophone();
   isInterviewStarted.value = false;
   stopInterviewTimer();
   if (interviewDetail.value) {
@@ -620,10 +620,10 @@ const getInterviewSessionId = () =>
   interviewDetail.value?.id || (route.params.id as string);
 
 const AUDIO_PARAMS = {
-  format: "opus",
+  format: "pcm_s16le",
   sample_rate: 16000,
   channels: 1,
-  frame_duration: 60
+  frame_duration: 20
 };
 
 const shouldResumeMicrophone = ref(false);
@@ -849,7 +849,7 @@ const handleServerMessage = (message: InterviewServerMessage) => {
 
   if (message.type === "connection.kicked") {
     shouldResumeMicrophone.value = false;
-    stopRecording();
+    stopMicrophone();
     isInterviewStarted.value = false;
     stopInterviewTimer();
     ElMessage.warning(message.reason || t("interview.runtime.kicked"));
@@ -891,7 +891,7 @@ const handleServerMessage = (message: InterviewServerMessage) => {
       interviewDetail.value.status =
         message.type === "session.ended" ? "ended" : "suspended";
       shouldResumeMicrophone.value = false;
-      stopRecording();
+      stopMicrophone();
       isInterviewStarted.value = false;
       stopInterviewTimer();
     }
@@ -931,8 +931,8 @@ const websocket = useWebSocket({
     // 必须保留启动意图，让新连接握手完成后发送 listen:start；仅在本端
     // 已不处于访谈状态时清掉它（手动暂停、被踢出或结束等路径）。
     shouldResumeMicrophone.value = isInterviewStarted.value;
-    if (!isMicrophoneEnabled.value) return;
-    stopRecording();
+    if (!microphoneEnabled.value) return;
+    stopMicrophone();
   },
   onError: message => {
     console.error("[InterviewPage] WebSocket 错误", message);
@@ -950,49 +950,58 @@ const isWebSocketConnected = computed(
   () => websocketState.value === "connected"
 );
 
-const {
-  isRecording: isMicrophoneEnabled,
-  error: microphoneErrorState,
-  acquireStream,
-  startRecording,
-  stopRecording
-} = useAudioRecorder({
+const pcmRecorder = usePcmRecorder({
   audio: {
     channelCount: 1,
     echoCancellation: true,
     noiseSuppression: true,
     autoGainControl: true
   },
-  onAudioData: async audio => {
-    const payload = await audio.arrayBuffer();
-    if (!isMicrophoneEnabled.value) return;
-    const sent = sendAudioFrame(payload);
+  onAudioData: audio => {
+    if (!microphoneEnabled.value) return;
+    const sent = sendAudioFrame(audio);
     if (!sent) {
-      console.warn("[InterviewPage] 音频片段未发送", {
-        size: audio.size,
+      console.warn("[InterviewPage] PCM 音频帧未发送", {
+        size: audio.byteLength,
         websocketState: websocketState.value
       });
     }
   }
 });
 
+const microphoneEnabled = computed(() => pcmRecorder.isRecording.value);
+const microphoneError = computed(() => pcmRecorder.error.value);
+const acquireMicrophone = () => pcmRecorder.acquireStream();
+const startMicrophone = () => pcmRecorder.startRecording();
+const stopMicrophone = () => pcmRecorder.stopRecording();
+
 const openMicrophone = async () => {
   if (!isWebSocketConnected.value) {
     ElMessage.warning(t("interview.runtime.ws_not_connected"));
+    return false;
+  }
+  // acquireMicrophone 是 pcmRecorder.acquireStream 的薄包装，内部
+  // `if (mediaStream.value) return true` 幂等保护：handleStartInterview 已
+  // 先调过的路径走这里就是 no-op，未调过的路径（resumeInterviewAfterReload /
+  // onConnected）在此补上。startMicrophone 内部守卫会因 context 为 null
+  // 直接拒握，所以 acquireMicrophone 必须前置。
+  const streamAcquired = await acquireMicrophone();
+  if (!streamAcquired) {
+    ElMessage.warning(t("interview.runtime.mic_acquire_failed"));
     return false;
   }
   if (!sendListenState("start")) {
     ElMessage.warning(t("interview.runtime.listen_failed"));
     return false;
   }
-  const started = await startRecording();
+  const started = await startMicrophone();
   if (!started) sendListenState("stop");
   return started;
 };
 
 function suspendLocalInterview() {
   shouldResumeMicrophone.value = false;
-  stopRecording();
+  stopMicrophone();
   isInterviewStarted.value = false;
   stopInterviewTimer();
   if (interviewDetail.value?.status === "in_progress") {
@@ -1084,8 +1093,8 @@ onBeforeUnmount(() => {
   suggestionCards.value.forEach(card => clearIgnoreTimer(card));
   clearIdleWarning();
   stopInterviewTimer();
-  if (isMicrophoneEnabled.value) sendListenState("stop");
-  stopRecording();
+  if (microphoneEnabled.value) sendListenState("stop");
+  stopMicrophone();
   websocket.close();
 });
 
@@ -1227,8 +1236,8 @@ const handleEndInterview = async () => {
 
   stopInterviewTimer();
   isInterviewStarted.value = false;
-  if (isMicrophoneEnabled.value) sendListenState("stop");
-  stopRecording();
+  if (microphoneEnabled.value) sendListenState("stop");
+  stopMicrophone();
   websocket.close();
   router.push("/home");
 };

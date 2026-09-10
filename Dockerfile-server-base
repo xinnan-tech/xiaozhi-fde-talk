@@ -3,7 +3,7 @@
 # 或本文件变更时由 build-base-image.yml 重打；改后端业务代码不需要重打本镜像。
 #
 # 故意不带：ffmpeg / libopus / gcc / python3-dev。
-# - 后端用 PyAV（av==12.3.0）做 WebM 解码，PyAV wheel 自带 FFmpeg 二进制，不需要系统 ffmpeg。
+# - 音频前端走 AudioWorklet 推裸 PCM 字节流，后端无解码依赖（无 PyAV、无 ffmpeg/libopus）。
 # - bcrypt==4.2.1 在 PyPI 有 manylinux wheel，pip install 不触发本地编译。
 # - pip 升级 setuptools wheel 已在 pip install 前完成。
 #

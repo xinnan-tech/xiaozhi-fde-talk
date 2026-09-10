@@ -24,13 +24,13 @@ async function detectLocale(page: Page): Promise<Locale> {
 }
 
 async function createInterviewAndStart(page: Page, locale: Locale, title: string) {
-  // 不静默 MediaRecorder：必须让 fake audio 帧持续 _touch server 的
+  // 不静默 PCM 录音：必须让 fake audio 帧持续 _touch server 的
   // _last_activity_at，让 idle watchdog（30s）不会抢在我们的用户手动暂停
   // 之前触发 session.suspended；同时保证 openMicrophone() 成功返回 true，
   // 否则 onConnected → suspendLocalInterview() 会在没调 suspend API 的情况
   // 下把 status 翻 suspended，污染测试断言。
   // launchOptions 给的是 --use-fake-device-for-media-stream + --use-fake-ui-for-media-stream，
-  // Chrome 会用 440Hz tone 喂 MediaRecorder，正常产出 dataavailable 事件。
+  // Chrome 喂 440Hz tone 进麦克风流，AudioContext + AudioWorklet 正常采到 PCM 帧。
 
   await page.goto("/")
   await page.locator(".user-avatar.online").waitFor({ state: "visible", timeout: 15_000 })
@@ -95,7 +95,7 @@ test.describe.serial("fix-web-status: pause/resume should reflect status immedia
   let locale: Locale
 
   test.beforeAll(async ({ browser }) => {
-    // 单独起一个 page 仅用于探测 locale（避免在主 spec 里 init MediaRecorder）
+    // 单独起一个 page 仅用于探测 locale（避免主 spec 的 init script / 共享状态污染）
     const ctx = await browser.newContext()
     const page = await ctx.newPage()
     await page.goto("/")

@@ -412,6 +412,7 @@
   "interview.runtime.mic_permission_guide": "🎤 Microphone unavailable: this page is using HTTP with a local network IP (an insecure origin). Use HTTPS instead; or open chrome://flags/#unsafely-treat-insecure-origin-as-secure in Chrome/Edge, add {origin}, enable the flag, and restart the browser.",
   "interview.runtime.mic_permission_confirm": "Got it",
   "interview.runtime.ws_not_connected": "WebSocket is not connected",
+  "interview.runtime.mic_acquire_failed": "Failed to initialize recording. Please check microphone permissions.",
   "interview.runtime.listen_failed": "Unable to start listening. Please try again later.",
   "interview.runtime.connection_conflict": "This interview is open on another page. Take over the connection?",
   "interview.runtime.connection_conflict_title": "Interview connection conflict",

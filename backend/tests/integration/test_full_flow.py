@@ -17,7 +17,7 @@ WS_BASE = "ws://localhost:8000"
 pytestmark = pytest.mark.integration
 
 
-async def test_full_flow(client, login, create_session, end_session, zh_webm):
+async def test_full_flow(client, login, create_session, end_session, zh_pcm):
     """全流程验收：首算 + 音频 + 30s 计时器重算 + 报告生成 + 导出。"""
     import httpx
 
@@ -34,7 +34,7 @@ async def test_full_flow(client, login, create_session, end_session, zh_webm):
     uri = f"{WS_BASE}/ws/v1/interview/{sid}"
     hello = {
         "type": "hello",
-        "audio_params": {"format": "opus", "sample_rate": 16000, "channels": 1},
+        "audio_params": {"format": "pcm_s16le", "sample_rate": 16000, "channels": 1},
     }
 
     async with websockets.connect(uri, subprotocols=["bearer." + token]) as ws:
@@ -48,8 +48,8 @@ async def test_full_flow(client, login, create_session, end_session, zh_webm):
             raise AssertionError("未收到 hello")
 
         await ws.send(json.dumps({"type": "listen", "state": "start"}))
-        for i, off in enumerate(range(0, len(zh_webm), 4000)):
-            await ws.send(i.to_bytes(4, "big") + zh_webm[off:off + 4000])
+        for i, off in enumerate(range(0, len(zh_pcm), 4000)):
+            await ws.send(i.to_bytes(4, "big") + zh_pcm[off:off + 4000])
             await asyncio.sleep(0.02)
         await ws.send(json.dumps({"type": "listen", "state": "stop"}))
 

@@ -221,7 +221,7 @@ async def test_zombie_live_bind_recycles_asr_and_returns_to_live_paused(make_sta
       2) 旧 ASR provider「假活」（WS 仍开但 FunASR 2pass 会话卡死、不再出字），
          is_alive 区分不出，复用会带病上岗。
     修复：bind 回到 live_paused + 拆除旧 provider，让客户端 listen:start 建全新的。
-    解码器保留（MediaRecorder 是连续 WebM 流，重连不重发 EBML 头）。
+    管线保留（连续 PCM 流无状态，不需任何重置）。
     """
     import app.services.sessions.pipeline as pl_mod
     from app.services.sessions.runtime import SessionRuntime

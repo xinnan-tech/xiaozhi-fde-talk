@@ -47,10 +47,10 @@ new WebSocket(url, ["bearer." + jwt])
   "type": "hello",
   "client_id": "uuid-or-any-stable-id",
   "audio_params": {
-    "format": "opus",
+    "format": "pcm_s16le",
     "sample_rate": 16000,
     "channels": 1,
-    "frame_duration": 60
+    "frame_duration": 20
   }
 }
 ```
@@ -100,14 +100,15 @@ new WebSocket(url, ["bearer." + jwt])
 
 ```
 ┌────────────────────────────┬──────────────────────────┐
-│  seq (4 B, big-endian u32) │  opus payload            │
+│  seq (4 B, big-endian u32) │  pcm payload            │
 └────────────────────────────┴──────────────────────────┘
 ```
 
 - `seq` 从客户端 0 开始递增。
 - 重连且未重新开麦时，**从 `resume_from_seq` 起续编**（见 §6.1）。
-- 每次「开麦」都应**从 0 重新编 seq**（重建 `MediaRecorder` 时旧流无法续号）。服务端在收到 `listen:start` 时会重置去重窗口，已发送过的低 seq 会被丢弃。
-- 整帧（4 字节 seq 头 + opus payload）总长不得超过 §1 的 64 KiB 单帧上限。
+- 每次「开麦」都应**从 0 重新编 seq**（重建 AudioWorklet 节点 / 重新 `startRecording` 时旧流自然断开）。服务端在收到 `listen:start` 时会重置去重窗口，已发送过的低 seq 会被丢弃。
+- `pcm payload` 为 16kHz、s16、单声道 int16 little-endian PCM 字节流（前端 AudioWorklet 输出格式，与服务端流式 ASR 直通，**不做任何解码或重采样**）。
+- 整帧（4 字节 seq 头 + pcm payload）总长不得超过 §1 的 64 KiB 单帧上限。
 - 不足 4 字节（放不下 seq 头）的帧被服务端静默丢弃。
 
 ---
@@ -164,12 +165,12 @@ new WebSocket(url, ["bearer." + jwt])
 1. 服务端识别为同身份 → 静默复用运行时。
 2. 回 `hello` 的 `resume_from_seq` 是已喂给 ASR 的下一帧号。
 3. 之后的 seq 编号取决于客户端如何恢复录音：
-   - **录音未中断**（闪断、未重建 `MediaRecorder`、不发 `listen:start`）：把本地 seq 置为
-     `resume_from_seq` 续编，服务端按会话级去重窗口收帧。
-   - **重新开麦**（重建 recorder、发 `listen:start`）：seq 从 0 重新编起。服务端收到
-     `listen:start` 会整体重置去重窗口，旧窗口的高水位作废。
-   浏览器断线后 recorder 通常已失效，走第二条路径是常态；`resume_from_seq` 仅在第一条
-   路径（连接层闪断但音频流仍连续）时有意义。
+   - **录音未中断**（闪断、未重建 AudioWorklet 节点 / 未 `stopRecording`+`startRecording`、
+     不发 `listen:start`）：把本地 seq 置为 `resume_from_seq` 续编，服务端按会话级去重窗口收帧。
+   - **重新开麦**（重新 `startRecording`、发 `listen:start`）：seq 从 0 重新编起。
+     服务端收到 `listen:start` 会整体重置去重窗口，旧窗口的高水位作废。
+   浏览器断线后 AudioContext/AudioWorklet 节点通常已失效（媒体流被释放），走第二条路径
+   是常态；`resume_from_seq` 仅在第一条路径（连接层闪断但音频流仍连续）时有意义。
 4. 服务端还会重推一条 `coaching.update{final}` 作为 snapshot。断连期间缓冲的 critical 通知（`error`、`session.ended`）也会在 hello 后重放。
 
 ### 6.2 客户端断开 → 重连超时
@@ -393,7 +394,7 @@ ws.onopen = () => {
   ws.send(JSON.stringify({
     type: "hello",
     client_id: getClientId(),          // sessionStorage 持久化
-    audio_params: { format: "opus", sample_rate: 16000, channels: 1, frame_duration: 60 },
+    audio_params: { format: "pcm_s16le", sample_rate: 16000, channels: 1, frame_duration: 20 },
     protocol_version: 1,
   }));
 };
@@ -441,11 +442,8 @@ A: 弹框问用户。同意 → 发 `connection.takeover`；取消 → 直接 `w
 **Q: 断网几秒后回来，重连还是 4406？**
 A: 已超过存活窗口（默认 60 s），会话被服务端自动收尾。让用户回列表刷新状态。
 
-**Q: 重连后音频进得来却不出字？**
-A: 重建 `MediaRecorder`（`mr.stop()` → `new MediaRecorder(...)`），必须发一条**含 EBML 头**的全新流。直接 `resume()` 旧 recorder 会发无头续流污染解码器。
-
 **Q: `seq` 是会话级还是连接级？**
-A: 服务端会话级单调递增，跨连接保留。客户端每次 `listen:start` 都从 0 起编（因为 MediaRecorder 被重建）；重连时按服务端回包的 `resume_from_seq` 续编。重连后若需重新开麦（发 `listen:start`），seq 直接从 0 编起，无需理会 `resume_from_seq`（见 §6.1）。
+A: 服务端会话级单调递增，跨连接保留。客户端每次 `listen:start` 都从 0 起编（前端 AudioWorklet 录音节点重建）；重连时按服务端回包的 `resume_from_seq` 续编。重连后若需重新开麦（发 `listen:start`），seq 直接从 0 编起，无需理会 `resume_from_seq`（见 §6.1）。
 
 **Q: 同一会话在两个浏览器标签打开会怎样？**
 A: 第二个标签收到 `connection.conflict`，弹「接管」框。接管后第一个标签收 `connection.kicked` 并被强制断开（4402）。

@@ -47,6 +47,7 @@
   "ws.connection.conflict": "Another connection is already attached to this interview. Take over?",
   "ws.connection.kicked": "Connection has been taken over by another client",
   "ws.audio.low_level": "Audio level too low, please move closer to the microphone",
+  "ws.audio.format_unsupported": "Unsupported audio format. Please refresh your browser and try again",
   "ws.close.session_ended": "Interview ended",
   "ws.close.suspended": "Interview suspended",
   "session.concurrent_limit": "Active interview limit reached ({limit})",

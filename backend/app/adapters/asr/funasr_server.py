@@ -306,6 +306,7 @@ class FunASRServerProvider(ASRProvider):
                 response = response.decode("utf-8")
             msg = json.loads(response)
         except (json.JSONDecodeError, UnicodeDecodeError):
+            logger.warning("FunASR 返回无法解析：type=%s", type(response).__name__)
             return False
 
         text = ""

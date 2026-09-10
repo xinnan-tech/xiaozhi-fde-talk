@@ -9,7 +9,7 @@
 | 单进程模式（默认推荐） | 否 | 单机部署、不想折腾 nginx、TLS 由上游网关终止 |
 | 反向代理模式 | 是 | 多服务同域名分流、TLS 在本机终结、需要复杂路径路由 |
 
-两种形态的前端配置完全相同，区别只在第 3 步「启动方式」。
+两种形态的前端 VITE_PUBLIC_PATH 配置相同；后端 SUBPATH 反代模式留空、单进程模式必须与前端一致。
 
 ## 1. 配置文件（前后端必须一致）
 
@@ -76,7 +76,7 @@ docker compose up -d app
 
 ```bash
 cd frontend && pnpm install --frozen-lockfile && pnpm build
-cp -r dist/* backend/static/
+cp -r dist/* ../backend/static/
 ```
 
 后端 `python main.py` 启动时读 `SUBPATH` 自动带前缀，无需再编译。
@@ -110,6 +110,9 @@ location = /xiaozhi-fde-talk {
 location /xiaozhi-fde-talk/ {
     proxy_pass http://127.0.0.1:8000/;
     proxy_http_version 1.1;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_buffering off;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

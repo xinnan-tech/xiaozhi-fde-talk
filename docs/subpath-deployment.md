@@ -100,7 +100,12 @@ SUBPATH=/xiaozhi-fde-talk python main.py
 
 ### 3.2 反向代理模式
 
-服务器应将 `/xiaozhi-fde-talk/` 转发到本项目服务，并保留 WebSocket 转发能力。Nginx 示例：
+服务器应将 `/xiaozhi-fde-talk/` 转发到本项目服务，并保留 WebSocket 转发能力。子路径前缀有两种剥离方式，**任选一种并保持前后端一致**：
+
+- **方式 ①**（推荐）：Nginx 侧剥前缀 → 后端照常收 `/api/...`、`/ws/...`，后端不配 `SUBPATH`
+- **方式 ②**：Nginx 原样转发 → 后端配 `SUBPATH=/xiaozhi-fde-talk`，由后端的 `_SubpathStripMiddleware` 处理
+
+#### 方式 ①：Nginx 剥前缀（后端不配 SUBPATH）
 
 ```nginx
 location = /xiaozhi-fde-talk {
@@ -108,25 +113,61 @@ location = /xiaozhi-fde-talk {
 }
 
 location /xiaozhi-fde-talk/ {
-    proxy_pass http://127.0.0.1:8000/;
+    proxy_pass http://127.0.0.1:8000/;    # 末尾的 / 负责剥前缀
     proxy_http_version 1.1;
+
+    # 语音 WS 长连接：超时与缓冲必须调大，默认 60s 会断
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
     proxy_buffering off;
+
     proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+
+    # 真实 IP 透传（按需开启）
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
 }
 ```
 
-`proxy_pass` 结尾的 `/` 会在转发时去掉 `/xiaozhi-fde-talk` 前缀，使后端继续接收 `/api/...` 和 `/ws/...` 路径。
+`proxy_pass` 末尾的 `/` 会在转发时去掉 `/xiaozhi-fde-talk` 前缀，使后端继续接收 `/api/...` 和 `/ws/...` 路径。**后端 `SUBPATH` 必须留空**。
 
-**反代模式下后端不需要配置 `SUBPATH`**（前置反代已经把前缀剥掉）。但前端 `VITE_PUBLIC_PATH` 仍要配成 `/xiaozhi-fde-talk/`，否则浏览器不会带前缀打反代。
+#### 方式 ②：Nginx 原样转发（后端配 SUBPATH）
 
-> Caddy / Traefik / 云负载均衡同理：把 `/xiaozhi-fde-talk/` 整段转发到后端，前缀在反代侧被剥离。
+适用场景：希望 Nginx 只做 TLS 终止 / 限流 / 访问控制，不参与路径处理。
+
+```nginx
+location = /xiaozhi-fde-talk {
+    return 301 /xiaozhi-fde-talk/;
+}
+
+location /xiaozhi-fde-talk/ {
+    proxy_pass http://127.0.0.1:8000;     # 末尾不带 /：前缀原样转发
+    proxy_http_version 1.1;
+
+    # 语音 WS 长连接：超时与缓冲必须调大，默认 60s 会断
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_buffering off;
+
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+
+    # 真实 IP 透传（按需开启）
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**关键区别是 `proxy_pass` 末尾有没有 `/`**：方式 ① 带 `/`，Nginx 去掉 `/xiaozhi-fde-talk` 前缀，后端 `SUBPATH` 留空；方式 ② 不带 `/`，前缀留在请求路径里，**后端必须配 `SUBPATH=/xiaozhi-fde-talk`**，否则所有请求（包括 WS）404，浏览器侧 WebSocket 握手失败会报 `missing Upgrade header`。
+
+两种方式下，前端 `VITE_PUBLIC_PATH` 都要配成 `/xiaozhi-fde-talk/`，否则浏览器不会带前缀打反代。
+
+> Caddy / Traefik / 云负载均衡同理：把 `/xiaozhi-fde-talk/` 整段转发到后端，按你选的方式决定前缀在反代侧剥掉（方式 ①）还是保留给后端处理（方式 ②）。
 
 ## 4. 验证
 

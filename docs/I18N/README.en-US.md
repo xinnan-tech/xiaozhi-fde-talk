@@ -9,7 +9,7 @@
 
 Regular recording tools only help you clean up after the interview. This one listens in real time and nudges you on what to ask next and what you have not covered yet. When the interview ends, you get a structured requirements report—no manual note-taking needed.
 
-[Quick Start](#quick-start) · [Full Docs](../index.md) · [Subpath Deployment](../subpath-deployment.md) · [Report an issue](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[Quick Start](#quick-start) · [Full Docs](../index.md) · [Report an issue](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-zh--CN-lightgrey.svg)](../../README.md)
 [![English](https://img.shields.io/badge/English-current-green.svg)](README.en-US.md)

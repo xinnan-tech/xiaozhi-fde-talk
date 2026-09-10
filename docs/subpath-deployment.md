@@ -2,6 +2,10 @@
 
 生产环境默认部署在域名根路径 `/`。如果服务器根路径已经有其他项目，可以将本项目部署到子路径，例如 `/xiaozhi-fde-talk/`。
 
+> **⚠️ 硬前提：子路径部署必须前置一层会剥掉 `/xiaozhi-fde-talk/` 前缀的反向代理（nginx / Caddy / Traefik / 云负载均衡皆可），否则不要改这个配置。**
+>
+> 后端的 SPA 兜底会把 `/xiaozhi-fde-talk/api/...`、`platform-config.json`、所有静态资源全部回 `200 + index.html`，前端拿 HTML 当 JSON 解析，永久白屏且无任何报错。**只跑 `pnpm build` 然后把 dist 丢到后端裸跑这条路走不通**，必须经过反向代理把前缀剥掉。
+
 ## 1. 设置前端构建路径
 
 构建前修改 `frontend/.env.production`：
@@ -12,11 +16,7 @@ VITE_PUBLIC_PATH = /xiaozhi-fde-talk/
 
 如果恢复为根路径部署，将该配置改回 `/` 后重新构建。
 
-## 2. 重新构建镜像
-
-按部署方式二选一：
-
-### 2.1 Docker 部署（默认推荐）
+## 2. 重新构建镜像（默认 Docker 部署）
 
 GHCR 预构建镜像不包含本地 `VITE_PUBLIC_PATH` 改动，必须本地重打 `app` 镜像再起容器：
 
@@ -26,13 +26,6 @@ docker compose up -d app
 ```
 
 镜像编译细节参见 [本地编译 Docker 镜像](docker-build.md)。
-
-### 2.2 直接跑容器 / 源码部署
-
-```bash
-cd frontend
-pnpm build
-```
 
 ## 3. 配置反向代理
 

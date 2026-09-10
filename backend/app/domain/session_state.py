@@ -67,6 +67,26 @@ class SessionState:
     def user_id(self) -> str | None:
         return self.session.user_id
 
+    def set_item_filtered(self, item_id: str, *, kind: str) -> None:
+        """add 路径互斥写入：skipped 与 ignored 对同 item 互斥，避免双侧脏状态。"""
+        if kind == "skipped":
+            self.skipped_ids.add(item_id)
+            self.ignored_ids.discard(item_id)
+        elif kind == "ignored":
+            self.ignored_ids.add(item_id)
+            self.skipped_ids.discard(item_id)
+        else:
+            raise ValueError(f"unknown kind: {kind}")
+
+    def clear_item_filter(self, item_id: str, *, kind: str) -> None:
+        """undo 路径仅本地 discard，不动对方集合。"""
+        if kind == "skipped":
+            self.skipped_ids.discard(item_id)
+        elif kind == "ignored":
+            self.ignored_ids.discard(item_id)
+        else:
+            raise ValueError(f"unknown kind: {kind}")
+
     def next_seg_id(self) -> str:
         """分配下一个 seg_id（s1, s2, ...）。独立自增计数器，transcript 增减不影响。"""
         self._next_seg_id += 1

@@ -56,7 +56,7 @@ docker compose up -d app
 
 ```bash
 cd frontend && pnpm install --frozen-lockfile && pnpm build
-cp -r dist/* backend/static/
+cp -r dist/* ../backend/static/
 ```
 
 后端 `python main.py` 启动时读 `SUBPATH` 自动带前缀，无需再编译。

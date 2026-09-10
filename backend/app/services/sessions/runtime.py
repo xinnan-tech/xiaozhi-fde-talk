@@ -376,13 +376,13 @@ class SessionRuntime:
     async def _on_misaligned(self) -> None:
         """连续 ≥3 次收到奇数字节 PCM 帧：协议层异常，推错误帧提示用户刷新。
 
-        管线 fire-once 后会清零 streak，但本方法不主动标记 _send_dead——前端刷新
-        重建连接后会发新 audio_params（pcm_s16le），握手阶段就被 hello 拒握逻辑
-        拦下（audio_format_unsupported），不会反复触发此回调。
+        用 _raw_send 而非 _send：_send 走 retain_critical 把帧入 outbound
+        缓冲，重连时 critical_for_replay 会无脑重发「不支持的音频格式」错
+        误帧，与本方法设计意图（fire-once）矛盾。_raw_send 直接出站不缓存。
         """
         logger.warning("PCM 持续错位，疑似协议层异常：session=%s",
                        self.state.session.id)
-        await self._send({
+        await self._raw_send({
             "type": "error",
             "code": "audio_format_unsupported",
             "i18n_key": Keys.WS_AUDIO_FORMAT_UNSUPPORTED.value,

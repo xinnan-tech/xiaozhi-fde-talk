@@ -84,19 +84,19 @@ class AudioPipeline:
         # audio_format_unsupported 错误帧提示刷新。偶数字节帧立即清零计数。
         _MISALIGNED_THRESHOLD = 3
         if audio and len(audio) % 2:
-            self._misaligned_streak += 1
             logger.warning(
-                "PCM 帧奇数字节：bytes=%d 已截断最后 1B（streak=%d）",
-                len(audio), self._misaligned_streak,
+                "PCM 帧奇数字节：bytes=%d 已截断最后 1B（协议错乱？）",
+                len(audio),
             )
             audio = audio[:-1]
-            if (
-                self._misaligned_streak >= _MISALIGNED_THRESHOLD
-                and self._on_misaligned is not None
-            ):
-                # fire-once：触发后清零，避免每帧重复打扰；偶数字节帧来时也会清零
-                self._misaligned_streak = 0
-                await self._on_misaligned()
+            # 仅在回调存在时累计 streak：_on_misaligned is None（单测/mock
+            # 路径）时只打日志不计数，避免 streak 无界增长。
+            if self._on_misaligned is not None:
+                self._misaligned_streak += 1
+                if self._misaligned_streak >= _MISALIGNED_THRESHOLD:
+                    # fire-once：触发后清零，避免每帧重复打扰
+                    self._misaligned_streak = 0
+                    await self._on_misaligned()
         else:
             self._misaligned_streak = 0
         pcm_new = audio

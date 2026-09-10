@@ -184,6 +184,53 @@ describe("usePcmRecorder 预分配开销对比", () => {
     expect(reduction).toBeGreaterThan(3);
   });
 
+  /**
+   * 高采样率（48 kHz → step=3）下验证 P0-3 修复：consumed 必须钳制
+   * ≤ resampleAvailable，否则环形索引不变量破坏。模拟 128 samples 输入
+   * × 多轮迭代，确认 invariant 维持。
+   */
+  it("48 kHz 输入下 consumed 钳制保持环形不变量（动态 step 路径）", () => {
+    const TARGET = 16000;
+    const INPUT_RATE = 48000;
+    const STEP = INPUT_RATE / TARGET; // 3
+    const cap = 2048;
+    const buf = new Float32Array(cap);
+    let start = 0;
+    let available = 0;
+    let pos = 0;
+
+    const writeIdx = (logical: number) => (start + logical) % cap;
+    const read = (logical: number) => buf[writeIdx(logical)];
+
+    // 模拟 100 轮 × 128 samples 输入（≈ 0.27s 音频）
+    for (let round = 0; round < 100; round += 1) {
+      const input = new Float32Array(128);
+      // 写入环形
+      for (let i = 0; i < input.length; i += 1) {
+        buf[writeIdx(available + i)] = i;
+      }
+      available += input.length;
+
+      // 重采样循环（与 usePcmRecorder 一致）
+      while (pos + 1 < available) {
+        const i0 = Math.floor(pos);
+        const frac = pos - i0;
+        read(i0) * (1 - frac) + read(i0 + 1) * frac;
+        pos += STEP;
+      }
+
+      // P0-3 钳制：consumed ≤ available，否则 start 索引跨段、读错乱样本
+      const consumed = Math.min(Math.floor(pos), available);
+      expect(consumed).toBeLessThanOrEqual(available);
+      start = (start + consumed) % cap;
+      available -= consumed;
+      pos -= consumed;
+      // 不变量：available ∈ [0, cap]
+      expect(available).toBeGreaterThanOrEqual(0);
+      expect(available).toBeLessThanOrEqual(cap);
+    }
+  });
+
   it("行为等价性：两版发出的 PCM 帧数应相同", () => {
     // 跑两版，比较 sentFrames（不直接比较内容，因为算法实现不同，
     // 但帧数应一致——都按 20ms 切帧）

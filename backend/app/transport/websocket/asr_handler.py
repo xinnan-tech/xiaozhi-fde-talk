@@ -33,6 +33,10 @@ class ASRHandler:
         self._stream_provider = None
         self._stopped = False
         self._max_timer: Optional[asyncio.Task] = None
+        # TODO 后续：/ws/v1/asr 加 hello 协商（与 /ws/v1/interview 一样要
+        # format/音频参数 检查）。当前用首帧 EBML magic 兜底旧前端缓存：
+        # 检测到 WebM 头立即 close + 明确日志。
+        self._format_checked = False
 
     async def run(self) -> None:
         # 鉴权在 accept 之前：token 只认子协议 bearer.<jwt>，校验失败即拒握。
@@ -76,6 +80,22 @@ class ASRHandler:
             frame = raw["bytes"]
             if len(frame) > 64 * 1024:
                 continue
+            # 首帧 EBML magic 检测：旧前端缓存（曾走 MediaRecorder/WebM）
+            # 发来的字节流以 0x1A 0x45 0xDF 0xA3 开头，会被当 PCM 解析得
+            # 静音/乱码。检测到立即 close，让前端有明确反馈而不是 60s 后
+            # 才看到 no_result。
+            if not self._format_checked:
+                self._format_checked = True
+                if frame[:4] == b"\x1a\x45\xdf\xa3":
+                    logger.warning(
+                        "ASR 收到 WebM 字节流（疑似旧前端缓存），关闭连接请刷新"
+                    )
+                    try:
+                        await self.ws.close(code=4400)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._stopped = True
+                    return
             await self._on_audio(frame)
 
     async def _on_audio(self, frame: bytes) -> None:
@@ -84,7 +104,12 @@ class ASRHandler:
         PCM 字节流无共享可变状态（与 WebM cluster 累积缓冲相对），无需 to_thread
         卸载解码。provider.feed_stream 自身保证并发安全。
         """
-        if self._stopped or self._stream_provider is None or not frame:
+        # 局部捕获 provider 引用：check 与 feed_stream 之间 _cleanup 可能
+        # 并发跑（_max_duration_reached 触发 _send_stop → _cleanup 设
+        # _stream_provider = None），不存局部变量会 AttributeError 被
+        # except pass 静默吞 → 最后一两帧 PCM 丢失、funasr 缺尾。
+        provider = self._stream_provider
+        if self._stopped or provider is None or not frame:
             return
         # s16 mono PCM 必须 2 字节对齐；奇数字节截断最后一字节避免 ASR 帧偏移。
         if len(frame) % 2:
@@ -96,9 +121,12 @@ class ASRHandler:
             if not frame:
                 return
         try:
-            await self._stream_provider.feed_stream(frame)
-        except Exception:  # noqa: BLE001
-            pass
+            await provider.feed_stream(frame)
+        except Exception as exc:  # noqa: BLE001
+            # best-effort：丢帧可观测，CI 跑 e2e 看到这条 warning 能定位
+            # provider 假活 / WS 关闭竞态。原 except: pass 把 ASR 死链
+            # 静默拖 60s 才被 _max_duration_reached 兜底。
+            logger.warning("ASR feed_stream 失败（丢 1 帧）：%r", exc)
 
     async def _on_utterance(self, text: str, is_final: bool) -> None:
         """ASR 返回一句转写结果 → 推给前端。"""

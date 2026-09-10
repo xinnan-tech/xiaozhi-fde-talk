@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config_store import get_config_store
+from app.core.exceptions import AuthError
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.core.password_policy import validate_password_strength
@@ -401,6 +402,10 @@ async def me(
         raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
     try:
         current = await extract_auth(access_token)
-    except Exception:
+    except AuthError:
+        # 仅 AuthError（签名错 / 过期 / pwd_ver 不一致）吞成 401。DB / config_store
+        # 等其他异常向上抛 500——前端 bootstrapSession 据 5xx 走 transient_error
+        # 不动 Pinia；如果一并吞成 401，bootstrapSession 会清 Pinia + 跳 /home，
+        # 用户被静默踢出 + 监控看不到任何 5xx 信号。
         raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
     return UserInfo(id=current.user_id, username=current.username, role=current.role or "user")

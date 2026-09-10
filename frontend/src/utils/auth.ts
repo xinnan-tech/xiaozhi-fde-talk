@@ -73,19 +73,23 @@ export async function bootstrapSession(): Promise<BootstrapResult> {
     setBootstrapped(true);
     return "authenticated";
   } catch (err) {
+    // 只信任 response.status === 401 —— 这是后端显式告知「cookie 真过期 /
+    // 被吊销」。其他全部归 transient_error：
+    //
+    //   - status === undefined：网络错 / CORS 预检失败 / 请求被浏览器拦截，
+    //     此时 axios 没拿到响应，message 字符串可能含任何内容（含 nginx
+    //     502/504 错误页里偶尔夹带的 "401" 字样）。一律当 transient_error，
+    //     保留 Pinia，等下次启动 / 下次守卫再试。
+    //   - status === 5xx：后端抽风，不应被踢出。
+    //
+    // 早期版本曾用 ``message.includes("401")`` 兜底网络错路径，但 ERR_NETWORK
+    // 与 nginx 错误页 body 都可能塞 "401" 字样，导致已登录用户被误清 Pinia。
     const status = (err as { response?: { status?: number } })?.response
       ?.status;
-    if (
-      status === 401 ||
-      (status === undefined &&
-        (err as { message?: string })?.message?.includes("401"))
-    ) {
-      // 401：cookie 真过期或被吊销，清 session。
-      // 兜底分：network error 时 status 也是 undefined，但 message 含 401 字符串。
+    if (status === 401) {
       setBootstrapped(false);
       return "unauthenticated";
     }
-    // 5xx / 网络错 / 其他：保留 Pinia 当前态，仅记 warn。
     console.warn(
       "[bootstrapSession] transient error, keeping session:",
       status ?? (err as Error)?.message

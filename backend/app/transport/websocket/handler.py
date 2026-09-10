@@ -28,7 +28,11 @@ from app.core.policies import get_policy
 from app.domain.session import SessionStatus
 from app.services.sessions.manager import ConcurrentLimitError, manager
 from app.services.sessions.runtime import SessionRuntime, registry
-from app.transport.base import extract_auth, token_from_subprotocols
+from app.transport.base import (
+    extract_auth,
+    offered_subprotocol_for_token,
+    token_from_ws_handshake,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,15 +144,13 @@ class WSHandler:
     def _extract_token_for_handshake(self) -> Optional[str]:
         """从 cookie（首选）或 Sec-WebSocket-Protocol 取 access_token。
 
-        cookie 路径：HttpOnly cookie 由浏览器在 WS upgrade 时自动附在 Cookie 头，
-        FastAPI 把它解析到 ``ws.cookies``。前端主路径走这条。
-
-        subprotocol 路径：``bearer.<jwt>`` 子协议（兼容 chaos.py / 外部脚本）。
-        """
-        cookie_token = self.ws.cookies.get("authorized-token")
-        if cookie_token:
-            return cookie_token
-        return token_from_subprotocols(self.ws.scope.get("subprotocols"))
+        转调 ``transport.base.token_from_ws_handshake``——所有 WS 握手
+        必须走同一顺序（cookie > subprotocol），避免某条路径漏 cookie
+        导致浏览器用户被 1006 拒握。"""
+        return token_from_ws_handshake(
+            self.ws.cookies,
+            self.ws.scope.get("subprotocols"),
+        )
 
     # ---- 生命周期 ----
     async def run(self) -> None:
@@ -171,14 +173,13 @@ class WSHandler:
             return
         # 仅当客户端发送了 ``bearer.*`` subprotocol 时才回应同款 subprotocol。
         # cookie 路径下客户端没发 subprotocol，服务器若强行 accept 一个未请求的
-        # subprotocol 会被浏览器以协议违规关闭连接。空 subprotocol 即无 subprotocol。
-        client_subprotocols = self.ws.scope.get("subprotocols") or []
-        offered_subprotocol = (
-            "bearer." + token if any(
-                sp.startswith("bearer.") for sp in client_subprotocols
-            ) else None
+        # subprotocol 会被浏览器以协议违规关闭连接。
+        await self.ws.accept(
+            subprotocol=offered_subprotocol_for_token(
+                token,
+                self.ws.scope.get("subprotocols"),
+            )
         )
-        await self.ws.accept(subprotocol=offered_subprotocol)
         try:
             if not await self._handshake():
                 return

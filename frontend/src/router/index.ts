@@ -133,20 +133,23 @@ router.beforeEach(async (to: ToRouteType, _from, next) => {
   //   - "unauthenticated"：cookie 过期 / 缺失，bootstrapSession 已 setBootstrapped(false)
   //                      → 落到未登录分支跳 /home（登录 dialog 接手）
   //   - "transient_error"：5xx / 网络错，bootstrapSession 不动 bootstrapped；
-  //                      守卫条件 ``!isBootstrapped()`` 仍为 false（F5 已清 Pinia）
-  //                      → 与 unauthenticated 同分支落 /home；用户看到登录页时
-  //                      下一次进守卫会再试。本路径不清 Pinia 是有意的：
-  //                      后端短暂抽风不应把已登录用户的内存态擦掉（虽然本守卫
-  //                      路径上 isBootstrapped() 已是 false，保留 Pinia 是给
-  //                      后续其他调用方如 useAsrRecorder 留余地）。
+  //                      强制 next() 让用户按原 URL 进入；视图后续 API 调用若
+  //                      仍 5xx 由各 store 自身展示错误态，不要在这里把用户踢回
+  //                      /home——后端短暂抽风期间已登录用户被强制跳登录弹框是
+  //                      坏体验，且与「不清 Pinia」承诺自相矛盾（下面的 else
+  //                      分支会 clearSession()）。
+  let bootstrapResult: BootstrapResult | undefined;
   if (!isBootstrapped() && to.path !== "/home") {
-    const result: BootstrapResult = await bootstrapSession();
-    if (result === "transient_error") {
-      // 仅记录，不强制清 Pinia（让 axios 401 拦截器按真实态决定）
-      console.warn(
-        "[router] bootstrapSession returned transient_error, falling back to /home; Pinia preserved"
-      );
-    }
+    bootstrapResult = await bootstrapSession();
+  }
+  if (bootstrapResult === "transient_error") {
+    console.warn(
+      "[router] bootstrapSession returned transient_error; passing through to",
+      to.path,
+      "Pinia preserved (let next API call reveal real state)"
+    );
+    next();
+    return;
   }
 
   if (isBootstrapped()) {

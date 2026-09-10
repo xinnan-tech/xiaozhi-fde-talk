@@ -77,7 +77,10 @@ describe("utils/auth — bootstrapSession / isBootstrapped", () => {
   });
 
   it("bootstrapSession 失败（cookie 失效 / 401）→ isBootstrapped false", async () => {
-    meApiMock.mockRejectedValue(new Error("401"));
+    meApiMock.mockRejectedValue({
+      response: { status: 401 },
+      message: "Request failed with status code 401"
+    });
     const result = await bootstrapSession();
     expect(result).toBe("unauthenticated");
     expect(isBootstrapped()).toBe(false);
@@ -90,9 +93,37 @@ describe("utils/auth — bootstrapSession / isBootstrapped", () => {
     expect(isBootstrapped()).toBe(false);
   });
 
+  it("bootstrapSession 5xx → transient_error（保留 Pinia）", async () => {
+    setBootstrapped(true);
+    meApiMock.mockRejectedValue({
+      response: { status: 500 },
+      message: "Internal Server Error"
+    });
+    const result = await bootstrapSession();
+    expect(result).toBe("transient_error");
+    expect(isBootstrapped()).toBe(true); // 不动 Pinia
+  });
+
+  it("bootstrapSession network error（无 response.status）→ transient_error", async () => {
+    // ERR_NETWORK / CORS 预检失败：axios 没拿到 response，但 message 可能含
+    // 任何字符串（含上游 502/504 错误页 body 里偶尔夹带的 "401"）。
+    // 旧版 message.includes("401") 兜底会在这种情况把已登录用户误判为
+    // unauthenticated → 清 Pinia。回归钉死：必须返回 transient_error。
+    setBootstrapped(true);
+    meApiMock.mockRejectedValue({
+      message: "Network Error or proxy body containing 401 Unauthorized"
+    });
+    const result = await bootstrapSession();
+    expect(result).toBe("transient_error");
+    expect(isBootstrapped()).toBe(true);
+  });
+
   it("bootstrapSession 每次启动会先清掉旧版残留 localStorage[user-info]", async () => {
     memStore.set("user-info", { accessToken: "leaked", refreshToken: "leaked" });
-    meApiMock.mockRejectedValue(new Error("401"));
+    meApiMock.mockRejectedValue({
+      response: { status: 401 },
+      message: "Request failed with status code 401"
+    });
     await bootstrapSession();
     // 幂等清理：即便 bootstrap 失败也要先清掉历史残留
     expect(memStore.get("user-info")).toBeUndefined();

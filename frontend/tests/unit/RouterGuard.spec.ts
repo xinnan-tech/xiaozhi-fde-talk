@@ -43,6 +43,14 @@ describe("router guards (HttpOnly cookie 模型)", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     clearLogin();
+    // 默认 guest：无 cookie → /auth/me 返 401 → bootstrapSession 返回
+    // "unauthenticated" → 守卫走未登录分支跳 /home。
+    // 单测可单独覆盖 meApiMock 验证其他分支（transient_error 等）。
+    meApiMock.mockReset();
+    meApiMock.mockRejectedValue({
+      response: { status: 401 },
+      message: "Request failed with status code 401"
+    });
   });
 
   afterEach(() => {

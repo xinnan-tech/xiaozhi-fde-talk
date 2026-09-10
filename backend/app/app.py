@@ -136,6 +136,23 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await _lifespan_startup(app)
+        # 披露限流器进程内实现对多 worker 的影响：每 worker 各自持一份
+        # RateLimiter._buckets，capacity 实际退化为 N × capacity；lifespan 重启
+        # 清空各进程桶，攻击者对齐启动时机即可重置配额。当前 PR 范围内仅披露，
+        # 长期方案走 Redis 共享桶（限流改动需同步 review，故单独 PR）。
+        import logging
+        import os
+        _logger = logging.getLogger("app.app")
+        _workers_env = os.environ.get("WEB_CONCURRENCY") or os.environ.get(
+            "UVICORN_WORKERS"
+        )
+        if _workers_env and _workers_env not in ("1", ""):
+            _logger.warning(
+                "RateLimiter 是进程内桶：当前 workers=%s，限流 capacity "
+                "实际为 N×配置值（每个 worker 各持一份桶）。攻击者只要对齐启动"
+                "时机即可重置配额。生产环境若 N>1 应改 Redis 共享桶。",
+                _workers_env,
+            )
         try:
             yield
         finally:

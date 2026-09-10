@@ -19,7 +19,11 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.adapters.asr.audio_decode import WebMDecoder
 from app.adapters.asr.factory import create_asr_provider
 from app.core.exceptions import AuthError
-from app.transport.base import extract_auth, token_from_subprotocols
+from app.transport.base import (
+    extract_auth,
+    offered_subprotocol_for_token,
+    token_from_ws_handshake,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +43,12 @@ class ASRHandler:
         self._max_timer: Optional[asyncio.Task] = None
 
     async def run(self) -> None:
-        # 鉴权在 accept 之前：token 只认子协议 bearer.<jwt>，校验失败即拒握。
-        token = token_from_subprotocols(self.ws.scope.get("subprotocols"))
+        # 鉴权在 accept 之前。优先级：HttpOnly cookie > bearer.* subprotocol。
+        # 浏览器主路径走 cookie（WS upgrade 自动附）；脚本 / chaos 客户端走 subprotocol。
+        token = token_from_ws_handshake(
+            self.ws.cookies,
+            self.ws.scope.get("subprotocols"),
+        )
         try:
             await extract_auth(token)
         except AuthError as e:
@@ -53,7 +61,14 @@ class ASRHandler:
             )
             return
         try:
-            await self.ws.accept(subprotocol="bearer." + token)
+            # 仅在客户端明确发 bearer.* subprotocol 时回传——cookie 路径下
+            # 浏览器未请求 subprotocol，回传会触发协议违规 close。
+            await self.ws.accept(
+                subprotocol=offered_subprotocol_for_token(
+                    token,
+                    self.ws.scope.get("subprotocols"),
+                )
+            )
             await self._loop()
         except WebSocketDisconnect:
             pass

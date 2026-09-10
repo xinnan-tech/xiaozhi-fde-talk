@@ -241,7 +241,10 @@ describe("stores/UserStore — bootstrapSession 暴露", () => {
   });
 
   it("bootstrapSession 失败（meApi 抛）→ isBootstrapped false", async () => {
-    mocks.meApi.mockRejectedValue(new Error("401"));
+    mocks.meApi.mockRejectedValue({
+      response: { status: 401 },
+      message: "Request failed with status code 401"
+    });
     const result = await bootstrapSession();
     expect(result).toBe("unauthenticated");
     expect(isBootstrapped()).toBe(false);

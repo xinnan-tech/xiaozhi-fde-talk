@@ -162,6 +162,19 @@ export function useAsrRecorder() {
    *  路径（axios 401 拦截器会清 Pinia + 跳登录）。 */
   const MAX_RECONNECT_AFTERS = 1;
 
+  /** WS close code 处理策略：只有 1006/1011 才视为「可能是鉴权失效或服务端
+   *  临时抽风」，允许 refreshApi + 重连一次。
+   *
+   *  - 1000 正常关、1001 端点离开（服务重启）、1005 无 status：业务态决定；
+   *    不盲目刷 refresh——服务重启每次录音都刷 refresh 浪费配额。
+   *  - 1008 策略违规：脚本 / chaos 客户端误用 subprotocol 之类，与鉴权无关，
+   *    不重试。
+   *  - 其他 1xxx：服务端 bug，按 1011 同款处理。
+   *
+   * 早版本对所有 close code 一律 refresh + 重连，被服务重启测试场景打到
+   * 后台日志刷一片 refreshApi——记录在 PR 评论里。 */
+  const SHOULD_REFRESH_CLOSE_CODES: ReadonlySet<number> = new Set([1006, 1011]);
+
   /** 触发 refreshApi 换新 access cookie 后再尝试一次 WS 握手。 */
   const refreshAccessAndReconnect = async (
     url: string,
@@ -200,16 +213,20 @@ export function useAsrRecorder() {
       socket.onopen = () => {
         // 已开麦前，收到 onopen 才算成功
         settle(socket);
-        // 装好业务监听（含后续 401 重连分支）
+        // 装好业务监听（含后续 close code 分支）
         socket.onmessage = handleServerMessage;
         socket.onerror = () => socket.close();
-        socket.onclose = async () => {
-          // 服务端中途关闭（1006 异常 / 鉴权中途吊销）。已开麦期间不阻塞
-          // 当前 stop() 路径，仅在尚未 stop 时尝试 refresh + 重连一次。
+        socket.onclose = async (event: CloseEvent) => {
+          // 服务端中途关闭。按 close code 区分：
+          //   - 1006 / 1011：refresh + 重连一次（鉴权中途吊销 / 服务临时抽风）
+          //   - 其他：业务态已变（用户停 / 服务重启 / 网络错），直接 stop
           if (ws.value !== socket) return;
           ws.value = null;
-          // 已是 retry 失败：停止，让 stop("server") 把当前态收尾
-          if (attempt > MAX_RECONNECT_AFTERS) {
+          const code = event?.code ?? 1005;
+          const shouldRetry =
+            SHOULD_REFRESH_CLOSE_CODES.has(code) &&
+            attempt < MAX_RECONNECT_AFTERS;
+          if (!shouldRetry) {
             void stop("server");
             return;
           }

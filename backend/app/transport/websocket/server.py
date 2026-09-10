@@ -7,11 +7,11 @@ from app.transport.websocket.asr_handler import ASRHandler
 from app.transport.websocket.handler import WSHandler
 
 
-def mount(app: FastAPI) -> None:
-    @app.websocket("/ws/v1/interview/{interview_id}")
+def mount(app: FastAPI, subpath: str = "") -> None:
+    @app.websocket(f"{subpath}/ws/v1/interview/{{interview_id}}")
     async def interview_ws(interview_id: str, ws: WebSocket):
         await WSHandler(ws, interview_id).run()
 
-    @app.websocket("/ws/v1/asr")
+    @app.websocket(f"{subpath}/ws/v1/asr")
     async def asr_ws(ws: WebSocket):
         await ASRHandler(ws).run()

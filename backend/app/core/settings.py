@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # --- 部署 ---
     # True: 后端托管前端 SPA（Docker 部署模式）；False: 仅纯 API（dev 模式）
     serve_frontend: bool = True
+    # 子路径部署：所有 API / WS / 静态都挂到这个前缀下。例如 SUBPATH=/xiaozhi-fde-talk
+    # → 浏览器访问 http://host:8000/xiaozhi-fde-talk/。默认空（根路径部署）。
+    subpath: str = ""
 
     # --- LLM（辅导重算 + 报告生成；可插拔）---
     llm_type: str = "openai"

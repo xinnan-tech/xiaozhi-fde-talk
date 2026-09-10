@@ -236,23 +236,25 @@ def create_app() -> FastAPI:
         finally:
             clear_contextvars()
 
+    # --- 配置：mount_ws / mount_static / api_router 都需要 settings.subpath ---
+    settings = get_settings()
+
     # --- HTTP 业务路由（来自 transport/http/routes/）---
     from app.transport.http.routes import router as api_router
-    app.include_router(api_router)
+    app.include_router(api_router, prefix=settings.subpath)
 
     # --- WebSocket 路由（连接层在 transport/websocket/）---
     from app.transport.websocket.server import mount as mount_ws
-    mount_ws(app)
+    mount_ws(app, settings.subpath)
 
     # --- health + echo ---
     from app.transport.health import mount as mount_health
     mount_health(app)
 
     # --- 前端 SPA 托管（部署模式） ---
-    settings = get_settings()
     if settings.serve_frontend:
         from app.transport.static import mount as mount_static
-        mount_static(app)
+        mount_static(app, settings.subpath)
 
         from app.transport.spa_fallback import mount as mount_spa
         mount_spa(app)

@@ -109,12 +109,14 @@ export const getInterviewWebSocketUrl = (
   interviewId: string,
   wsBaseUrl?: string
 ) => {
-  const path = `/ws/v1/interview/${encodeURIComponent(interviewId)}`;
+  const interviewPath = `/ws/v1/interview/${encodeURIComponent(interviewId)}`;
 
   // 显式 wsBaseUrl 走自定义网关；其余一律走运行时宿主（dev vite proxy / prod 反代）
   if (wsBaseUrl) {
+    // 外部网关只关心自己的路径（如 /gateway/...），不携带前端子路径，
+    // 否则 URL 解析会拼出 wss://gw/gateway/<base>/ws/... 这种污染
     const url = new URL(
-      path,
+      interviewPath,
       wsBaseUrl.endsWith("/") ? wsBaseUrl : `${wsBaseUrl}/`
     );
     if (url.protocol === "http:") url.protocol = "ws:";
@@ -124,7 +126,8 @@ export const getInterviewWebSocketUrl = (
 
   if (typeof window === "undefined") return undefined;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}${path}`;
+  const basePath = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+  return `${protocol}//${window.location.host}${basePath}${interviewPath}`;
 };
 
 const isInterviewServerMessage = (

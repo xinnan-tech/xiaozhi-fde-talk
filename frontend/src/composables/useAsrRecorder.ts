@@ -18,7 +18,8 @@ const getAsrWebSocketUrl = () => {
   // 与 useWebSocket.getInterviewWebSocketUrl 同款构造：dev 走 vite 代理，prod 走反代
   if (typeof window === "undefined") return undefined;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/ws/v1/asr`;
+  const basePath = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+  return `${protocol}//${window.location.host}${basePath}/ws/v1/asr`;
 };
 
 /**

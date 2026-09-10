@@ -9,6 +9,7 @@
 - [LLM 配置](llm-config.md) — 阿里云百炼 等 OpenAI 兼容厂商
 - [ASR 配置](asr-config.md) — 火山引擎豆包流式 API / 本地免费 FunASR
 - [OCR 配置](ocr-config.md) — 百度智能云 OCR （可跳过）
+- [子路径部署](subpath-deployment.md) — 把整套服务挂到 `/xiaozhi-fde-talk/` 之类子路径
 
 ## 开发者参考
 

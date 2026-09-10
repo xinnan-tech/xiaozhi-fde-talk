@@ -32,9 +32,10 @@ const getConfig = (key?: string): PlatformConfigs => {
 /** 获取项目动态全局配置 */
 export const getPlatformConfig = async (app: App): Promise<PlatformConfigs> => {
   app.config.globalProperties.$config = getConfig();
+  const basePath = (VITE_PUBLIC_PATH || "/").replace(/\/$/, "");
   return axios({
     method: "get",
-    url: `${VITE_PUBLIC_PATH}platform-config.json`
+    url: `${basePath}/platform-config.json`
   })
     .then(({ data: config }) => {
       let $config = app.config.globalProperties.$config;

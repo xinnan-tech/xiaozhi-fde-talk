@@ -37,6 +37,13 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       }
     : undefined;
 
+  // vite preview 代理按 base 动态剥前缀（见下方 preview.proxy 注释）
+  const baseNoSlash = (VITE_PUBLIC_PATH || "/").replace(/\/$/, "");
+  const stripBase = (path: string) =>
+    baseNoSlash && path.startsWith(baseNoSlash)
+      ? path.slice(baseNoSlash.length) || "/"
+      : path;
+
   return {
     base: VITE_PUBLIC_PATH,
     root,
@@ -74,15 +81,20 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
       port: 4173,
       host: "0.0.0.0",
       strictPort: true,
+      // 按 base 动态生成代理 key（默认 "/" 时等价于 /api / /ws），
+      // 转发前把前端子路径剥掉，否则子路径构建产物的 /xiaozhi-fde-talk/api
+      // 进来会被 vite preview 的 SPA 兜底回 HTML
       proxy: {
-        "/api": {
-          target: process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
-          changeOrigin: true
-        },
-        "/ws": {
+        [`${baseNoSlash}/api`]: {
           target: process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
           changeOrigin: true,
-          ws: true
+          rewrite: stripBase
+        },
+        [`${baseNoSlash}/ws`]: {
+          target: process.env.E2E_BACKEND_URL || "http://127.0.0.1:8000",
+          changeOrigin: true,
+          ws: true,
+          rewrite: stripBase
         }
       }
     },

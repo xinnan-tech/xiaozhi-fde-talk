@@ -49,6 +49,7 @@ export function useAsrRecorder() {
     mediaStream,
     isRecording,
     error: recorderError,
+    acquireStream,
     startRecording,
     stopRecording
   } = usePcmRecorder({
@@ -211,6 +212,19 @@ export function useAsrRecorder() {
       }
     };
 
+    // 先 acquireStream（getUserMedia + AudioContext + worklet + resume，
+    // 全部需在用户手势栈内）再 startRecording。acquireStream 内部
+    // `if (mediaStream.value) return true` 幂等保护，多次调用安全。
+    const streamAcquired = await acquireStream();
+    if (!streamAcquired) {
+      error.value = recorderError.value ?? new Error("麦克风初始化失败");
+      if (ws.value === socket) {
+        socket.onclose = null;
+        socket.close();
+        ws.value = null;
+      }
+      return false;
+    }
     const started = await startRecording();
     if (!started || ws.value !== socket) {
       // 开麦失败，或开麦期间连接已被服务端关闭（如 ASR 服务未启动）

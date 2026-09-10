@@ -69,8 +69,9 @@ class SessionRuntime:
         self.engine = CoachingEngine(state, self._send)
         self.engine._persist = self._persist_for_recompute
         self.pipeline = AudioPipeline(
-            self._on_utterance, on_dead=self._on_asr_dead, on_overflow=self._on_audio_overflow,
+            self._on_utterance, on_dead=self._on_asr_dead,
             on_low_level=self._on_low_level,
+            on_misaligned=self._on_misaligned,
         )
         self._utterance_lock = asyncio.Lock()
         self._first_computed = False
@@ -133,7 +134,7 @@ class SessionRuntime:
         # 否则遗留 LIVE 会让 listen_start 幂等早退、ASR 管线不重建 → 重连后音频进得来
         # 却永远不出字。同时拆除旧 ASR provider：其 WS 可能假活（仍开但会话卡死、不再
         # 出字），is_alive 区分不出，复用会带病上岗；listen_start 会建全新的。
-        # 解码器保留（连续 WebM 流不重发 EBML 头）。
+        # 管线保留（连续 PCM 流无状态）。拆除旧 ASR provider：其 WS 可能假活。
         if self._fsm.state in (RuntimeState.LIVE, RuntimeState.SUSPENDED_LOCAL):
             self._fsm.transition(RuntimeState.LIVE_PAUSED)
             await self.pipeline.reset_provider()
@@ -212,7 +213,7 @@ class SessionRuntime:
     # ── 入站 API（所有协议统一调用）──────────────────────────
 
     async def submit_audio(self, session_seq: int, payload: bytes) -> None:
-        """入站音频帧：seq 去重 → 喂管线（仅 LIVE 态处理）。"""
+        """入站音频帧：seq 去重 → 喂管线（仅 LIVE 态处理）。payload 是裸 PCM 字节。"""
         if not self.seq.should_accept(session_seq):
             return
         self.seq.mark_consumed(session_seq)
@@ -229,8 +230,9 @@ class SessionRuntime:
         连接已死），即便 LIVE 也强制重建管线——重连复用 runtime 时旧管线可能已死，
         不重建会永远不出字。
         """
-        # 重置 seq tracker：每次开麦都从头开始，前端 MediaRecorder 每次重建 seq 都从 0 编起。
-        # 如果不重置，之前残留的 consumed_seq 会导致所有新帧被去重丢弃（前端 seq < consumed_seq）。
+        # 重置 seq tracker：每次开麦都从头开始，前端每次开麦都从 seq 0 重编
+        # （PCM 路径与 MediaRecorder 无关，行为一致）。如果不重置，之前残留的
+        # consumed_seq 会导致所有新帧被去重丢弃（前端 seq < consumed_seq）。
         self.seq = SeqTracker(0)
         self.state.session.consumed_seq = 0
         if self._fsm.is_listening and not self._asr_dead:
@@ -346,13 +348,13 @@ class SessionRuntime:
 
     async def skip(self, item_id: Optional[str]) -> None:
         if item_id:
-            self.state.skipped_ids.add(item_id)
+            self.state.set_item_filtered(item_id, kind="skipped")
             await self._save_state()
         _touch(self.state.session.id)
 
     async def ignore(self, item_id: Optional[str]) -> None:
         if item_id:
-            self.state.ignored_ids.add(item_id)
+            self.state.set_item_filtered(item_id, kind="ignored")
             await self._save_state()
         _touch(self.state.session.id)
 
@@ -371,11 +373,23 @@ class SessionRuntime:
         })
         logger.warning("ASR 连接已标记失效：session=%s", self.state.session.id)
 
-    async def _on_audio_overflow(self) -> None:
-        """解码缓冲触顶（长会话累积）。解码器已自动恢复到缓存的 EBML 头继续解码，
-        仅丢触发那一帧（毫秒级），转写不中断——故只记日志，不打 error 帧。
-        （打 error 会让前端置 errorShown=true，从而抑制后续断线的自动重连。）"""
-        logger.info("解码缓冲溢出，已自动恢复：session=%s", self.state.session.id)
+    async def _on_misaligned(self) -> None:
+        """连续 ≥3 次收到奇数字节 PCM 帧：协议层异常，推错误帧提示用户刷新。
+
+        用 _raw_send 而非 _send：_send 走 retain_critical 把帧入 outbound
+        缓冲，重连时 critical_for_replay 会无脑重发「不支持的音频格式」错
+        误帧，与本方法设计意图（fire-once）矛盾。_raw_send 直接出站不缓存。
+        """
+        logger.warning("PCM 持续错位，疑似协议层异常：session=%s",
+                       self.state.session.id)
+        await self._raw_send({
+            "type": "error",
+            "code": "audio_format_unsupported",
+            "i18n_key": Keys.WS_AUDIO_FORMAT_UNSUPPORTED.value,
+            "i18n_params": {},
+            "message": i18n_t(Keys.WS_AUDIO_FORMAT_UNSUPPORTED,
+                              locale=self.state.locale),
+        })
 
     async def _on_low_level(self, reading: LevelReading) -> None:
         """开麦周期内解码 PCM 电平持续过低（窗口读数 reading）：提示用户。

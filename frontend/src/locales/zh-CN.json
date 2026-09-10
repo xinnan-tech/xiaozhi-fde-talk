@@ -412,6 +412,7 @@
   "interview.runtime.mic_permission_guide": "🎤 麦克风不可用：当前是 HTTP + 局域网 IP（非安全源）。请改用 HTTPS 访问；或在 Chrome/Edge 打开 chrome://flags/#unsafely-treat-insecure-origin-as-secure，填入 {origin} → 启用 → 重启浏览器。",
   "interview.runtime.mic_permission_confirm": "知道了",
   "interview.runtime.ws_not_connected": "WebSocket 尚未连接",
+  "interview.runtime.mic_acquire_failed": "无法初始化录音，请检查麦克风权限",
   "interview.runtime.listen_failed": "无法开始监听，请稍后重试",
   "interview.runtime.connection_conflict": "该访谈已在其他页面打开，是否接管？",
   "interview.runtime.connection_conflict_title": "访谈连接冲突",

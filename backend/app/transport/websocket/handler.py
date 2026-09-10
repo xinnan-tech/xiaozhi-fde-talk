@@ -244,6 +244,43 @@ class WSHandler:
                         close_code=4000)
             return False
 
+        # audio_params 校验提前到 manager.get / state.locale 之前。理由：
+        # 若校验失败拒握，不应污染 state（state.locale 后续会被持久化，
+        # 错误的 locale 会影响下次重连的错误提示渲染）。错误消息的 locale
+        # 临时从 msg + scope 解析 + force_locale，_fail 走 i18n 渲染。
+        # 仅在 audio_params 显式提供时校验：缺失保持向后兼容（旧的协议面
+        # hello 不携带 audio_params 也能完成握手），仅在字段格式非法时拒握。
+        audio_params = msg.get("audio_params")
+        # TODO 后续：动态采样率切换。当前白名单 (8000/16000/24000/48000)
+        # 覆盖常见采样率，足够 recorder 兜住 16k 失败回退场景。后续
+        # admin 配置 ASR 时，前端会从 admin 读 sample_rate 发过来，
+        # 这里的白名单可能要按 ASR 配置动态收窄或校验匹配。
+        _ALLOWED_FORMATS = {"pcm_s16le"}
+        _ALLOWED_SAMPLE_RATES = {8000, 16000, 24000, 48000}
+        _ALLOWED_CHANNELS = {1}
+        _ALLOWED_FRAME_DURATIONS = {20, 40}
+        if audio_params is not None and (
+            not isinstance(audio_params, dict)
+            or audio_params.get("format") not in _ALLOWED_FORMATS
+            or audio_params.get("sample_rate") not in _ALLOWED_SAMPLE_RATES
+            or audio_params.get("channels") not in _ALLOWED_CHANNELS
+            or audio_params.get("frame_duration") not in _ALLOWED_FRAME_DURATIONS
+        ):
+            logger.warning(
+                "客户端 audio_params 不合规：%s session=%s",
+                audio_params, self.session_id,
+            )
+            # 临时设 locale 让错误消息按用户语言渲染，不污染 state.locale
+            temp_locale = _resolve_hello_locale(msg, self.ws.scope)
+            force_locale(temp_locale)
+            await _fail(
+                self.ws,
+                code="audio_format_unsupported",
+                i18n_key=Keys.WS_AUDIO_FORMAT_UNSUPPORTED,
+                close_code=4400,
+            )
+            return False
+
         state = await manager.get(self.session_id)
         if state is None or state.session.user_id != self._user.user_id:
             await _fail(self.ws, code="not_found", close_code=4404)

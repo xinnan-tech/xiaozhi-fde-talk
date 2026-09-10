@@ -74,8 +74,9 @@ export default defineConfig({
           args: [
             "--use-fake-device-for-media-stream",
             "--use-fake-ui-for-media-stream",
-            // 真 9min16s 访谈录音（opus 32kbps mono 16kHz）——chromium 接受 webm/opus 直接喂
-            // MediaRecorder loop 播放，spec 跑 < 9min 永远是真语音段，FunASR 会出真文本
+            // 真 9min16s 访谈录音（opus 32kbps mono 16kHz）——chromium 接受 webm/opus
+            // 直接喂进麦克风流，AudioContext + AudioWorklet 持续采样；spec 跑
+            // < 9min 永远是真语音段，FunASR 会出真文本。
             `--use-file-for-fake-audio-capture=${process.cwd()}/../backend/tests/e2e/audio/interview.webm`,
           ],
         },

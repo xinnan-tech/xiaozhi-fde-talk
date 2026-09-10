@@ -14,6 +14,7 @@ import Clock from "~icons/ep/clock";
 import Timer from "~icons/ep/timer";
 import SwitchButton from "~icons/ep/switch-button";
 import User from "~icons/ep/user";
+import BackTopIcon from "@/assets/svg/back_top.svg?component";
 import VideoPlay from "~icons/ep/video-play";
 import VideoPause from "~icons/ep/video-pause";
 import CircleCheck from "~icons/ep/circle-check";
@@ -33,7 +34,7 @@ import {
   suspendInterviewApi,
   unignoreInterviewItemApi
 } from "@/api/interview";
-import { useAudioRecorder } from "@/composables/useAudioRecorder";
+import { usePcmRecorder } from "@/composables/usePcmRecorder";
 import {
   useWebSocket,
   type InterviewServerMessage
@@ -46,7 +47,7 @@ defineOptions({
 const router = useRouter();
 const route = useRoute();
 const interviewStore = useInterviewStoreHook();
-const { locale, t } = useI18n();
+const { t } = useI18n();
 const backIcon = useRenderIcon("heroicons:arrow-long-left");
 const eraserIcon = useRenderIcon("boxicons:eraser-filled");
 const handwritingIcon = useRenderIcon("boxicons:pencil-draw");
@@ -393,7 +394,7 @@ const startInterviewTimer = (reset = true) => {
 };
 
 const showMicrophonePermissionGuide = () => {
-  const microphoneError = microphoneErrorState.value;
+  const microphoneError = pcmRecorder.error.value;
   // 只有非安全源需要 flags 指引，普通权限拒绝仍使用通用提示
   const isInsecureOrigin =
     microphoneError?.message === "mic_unavailable_insecure_origin";
@@ -429,7 +430,7 @@ const handleStartInterview = async () => {
 
   // 在点击事件中立即请求权限，避免等待 WebSocket 握手后丢失浏览器用户手势。
   shouldResumeMicrophone.value = true;
-  const microphoneStarted = await acquireStream();
+  const microphoneStarted = await acquireMicrophone();
   // 显式标注 string | undefined，避免 TS 沿入口守卫控制流把 ended /
   // suspended 收窄掉——handleServerMessage 在 await 期间可异步改写 status。
   const statusAfterAcquire: string | undefined = interviewDetail.value?.status;
@@ -508,7 +509,7 @@ const handlePauseInterview = async () => {
     }
   }
   sendListenState("stop");
-  stopRecording();
+  stopMicrophone();
   isInterviewStarted.value = false;
   stopInterviewTimer();
   if (interviewDetail.value) {
@@ -619,10 +620,10 @@ const getInterviewSessionId = () =>
   interviewDetail.value?.id || (route.params.id as string);
 
 const AUDIO_PARAMS = {
-  format: "opus",
+  format: "pcm_s16le",
   sample_rate: 16000,
   channels: 1,
-  frame_duration: 60
+  frame_duration: 20
 };
 
 const shouldResumeMicrophone = ref(false);
@@ -848,7 +849,7 @@ const handleServerMessage = (message: InterviewServerMessage) => {
 
   if (message.type === "connection.kicked") {
     shouldResumeMicrophone.value = false;
-    stopRecording();
+    stopMicrophone();
     isInterviewStarted.value = false;
     stopInterviewTimer();
     ElMessage.warning(message.reason || t("interview.runtime.kicked"));
@@ -890,7 +891,7 @@ const handleServerMessage = (message: InterviewServerMessage) => {
       interviewDetail.value.status =
         message.type === "session.ended" ? "ended" : "suspended";
       shouldResumeMicrophone.value = false;
-      stopRecording();
+      stopMicrophone();
       isInterviewStarted.value = false;
       stopInterviewTimer();
     }
@@ -930,8 +931,8 @@ const websocket = useWebSocket({
     // 必须保留启动意图，让新连接握手完成后发送 listen:start；仅在本端
     // 已不处于访谈状态时清掉它（手动暂停、被踢出或结束等路径）。
     shouldResumeMicrophone.value = isInterviewStarted.value;
-    if (!isMicrophoneEnabled.value) return;
-    stopRecording();
+    if (!microphoneEnabled.value) return;
+    stopMicrophone();
   },
   onError: message => {
     console.error("[InterviewPage] WebSocket 错误", message);
@@ -949,49 +950,58 @@ const isWebSocketConnected = computed(
   () => websocketState.value === "connected"
 );
 
-const {
-  isRecording: isMicrophoneEnabled,
-  error: microphoneErrorState,
-  acquireStream,
-  startRecording,
-  stopRecording
-} = useAudioRecorder({
+const pcmRecorder = usePcmRecorder({
   audio: {
     channelCount: 1,
     echoCancellation: true,
     noiseSuppression: true,
     autoGainControl: true
   },
-  onAudioData: async audio => {
-    const payload = await audio.arrayBuffer();
-    if (!isMicrophoneEnabled.value) return;
-    const sent = sendAudioFrame(payload);
+  onAudioData: audio => {
+    if (!microphoneEnabled.value) return;
+    const sent = sendAudioFrame(audio);
     if (!sent) {
-      console.warn("[InterviewPage] 音频片段未发送", {
-        size: audio.size,
+      console.warn("[InterviewPage] PCM 音频帧未发送", {
+        size: audio.byteLength,
         websocketState: websocketState.value
       });
     }
   }
 });
 
+const microphoneEnabled = computed(() => pcmRecorder.isRecording.value);
+const microphoneError = computed(() => pcmRecorder.error.value);
+const acquireMicrophone = () => pcmRecorder.acquireStream();
+const startMicrophone = () => pcmRecorder.startRecording();
+const stopMicrophone = () => pcmRecorder.stopRecording();
+
 const openMicrophone = async () => {
   if (!isWebSocketConnected.value) {
     ElMessage.warning(t("interview.runtime.ws_not_connected"));
+    return false;
+  }
+  // acquireMicrophone 是 pcmRecorder.acquireStream 的薄包装，内部
+  // `if (mediaStream.value) return true` 幂等保护：handleStartInterview 已
+  // 先调过的路径走这里就是 no-op，未调过的路径（resumeInterviewAfterReload /
+  // onConnected）在此补上。startMicrophone 内部守卫会因 context 为 null
+  // 直接拒握，所以 acquireMicrophone 必须前置。
+  const streamAcquired = await acquireMicrophone();
+  if (!streamAcquired) {
+    ElMessage.warning(t("interview.runtime.mic_acquire_failed"));
     return false;
   }
   if (!sendListenState("start")) {
     ElMessage.warning(t("interview.runtime.listen_failed"));
     return false;
   }
-  const started = await startRecording();
+  const started = await startMicrophone();
   if (!started) sendListenState("stop");
   return started;
 };
 
 function suspendLocalInterview() {
   shouldResumeMicrophone.value = false;
-  stopRecording();
+  stopMicrophone();
   isInterviewStarted.value = false;
   stopInterviewTimer();
   if (interviewDetail.value?.status === "in_progress") {
@@ -1083,8 +1093,8 @@ onBeforeUnmount(() => {
   suggestionCards.value.forEach(card => clearIgnoreTimer(card));
   clearIdleWarning();
   stopInterviewTimer();
-  if (isMicrophoneEnabled.value) sendListenState("stop");
-  stopRecording();
+  if (microphoneEnabled.value) sendListenState("stop");
+  stopMicrophone();
   websocket.close();
 });
 
@@ -1226,8 +1236,8 @@ const handleEndInterview = async () => {
 
   stopInterviewTimer();
   isInterviewStarted.value = false;
-  if (isMicrophoneEnabled.value) sendListenState("stop");
-  stopRecording();
+  if (microphoneEnabled.value) sendListenState("stop");
+  stopMicrophone();
   websocket.close();
   router.push("/home");
 };
@@ -1314,6 +1324,35 @@ onMounted(() => {
               interviewDetail?.base_info?.title || $t("interview.default_title")
             }}
           </h1>
+        </div>
+        <div class="session-actions">
+          <el-button
+            class="session-action-button session-control-button"
+            :class="interviewStatusClass"
+            :icon="controlButtonIcon"
+            :disabled="isControlButtonDisabled"
+            @click="handleControlButtonClick"
+          >
+            <span
+              v-if="isInterviewInProgress"
+              class="rec-badge"
+              aria-hidden="true"
+            >
+              <span class="rec-dot" />
+              <span class="rec-text">REC</span>
+            </span>
+            <span class="session-action-label">{{ controlButtonText }}</span>
+          </el-button>
+          <el-button
+            type="primary"
+            class="session-action-button session-action-primary"
+            :icon="SwitchButton"
+            @click="handleEndInterview"
+          >
+            <span class="session-action-label">{{
+              $t("interview.action.end")
+            }}</span>
+          </el-button>
         </div>
       </header>
 
@@ -1468,82 +1507,63 @@ onMounted(() => {
 
         <section class="right-panel">
           <div class="session-bar glass-card">
-            <div class="session-meta">
-              <!-- 业务字段按模板定义（快照）渲染：label/顺序跟模板走 -->
-              <div
-                v-for="f in sessionMetaFields"
-                :key="f.key"
-                class="session-meta-item session-meta-field"
-              >
-                <div class="session-meta-copy">
-                  <span class="session-meta-label">
-                    <component
-                      :is="metaIconOf(f.type)"
-                      class="session-meta-icon"
-                    />
-                    <span>{{ f.label }}</span>
-                  </span>
-                  <strong :title="interviewDetail?.base_info?.[f.key] || '--'">
-                    {{ interviewDetail?.base_info?.[f.key] || "--" }}
-                  </strong>
-                </div>
-              </div>
-              <div
-                v-if="startedAtDisplay !== '--'"
-                class="session-meta-item session-meta-time"
-              >
-                <div class="session-meta-copy">
-                  <span class="session-meta-label">
-                    <Calendar class="session-meta-icon" />
-                    <span>{{ $t("interview.meta.start_time") }}</span>
-                  </span>
-                  <strong>{{ startedAtDisplay }}</strong>
-                </div>
-              </div>
-              <div class="session-meta-item session-meta-goal">
-                <div class="session-meta-copy">
-                  <span class="session-meta-label">
-                    <Aim class="session-meta-icon" />
-                    <span>{{ $t("interview.meta.goal") }}</span>
-                  </span>
-                  <strong :title="interviewDetail?.goal">{{
-                    interviewDetail?.goal || "--"
-                  }}</strong>
-                </div>
-              </div>
-            </div>
-
-            <div class="session-actions">
-              <el-button
-                class="session-action-button session-control-button"
-                :class="interviewStatusClass"
-                :icon="controlButtonIcon"
-                :disabled="isControlButtonDisabled"
-                @click="handleControlButtonClick"
-              >
-                <span
-                  v-if="isInterviewInProgress"
-                  class="rec-badge"
-                  aria-hidden="true"
+            <el-scrollbar>
+              <div class="session-meta">
+                <!-- 业务字段按模板定义（快照）渲染：label/顺序跟模板走 -->
+                <div
+                  v-for="f in sessionMetaFields"
+                  :key="f.key"
+                  class="session-meta-item"
+                  :class="{ 'session-meta-time': f.key === 'start_time' }"
                 >
-                  <span class="rec-dot" />
-                  <span class="rec-text">REC</span>
-                </span>
-                <span class="session-action-label">{{
-                  controlButtonText
-                }}</span>
-              </el-button>
-              <el-button
-                type="primary"
-                class="session-action-button session-action-primary"
-                :icon="SwitchButton"
-                @click="handleEndInterview"
-              >
-                <span class="session-action-label">{{
-                  $t("interview.action.end")
-                }}</span>
-              </el-button>
-            </div>
+                  <div class="session-meta-copy">
+                    <span class="session-meta-label">
+                      <component
+                        :is="metaIconOf(f.type)"
+                        class="session-meta-icon"
+                      />
+                      <span :title="f.label" class="session-meta-label-text">{{
+                        f.label
+                      }}</span>
+                    </span>
+                    <strong
+                      :title="interviewDetail?.base_info?.[f.key] || '--'"
+                    >
+                      {{ interviewDetail?.base_info?.[f.key] || "--" }}
+                    </strong>
+                  </div>
+                </div>
+                <div
+                  v-if="startedAtDisplay !== '--'"
+                  class="session-meta-item session-meta-time"
+                >
+                  <div class="session-meta-copy">
+                    <span class="session-meta-label">
+                      <Calendar class="session-meta-icon" />
+                      <span :title="$t('interview.meta.start_time')">{{
+                        $t("interview.meta.start_time")
+                      }}</span>
+                    </span>
+                    <strong :title="startedAtDisplay">{{
+                      startedAtDisplay
+                    }}</strong>
+                  </div>
+                </div>
+                <div class="session-meta-item session-meta-goal">
+                  <div class="session-meta-copy">
+                    <span class="session-meta-label">
+                      <Aim class="session-meta-icon" />
+                      <span :title="$t('interview.meta.goal')">{{
+                        $t("interview.meta.goal")
+                      }}</span>
+                    </span>
+                    <strong :title="interviewDetail?.goal">{{
+                      interviewDetail?.goal || "--"
+                    }}</strong>
+                  </div>
+                </div>
+              </div>
+            </el-scrollbar>
           </div>
 
           <div class="transcript-card glass-card">
@@ -1680,6 +1700,9 @@ onMounted(() => {
       </main>
     </div>
     <LayFooter />
+    <el-backtop>
+      <BackTopIcon />
+    </el-backtop>
   </div>
 </template>
 
@@ -1784,7 +1807,6 @@ onMounted(() => {
   }
 
   .left-panel-header,
-  .session-bar,
   .transcript-head {
     display: flex;
     align-items: center;
@@ -2210,25 +2232,24 @@ onMounted(() => {
   }
 
   .session-bar {
-    flex-shrink: 0;
-    gap: 18px;
     min-width: 0;
-    padding: 18px 22px;
+    padding: 18px 22px 8px 22px;
   }
 
   .session-meta {
     display: flex;
-    flex: 1;
     gap: 0;
     align-items: stretch;
+    margin-bottom: 10px;
     min-width: 0;
   }
 
   .session-meta-item {
     display: flex;
+    flex: none;
     align-items: flex-start;
     min-width: 0;
-    padding: 2px 18px;
+    padding: 0 18px;
     border-right: 1px solid rgb(203 213 225 / 72%);
   }
 
@@ -2241,17 +2262,13 @@ onMounted(() => {
     border-right: 0;
   }
 
-  .session-meta-field {
-    flex: 0 1 auto;
-    max-width: 12em;
-  }
-
   .session-meta-time {
     flex: 0 0 auto;
+    width: auto;
   }
 
   .session-meta-goal {
-    flex: 1 1 230px;
+    flex: 0 0 230px;
   }
 
   .session-meta-icon {
@@ -2259,6 +2276,12 @@ onMounted(() => {
     width: 14px;
     height: 14px;
     color: #334155;
+  }
+
+  .session-meta-label-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .session-meta-copy {
@@ -2271,31 +2294,33 @@ onMounted(() => {
 
   .session-meta-label {
     display: inline-flex;
+    overflow: hidden;
     gap: 6px;
     align-items: center;
     height: 17px;
     font-size: 12px;
     line-height: 1.25;
+    white-space: nowrap;
     color: #64748b;
   }
 
   .session-meta-copy strong {
+    display: -webkit-box;
     overflow: hidden;
     font-size: 13px;
     font-weight: 600;
     line-height: 1.35;
     color: #334155;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
   }
 
   .session-meta-goal .session-meta-copy strong {
     display: -webkit-box;
     overflow: hidden;
     white-space: normal;
-    -webkit-box-orient: vertical;
-    line-clamp: 2;
-    -webkit-line-clamp: 2;
   }
 
   .session-meta-interviewee .session-meta-copy strong {
@@ -2865,11 +2890,7 @@ onMounted(() => {
 @media (max-width: 1400px) {
   .interview-page .session-bar {
     gap: 12px;
-    padding: 12px 16px;
-  }
-
-  .interview-page .session-meta-time {
-    display: none;
+    padding: 12px 16px 2px 16px;
   }
 
   .interview-page .session-meta-item {
@@ -2913,6 +2934,10 @@ onMounted(() => {
 }
 
 @media (max-width: 1080px) {
+  .interview-page {
+    height: auto;
+  }
+
   .interview-page .page-shell {
     height: auto;
     min-height: calc(100% - 46px);
@@ -2943,7 +2968,10 @@ onMounted(() => {
 }
 
 @media (max-width: 820px) {
-  .interview-page .page-header,
+  .interview-page .page-header {
+    align-items: flex-start;
+  }
+
   .interview-page .session-bar,
   .interview-page .transcript-head {
     flex-direction: column;
@@ -2952,7 +2980,6 @@ onMounted(() => {
 
   .interview-page .session-actions {
     margin-left: 0;
-    width: 100%;
   }
 
   .interview-page .session-meta {
@@ -3035,11 +3062,7 @@ onMounted(() => {
   }
 
   .interview-page .session-bar {
-    padding: 14px;
-  }
-
-  .interview-page .session-meta-time {
-    display: none;
+    padding: 14px 14px 4px 14px;
   }
 
   .interview-page .session-meta-item {
@@ -3072,10 +3095,6 @@ onMounted(() => {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .interview-page .session-meta-goal {
-    display: none;
-  }
-
   .interview-page .session-actions {
     gap: 6px;
   }
@@ -3085,8 +3104,22 @@ onMounted(() => {
   }
 
   .interview-page .session-action-button.el-button {
-    height: 40px;
-    padding: 0;
+    display: flex;
+    justify-content: center;
+    height: 30px;
+    padding: 8px 10px;
+  }
+
+  :deep(.session-control-button.el-button) {
+    padding: 8px 10px;
+  }
+
+  :deep(.session-action-button.el-button [class*="el-icon"]) {
+    font-size: 13px;
+  }
+
+  :deep(.session-action-button.el-button [class*="el-icon"] + span) {
+    display: none;
   }
 }
 </style>

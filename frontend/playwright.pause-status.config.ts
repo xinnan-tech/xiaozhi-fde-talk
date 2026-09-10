@@ -20,9 +20,9 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
     launchOptions: {
-      // 用真 9min16s 访谈录音 webm 让 MediaRecorder 持续 _touch server 的
-      // _last_activity_at（避开 30s idle watchdog 抢在我们的手动暂停前触发），
-      // 同时保证 openMicrophone() 返回 true，否则 onConnected 会调
+      // 用真 9min16s 访谈录音 webm 让 AudioContext + AudioWorklet 持续 _touch
+      // server 的 _last_activity_at（避开 30s idle watchdog 抢在我们的手动暂停
+      // 前触发），同时保证 openMicrophone() 返回 true，否则 onConnected 会调
       // suspendLocalInterview 在没走 suspend API 的情况下翻 status，污染断言。
       args: [
         "--use-fake-device-for-media-stream",

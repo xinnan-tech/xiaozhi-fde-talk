@@ -47,6 +47,7 @@
   "ws.connection.conflict": "該訪談已有另一個連線，是否接管？",
   "ws.connection.kicked": "連線已被另一個客戶端接管",
   "ws.audio.low_level": "麥克風音量過低，請靠近麥克風",
+  "ws.audio.format_unsupported": "不支援的音訊格式，請重新整理瀏覽器後再試",
   "ws.close.session_ended": "訪談已結束",
   "ws.close.suspended": "訪談已掛起",
   "session.concurrent_limit": "活躍訪談數已達上限（{limit}）",

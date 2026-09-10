@@ -321,6 +321,8 @@ class SessionManager:
         `skip` / `ignore` 写入操作强制校验——错 id 直接 404，不污染
         DB（#164）。`unskip` / `unignore` 是 idempotent 的 discard，不校验
         （错 id 本就静默无操作，前端未渲染亦无害）。
+
+        add 路径互斥 discard 对方集合，undo 仅本地 discard。
         """
         if action not in ("ignore", "unignore", "skip", "unskip"):
             raise ValueError(f"unknown action: {action}")
@@ -331,13 +333,13 @@ class SessionManager:
             # 路由层负责把这条 I18nError 转 404 + {detail, code}
             raise I18nError(Keys.HTTP_COACHING_ITEM_NOT_FOUND, http_status=404, item_id=item_id)
         if action == "ignore":
-            state.ignored_ids.add(item_id)
+            state.set_item_filtered(item_id, kind="ignored")
         elif action == "unignore":
-            state.ignored_ids.discard(item_id)
+            state.clear_item_filter(item_id, kind="ignored")
         elif action == "skip":
-            state.skipped_ids.add(item_id)
+            state.set_item_filtered(item_id, kind="skipped")
         elif action == "unskip":
-            state.skipped_ids.discard(item_id)
+            state.clear_item_filter(item_id, kind="skipped")
         await interview_repo.save_state_auto(state)
         return state
 

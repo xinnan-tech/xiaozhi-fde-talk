@@ -241,15 +241,15 @@ export function useWebSocket(options: useWebSocketOptions) {
     return sendJson({ type: "listen", state });
   };
 
-  const sendAudioFrame = (opusPayload: ArrayBuffer | Uint8Array) => {
+  const sendAudioFrame = (audioPayload: ArrayBuffer | Uint8Array) => {
     if (!isHandshakeComplete.value || websocket.status.value !== "OPEN") {
       return false;
     }
 
     const payload =
-      opusPayload instanceof Uint8Array
-        ? opusPayload
-        : new Uint8Array(opusPayload);
+      audioPayload instanceof Uint8Array
+        ? audioPayload
+        : new Uint8Array(audioPayload);
     const frame = new Uint8Array(4 + payload.byteLength);
     // 前四个字节是大端序的音频序号
     new DataView(frame.buffer).setUint32(0, sequence.value, false);

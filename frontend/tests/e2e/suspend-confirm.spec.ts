@@ -19,26 +19,34 @@ test("suspend confirm dialog: idle → suspend → dialog → continue → in_pr
 }: { page: Page }) => {
   test.setTimeout(80_000)
 
-  // 在 app 加载前注入 MediaRecorder 静默 override：start() 是 no-op，ondataavailable
-  // 永不触发，server 不会持续收 audio 帧、 _last_activity_at 不会被 _touch。listen_start
-  // 是 WS 消息与服务端 runtime.feed_audio 无关，所以仍能正常把 session 推进 IN_PROGRESS
-  // 并把 _touch 设到 listen_start 那一刻。20s 后 watchdog 必然触发 session.suspended。
+  // 在 app 加载前注入 worklet stub：拦截 /pcm-processor.js fetch，返回一个空
+  // processor（process() 不产出任何 Float32Array，不触发 port.postMessage）。
+  // 链路：usePcmRecorder 加载 fake worklet 成功 → AudioWorkletNode 实例化 OK
+  // → context.resume() OK → isRecording=true → 但 onAudioData 永远不被调，
+  // server 不再收 PCM 帧、_last_activity_at 不再被 _touch。listen_start 仍能
+  // 正常推进 session 到 IN_PROGRESS 并在那一瞬设 _touch；20s 后 watchdog 触发。
   await page.addInitScript(() => {
-    const Original = window.MediaRecorder
-    class SilentRecorder extends Original {
-      override start(_timeslice?: number) {
-        // no-op：浏览器侧永远不触发 ondataavailable → server 收不到 audio 帧
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = function (input, init) {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : (input as Request).url
+      if (url.endsWith("/pcm-processor.js")) {
+        const source = `
+          class PCMCaptureProcessor extends AudioWorkletProcessor {
+            process() {
+              return true
+            }
+          }
+          registerProcessor("pcm-capture-processor", PCMCaptureProcessor)
+        `
+        return Promise.resolve(
+          new Response(source, {
+            status: 200,
+            headers: { "Content-Type": "application/javascript" }
+          })
+        )
       }
-      override requestData() {
-        // no-op
-      }
-      override stop() {
-        // 模仿原生 stop：state 切 inactive，不发 data
-        this.state = "inactive" as unknown as RecordingState
-      }
+      return originalFetch(input, init)
     }
-    // @ts-expect-error -- 替换全局构造函数以影响 useAudioRecorder 实例化
-    window.MediaRecorder = SilentRecorder
   })
 
   await page.goto("/")
@@ -89,7 +97,7 @@ test("suspend confirm dialog: idle → suspend → dialog → continue → in_pr
 
   // 3. 点开始：handleStartInterview 走 acquireStream → openMicrophone → listen:start
   //    服务端 runtime.listen_start 触发 _touch 把 _last_activity_at 设到现在；之后
-  //    audio 帧被静默掉、再无 touch。20s idle 阈值后 watchdog 推 session.suspended。
+  //    PCM 帧被静默 worklet 截掉、再无 touch。20s idle 阈值后 watchdog 推 session.suspended。
   const startBtn = page
     .getByRole("button", { name: /开始访谈|^Start$|Start interview/i })
     .first()

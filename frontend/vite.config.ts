@@ -2,7 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { getPluginsList } from "./build/plugins";
 import { include, exclude } from "./build/optimize";
-import { type UserConfigExport, type ConfigEnv, loadEnv } from "vite";
+import {
+  type UserConfigExport,
+  type ConfigEnv,
+  type ProxyOptions,
+  loadEnv
+} from "vite";
 import VueI18nPlugin from "@intlify/unplugin-vue-i18n/vite";
 import Components from "unplugin-vue-components/vite";
 import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
@@ -48,7 +53,7 @@ export default ({ mode }: ConfigEnv): UserConfigExport => {
   const buildBaseProxyEntries = (
     apiTarget: string,
     wsTarget: string
-  ): Record<string, unknown> => ({
+  ): Record<string, string | ProxyOptions> => ({
     [`${baseNoSlash}/api`]: {
       target: apiTarget,
       changeOrigin: true,

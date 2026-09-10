@@ -9,7 +9,7 @@
 
 Các công cụ ghi âm thông thường chỉ giúp bạn tổng hợp sau buổi phỏng vấn. Công cụ này lắng nghe theo thời gian thực và gợi ý bạn nên hỏi gì tiếp theo, những điểm nào chưa được đề cập. Khi buổi phỏng vấn kết thúc, bạn có ngay báo cáo yêu cầu có cấu trúc—không cần ghi chép thủ công.
 
-[Bắt đầu nhanh](#quick-start) · [Tài liệu](../index.md) · [Báo lỗi](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[Demo trực tuyến](https://2662r3426b.vicp.fun/xiaozhi-fde-talk/) · [Bắt đầu nhanh](#quick-start) · [Tài liệu](../index.md) · [Báo lỗi](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-zh--CN-lightgrey.svg)](../../README.md)
 [![English](https://img.shields.io/badge/English-en--US-lightgrey.svg)](README.en-US.md)
@@ -29,7 +29,9 @@ Các công cụ ghi âm thông thường chỉ giúp bạn tổng hợp sau bu�
 
 ## 🚀 Ba câu để chạy
 
-Cần cài Docker sẵn.
+Chưa muốn cài đặt? Vào thử [demo trực tuyến](https://2662r3426b.vicp.fun/xiaozhi-fde-talk/) trước, đăng ký một tài khoản là dùng được ngay.
+
+Muốn chạy local thì cần cài Docker sẵn.
 
 ```bash
 git clone https://github.com/xinnan-tech/xiaozhi-fde-talk.git

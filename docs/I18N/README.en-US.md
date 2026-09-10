@@ -9,7 +9,7 @@
 
 Regular recording tools only help you clean up after the interview. This one listens in real time and nudges you on what to ask next and what you have not covered yet. When the interview ends, you get a structured requirements report—no manual note-taking needed.
 
-[Quick Start](#quick-start) · [Full Docs](../index.md) · [Report an issue](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[Live Demo](https://2662r3426b.vicp.fun/xiaozhi-fde-talk/) · [Quick Start](#quick-start) · [Full Docs](../index.md) · [Report an issue](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-zh--CN-lightgrey.svg)](../../README.md)
 [![English](https://img.shields.io/badge/English-current-green.svg)](README.en-US.md)
@@ -29,7 +29,9 @@ Regular recording tools only help you clean up after the interview. This one lis
 
 ## 🚀 Three lines to start
 
-You need Docker installed.
+Don't want to set anything up yet? Take the [live demo](https://2662r3426b.vicp.fun/xiaozhi-fde-talk/) for a spin—register an account and you're in.
+
+To run it locally, you need Docker installed.
 
 ```bash
 git clone https://github.com/xinnan-tech/xiaozhi-fde-talk.git

@@ -109,7 +109,8 @@ export const getInterviewWebSocketUrl = (
   interviewId: string,
   wsBaseUrl?: string
 ) => {
-  const path = `/ws/v1/interview/${encodeURIComponent(interviewId)}`;
+  const basePath = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+  const path = `${basePath}/ws/v1/interview/${encodeURIComponent(interviewId)}`;
 
   // 显式 wsBaseUrl 走自定义网关；其余一律走运行时宿主（dev vite proxy / prod 反代）
   if (wsBaseUrl) {

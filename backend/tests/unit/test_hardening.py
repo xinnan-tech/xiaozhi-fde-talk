@@ -39,7 +39,8 @@ def test_docs_url_hidden_in_prod(monkeypatch):
         app_mod, "get_settings",
         lambda: SimpleNamespace(env="prod",
                                 cors_origins="https://talk.example.com",
-                                serve_frontend=False),
+                                serve_frontend=False,
+                                subpath=""),
     )
     app = app_mod.create_app()
     assert app.docs_url is None

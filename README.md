@@ -9,7 +9,7 @@
 
 和转写、录音工具不同，它在你访谈过程中实时分析对话，提示你"接下来该问什么、哪些关键点还没问到"，结束自动生成结构化需求报告。让每次访谈更完整、更专业，减少事后补漏。
 
-[快速开始](#quick-start) · [完整文档](docs/index.md) · [子路径部署](docs/subpath-deployment.md) · [问题反馈](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
+[快速开始](#quick-start) · [完整文档](docs/index.md) · [问题反馈](https://github.com/xinnan-tech/xiaozhi-fde-talk/issues)
 
 [![中文](https://img.shields.io/badge/%E4%B8%AD%E6%96%87-current-green.svg)](README.md)
 [![English](https://img.shields.io/badge/English-en--US-lightgrey.svg)](docs/I18N/README.en-US.md)

@@ -49,6 +49,11 @@ _login_limiter = RateLimiter(capacity=5, refill_per_hour=300)
 # （弱密码 / 两次密码不一致 / 重复 username）也消耗令牌——避免暴力扫 username
 # 与弱密码走绕过路径。
 _register_limiter = RateLimiter(capacity=3, refill_per_hour=60)
+# 注册另起一条按 IP 单键的桶：(ip, username) 双键会被 IP 池绕过（每个新 IP
+# 跟同一组 username 组合都是新桶），单 IP 桶卡住「同一出口 IP 上无论换 username
+# 都不让无限制打」。capacity=5、refill_per_hour=20 比双键宽——双键继续把单
+# username 暴力打严住，IP 桶负责守住 IP 池兜底。
+_register_ip_limiter = RateLimiter(capacity=5, refill_per_hour=20)
 # /auth/refresh 限流与 login 同款 bucket 大小，但不限 (ip, username) 而只按 ip——
 # refresh 通常由前端 axios 拦截器自动触发，频繁度高于登录；按用户限会把自动刷新
 # 路径锁死。纯 ip 限足够挡住外网滥用。
@@ -71,6 +76,7 @@ def _reset_for_test() -> None:
         return
     _login_limiter._buckets.clear()
     _register_limiter._buckets.clear()
+    _register_ip_limiter._buckets.clear()
     _refresh_limiter._buckets.clear()
     _change_pwd_limiter._buckets.clear()
     from app.services.auth import token as _tok
@@ -158,6 +164,11 @@ async def register(
     # 限流先于 confirm 比对与弱密码校验：失败路径同样消耗令牌，避免枚举绕路
     rl_key = f"{_client_ip(request)}:{req.username}"
     if not _register_limiter.try_acquire(rl_key):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
+    # IP 单键桶：防 IP 池换源绕开 (ip, username) 双键——换 IP 后每个 username
+    # 仍是新组合的双键桶，但 IP 桶基于同一出口 IP 仍命中。先 IP 后双键：IP 桶
+    # 比双键更宽松（capacity=5 vs 3），先卡 IP 池滥用，双键继续卡单 username 暴力。
+    if not _register_ip_limiter.try_acquire(_client_ip(request)):
         raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
 
     if req.password != req.confirm_password:

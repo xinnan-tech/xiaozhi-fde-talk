@@ -13,6 +13,7 @@ from app.core.i18n import Keys, current_locale, t
 from app.core.i18n.errors import I18nError, LLMContextOverflowError
 from app.core.i18n.extract_prompts import build_extract_system
 from app.core.i18n.ocr_prompts import OCR_PROMPT
+from app.core.retry import RateLimiter
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
 from app.domain.template import Template
@@ -37,6 +38,12 @@ from app.transport.http.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/interviews")
+
+# LLM 转发路由共用一份按 user_id 的配额桶：extract / first-batch / ocr 三个
+# 路由各自走 LLM，单用户额度打通算更省成本（绕开「分桶稀释成 60/h」的绕过路径）。
+# capacity=20、refill_per_hour=20 等价令牌桶上限 20/h。Depends(get_current_user)
+# 先验 token，再按 user_id 抢令牌——没登录的用户在被 401 挡掉前不会消耗桶。
+_llm_user_limiter = RateLimiter(capacity=20, refill_per_hour=20)
 
 
 _STATUS_TYPE = {
@@ -310,6 +317,8 @@ async def first_batch_interview(
     在线时结果顺带经 WS 推送。无 runtime → 在 DB 状态上生成（in-flight 锁）。
     已结束 / 已生成 / 对话已开始 → 直接返回当前清单，不调 LLM。
     """
+    if not _llm_user_limiter.try_acquire(user.user_id):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
     state = await manager.get(session_id)
     if state is None or state.session.user_id != user.user_id:
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
@@ -481,7 +490,7 @@ def _valid_item_ids(state: SessionState) -> Optional[set[str]]:
 @router.post("/extract", response_model=ExtractResponse)
 async def extract_fields(
     req: ExtractRequest,
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """接收转写文本 + 目标字段列表 → LLM 提取 → 返回字段值字典。
 
@@ -494,6 +503,9 @@ async def extract_fields(
       问题误导成「文本里没信息」（issue #197）
     """
     from app.adapters.llm.factory import get_llm
+
+    if not _llm_user_limiter.try_acquire(user.user_id):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
 
     if not req.transcript.strip():
         return ExtractResponse(values={k: "" for k in req.fields})
@@ -551,7 +563,7 @@ async def extract_fields(
 @router.post("/ocr", response_model=OCRResponse)
 async def recognize_image(
     req: OCRRequest,
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """接收 base64 编码的图片，用后端视觉模型提取文字。
 
@@ -566,6 +578,9 @@ async def recognize_image(
     from app.core.i18n.errors import I18nError
 
     import base64 as _b64
+
+    if not _llm_user_limiter.try_acquire(user.user_id):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
 
     try:
         image_bytes = _b64.b64decode(req.image_base64)

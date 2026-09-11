@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     # --- CORS（上公网必填）---
     cors_origins: str = ""  # 逗号分隔，如 "https://app.example.com"
 
+    # --- 反向代理白名单（限流取 client_ip 用）---
+    # 逗号分隔可信代理 IP/CIDR；空=不信任何代理，X-Forwarded-For 永远不读。
+    # 部署 nginx / traefik 后必须把前置代理 IP 列进来（如 127.0.0.1,10.0.0.0/8），
+    # 否则所有真实用户共享 socket 地址桶、一人刷爆全员 429；同时不列则攻击者
+    # 塞伪造 XFF 即可绕过 IP 限流桶。dev/test 默认空（直连测试不走反向代理）。
+    trusted_proxies: str = ""
+
     @model_validator(mode="after")
     def _validate_prod(self) -> "Settings":
         """生产环境强校验（DB_URL 必须为 MySQL/PostgreSQL）。

@@ -13,6 +13,7 @@ from app.core.i18n import Keys, current_locale, t
 from app.core.i18n.errors import I18nError, LLMContextOverflowError
 from app.core.i18n.extract_prompts import build_extract_system
 from app.core.i18n.ocr_prompts import OCR_PROMPT
+from app.core.retry import RateLimiter
 from app.domain.auth import CurrentUser
 from app.domain.session import SessionStatus
 from app.domain.template import Template
@@ -37,6 +38,26 @@ from app.transport.http.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/interviews")
+
+# LLM 转发路由共用一份按 user_id 的配额桶：extract / first-batch / ocr 三个
+# 路由各自走 LLM，单用户额度打通算更省成本（绕开「分桶稀释成 60/h」的绕过路径）。
+# capacity=20、refill_per_hour=20 等价令牌桶上限 20/h。Depends(get_current_user)
+# 先验 token，再按 user_id 抢令牌——没登录的用户在被 401 挡掉前不会消耗桶。
+_llm_user_limiter = RateLimiter(capacity=20, refill_per_hour=20)
+
+
+def _reset_for_test() -> None:
+    """清空 LLM 用户配额桶。env 守门，prod 误调会清掉所有封禁桶。
+
+    与 auth.py 五桶同款约定——模块级 RateLimiter 跨用例持续累加，不暴露 reset
+    的话测试要么 sleep 等令牌再生（慢）、要么依赖运气。生产误调会清掉所有
+    封禁桶，故显式 env 守门——只放行 dev/test，禁止 prod。
+    """
+    from app.core.settings import get_settings
+
+    if get_settings().env not in ("test", "dev"):
+        return
+    _llm_user_limiter._buckets.clear()
 
 
 _STATUS_TYPE = {
@@ -315,6 +336,10 @@ async def first_batch_interview(
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     if state.session.status in TERMINAL_SESSION_STATUSES:
         return _first_batch_response(state)
+    # 限流挪到 404/已结束早返回后、调 LLM 前：未调 LLM 的请求不该吃令牌——
+    # 前端在首评成功后偶发重复触发、或已生成后定时回查，都不该锁自己。
+    if not _llm_user_limiter.try_acquire(user.user_id):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
     rt = registry.get(session_id)
     if rt is not None:
         await rt.engine.first_generate()
@@ -481,7 +506,7 @@ def _valid_item_ids(state: SessionState) -> Optional[set[str]]:
 @router.post("/extract", response_model=ExtractResponse)
 async def extract_fields(
     req: ExtractRequest,
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """接收转写文本 + 目标字段列表 → LLM 提取 → 返回字段值字典。
 
@@ -497,6 +522,10 @@ async def extract_fields(
 
     if not req.transcript.strip():
         return ExtractResponse(values={k: "" for k in req.fields})
+
+    # 限流挪到空文本早返回后：表单自动保存循环、前端空串探测都不该吃令牌。
+    if not _llm_user_limiter.try_acquire(user.user_id):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
 
     # 构建字段说明（包含类型和格式）
     field_lines = []
@@ -551,7 +580,7 @@ async def extract_fields(
 @router.post("/ocr", response_model=OCRResponse)
 async def recognize_image(
     req: OCRRequest,
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """接收 base64 编码的图片，用后端视觉模型提取文字。
 
@@ -582,6 +611,11 @@ async def recognize_image(
         raise I18nError(
             Keys.HTTP_OCR_IMAGE_FORMAT_UNSUPPORTED, http_status=422,
         )
+
+    # 限流挪到格式/大小早返回后：坏图、超限图、非支持格式都不该吃令牌——
+    # 前端 OCR 按钮偶发重复触发、或图传一半失败重传，都不该锁自己。
+    if not _llm_user_limiter.try_acquire(user.user_id):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
 
     ocr = get_ocr()
     if not ocr.configured:

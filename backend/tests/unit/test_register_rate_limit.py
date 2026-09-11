@@ -134,3 +134,127 @@ async def test_register_limiter_and_login_limiter_are_independent():
         )
     finally:
         auth_module.authenticate_user = original_auth
+
+
+# ---- issue #240：注册端点加 IP 单键桶，防 IP 池绕过 (ip, username) 双键 ----
+
+
+def _request_with_ip(ip: str):
+    """构造走 x-forwarded-for 路径的 Request mock（覆盖更接近生产环境）。"""
+    request = MagicMock()
+    request.headers.get = lambda k: ip if k == "x-forwarded-for" else None
+    request.client.host = ip
+    return request
+
+
+async def test_register_ip_limiter_blocks_after_capacity():
+    """同一 IP 不管换 username，打满 5 次后第 6 次 429。
+
+    防 IP 池绕过：原 (ip, username) 双键让每个新 IP+username 组合都是新桶，
+    攻击者换 IP 池后能继续撞。IP 单键桶不管 username，把同一出口 IP 的总
+    注册尝试卡在 5/h。
+    """
+    rl = auth_route._register_ip_limiter
+
+    async def fake_svc_register(db, u, p):
+        from app.core.i18n.errors import I18nError
+        raise I18nError("dummy", http_status=500)
+
+    import app.transport.http.routes.auth as auth_module
+    original_svc = auth_module.svc_register
+    auth_module.svc_register = fake_svc_register
+    try:
+        # 同一 IP 5 次不同 username：双键桶每次都是新桶，但 IP 桶单调累加
+        for i in range(rl.capacity):
+            req, _ = _req_and_request(f"attacker{i}")
+            request = _request_with_ip("9.9.9.9")
+            with pytest.raises(Exception) as ei:
+                await auth_route.register(req, request, db=MagicMock())
+            assert getattr(ei.value, "http_status", None) != 429, (
+                f"前 {rl.capacity} 次不应撞 429，第 {i+1} 次实得 {getattr(ei.value, 'http_status', None)}"
+            )
+        # 第 6 次：IP 桶耗尽 → 429
+        req, _ = _req_and_request("attacker6")
+        request = _request_with_ip("9.9.9.9")
+        with pytest.raises(Exception) as ei:
+            await auth_route.register(req, request, db=MagicMock())
+        assert getattr(ei.value, "http_status", None) == 429
+    finally:
+        auth_module.svc_register = original_svc
+
+
+async def test_register_ip_limiter_isolated_per_ip():
+    """不同 IP 桶各自独立：IP A 打满不影响 IP B。"""
+    rl = auth_route._register_ip_limiter
+
+    async def fake_svc_register(db, u, p):
+        from app.core.i18n.errors import I18nError
+        raise I18nError("dummy", http_status=500)
+
+    import app.transport.http.routes.auth as auth_module
+    original_svc = auth_module.svc_register
+    auth_module.svc_register = fake_svc_register
+    try:
+        # IP A 打满
+        for _ in range(rl.capacity):
+            req, _ = _req_and_request("u")
+            request = _request_with_ip("1.1.1.1")
+            with pytest.raises(Exception):
+                await auth_route.register(req, request, db=MagicMock())
+        # IP A 第 6 次：429
+        req, _ = _req_and_request("u")
+        request = _request_with_ip("1.1.1.1")
+        with pytest.raises(Exception) as ei:
+            await auth_route.register(req, request, db=MagicMock())
+        assert getattr(ei.value, "http_status", None) == 429
+        # IP B 全新桶：放行
+        req, _ = _req_and_request("u")
+        request = _request_with_ip("2.2.2.2")
+        with pytest.raises(Exception) as ei:
+            await auth_route.register(req, request, db=MagicMock())
+        assert getattr(ei.value, "http_status", None) != 429
+    finally:
+        auth_module.svc_register = original_svc
+
+
+async def test_register_ip_limiter_reset_clears_buckets():
+    """_reset_for_test 真清掉 IP 桶，不是靠测试间换 IP 字符串巧合隔离。
+
+    同一 IP 打满 5 次 → 429，调用 _reset_for_test() → 同一 IP 再调应放行。
+    证明 IP 桶真的清掉了，跨 IP 测试隔离不依赖 IP 字符串差异。
+    """
+    rl = auth_route._register_ip_limiter
+
+    async def fake_svc_register(db, u, p):
+        from app.core.i18n.errors import I18nError
+        raise I18nError("dummy", http_status=500)
+
+    import app.transport.http.routes.auth as auth_module
+    original_svc = auth_module.svc_register
+    auth_module.svc_register = fake_svc_register
+    try:
+        # 同一 IP 打满
+        for _ in range(rl.capacity):
+            req, _ = _req_and_request("u")
+            request = _request_with_ip("7.7.7.7")
+            with pytest.raises(Exception):
+                await auth_route.register(req, request, db=MagicMock())
+        # 第 6 次：429
+        req, _ = _req_and_request("u")
+        request = _request_with_ip("7.7.7.7")
+        with pytest.raises(Exception) as ei:
+            await auth_route.register(req, request, db=MagicMock())
+        assert getattr(ei.value, "http_status", None) == 429
+        # 显式 reset：IP 桶必须真清
+        auth_route._reset_for_test()
+        assert "7.7.7.7" not in rl._buckets, "reset 后 IP 桶必须不含被锁 IP"
+        # 同一 IP 重试：放行
+        req, _ = _req_and_request("u")
+        request = _request_with_ip("7.7.7.7")
+        with pytest.raises(Exception) as ei:
+            await auth_route.register(req, request, db=MagicMock())
+        assert getattr(ei.value, "http_status", None) != 429, (
+            "reset 后同 IP 应放行；不靠换 IP 字符串的巧合隔离"
+        )
+    finally:
+        auth_module.svc_register = original_svc

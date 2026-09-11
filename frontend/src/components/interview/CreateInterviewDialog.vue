@@ -72,6 +72,9 @@ const interviewTemplatesLoading = ref(false);
 const defaultsLoading = ref(false);
 const templateFields = ref<TemplateBaseField[]>([]);
 const templateFieldsTemplateId = ref("");
+// base_fields 里的保留键：title 由「访谈名称」固定 UI 渲染、end_time 由
+// start_time+duration 算出，模板里再声明会与固定控件重复
+const RESERVED_BASE_KEYS = new Set(["title", "end_time"]);
 const clipboardText = ref("");
 const clipboardExtracting = ref(false);
 const voiceExtracting = ref(false);
@@ -179,6 +182,7 @@ const rules = computed<FormRules>(() => {
   };
   // 业务字段的必填规则跟着模板走（BaseField.required），trigger 按控件类型定
   for (const field of templateFields.value) {
+    if (RESERVED_BASE_KEYS.has(field.key)) continue; // 跳过保留键，避免给「访谈名称」重复挂规则
     if (!field.required) continue;
     result[`base_info.${field.key}`] = [
       {
@@ -366,13 +370,11 @@ const ensureTemplateFieldsLoaded = async (
 
 // 切模板时清理 base_info / 自动值记录里不属于新模板的孤儿键——
 // 切模板后旧域字段在表单里看不到，但会随提交一起落库（#175 review P1-1）。
-// 保留 title（伪字段）和 end_time（提交时根据 datetime+duration 重算）；
-// goal 是 form 顶层字段，不在 base_info 里，与本清理无关。
+// 保留 RESERVED_BASE_KEYS 里的伪字段；goal 在 form 顶层，与本清理无关。
 const pruneOrphanKeys = (fields: TemplateBaseField[]) => {
   const validKeys = new Set<string>([
     ...fields.map(f => f.key),
-    "title",
-    "end_time"
+    ...RESERVED_BASE_KEYS
   ]);
   const baseInfo = form.base_info as Record<string, string>;
   for (const key of Object.keys(baseInfo)) {
@@ -1149,10 +1151,11 @@ watch(
           </el-form-item>
 
           <!-- 业务字段按模板 base_fields 渲染（label=显示名，控件跟类型走）：
-               text→输入框 datetime→时间选择 duration→档位下拉 -->
+               text→输入框 datetime→时间选择 duration→档位下拉。
+               v-for 跳过保留键，避免与「访谈名称」等固定 UI 重复）。 -->
           <div class="basic-fields-row">
             <el-form-item
-              v-for="f in templateFields"
+              v-for="f in templateFields.filter(f => !RESERVED_BASE_KEYS.has(f.key))"
               :key="f.key"
               :class="{ 'is-duration': f.type === 'duration' }"
               :prop="`base_info.${f.key}`"

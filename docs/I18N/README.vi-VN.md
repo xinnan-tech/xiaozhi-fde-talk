@@ -31,6 +31,8 @@ Các công cụ ghi âm thông thường chỉ giúp bạn tổng hợp sau bu�
 
 Chưa muốn cài đặt? Vào thử [demo trực tuyến](https://2662r3426b.vicp.fun/xiaozhi-fde-talk/) trước, đăng ký một tài khoản là dùng được ngay.
 
+> Demo dùng nhận dạng giọng nói và mô hình ngôn ngữ miễn phí (Zhipu glm-4-flash + FunASR), nên **vào giờ cao điểm nhiều người online cùng lúc sẽ bị chậm**. Muốn trải nghiệm ổn định thì chạy ở máy local.
+
 Muốn chạy local thì cần cài Docker sẵn.
 
 ```bash

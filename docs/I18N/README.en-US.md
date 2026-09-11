@@ -31,6 +31,8 @@ Regular recording tools only help you clean up after the interview. This one lis
 
 Don't want to set anything up yet? Take the [live demo](https://2662r3426b.vicp.fun/xiaozhi-fde-talk/) for a spin—register an account and you're in.
 
+> The demo runs on free speech recognition and a free LLM (Zhipu glm-4-flash + FunASR), so **it can slow down during peak hours when many users are online**. For a stable experience, run it locally.
+
 To run it locally, you need Docker installed.
 
 ```bash

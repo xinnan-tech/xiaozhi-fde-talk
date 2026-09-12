@@ -1152,7 +1152,7 @@ watch(
 
           <!-- 业务字段按模板 base_fields 渲染（label=显示名，控件跟类型走）：
                text→输入框 datetime→时间选择 duration→档位下拉。
-               v-for 跳过保留键，避免与「访谈名称」等固定 UI 重复）。 -->
+               v-for 跳过保留键，避免与「访谈名称」等固定 UI 重复。 -->
           <div class="basic-fields-row">
             <el-form-item
               v-for="f in templateFields.filter(f => !RESERVED_BASE_KEYS.has(f.key))"

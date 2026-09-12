@@ -167,7 +167,7 @@ def test_route_ignore_passes_snapshot_must_ask_ids_as_valid_set(monkeypatch):
     async def _setup():
         await _make_state("s-164-9")
 
-    asyncio.get_event_loop().run_until_complete(_setup())
+    asyncio.run(_setup())
 
     captured = {}
 
@@ -210,7 +210,7 @@ def test_route_skip_passes_snapshot_must_ask_ids_as_valid_set(monkeypatch):
     async def _setup():
         await _make_state("s-164-10")
 
-    asyncio.get_event_loop().run_until_complete(_setup())
+    asyncio.run(_setup())
 
     captured = {}
 
@@ -352,7 +352,7 @@ def test_route_skip_when_must_ask_empty_does_not_404_over_block(monkeypatch):
         state = SessionState.initial(s, tpl)
         await interview_repo.save_state_auto(state)
 
-    asyncio.get_event_loop().run_until_complete(_setup_empty_snapshot())
+    asyncio.run(_setup_empty_snapshot())
 
     captured = {}
 

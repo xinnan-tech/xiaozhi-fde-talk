@@ -99,15 +99,7 @@ def test_replay_detection_works_near_boundary():
 
 
 def test_regression_attack_does_not_lock_subsequent_session():
-    """场景复现：攻击后 tracker 进入「任何 32-bit seq 都拒收」的死锁状态。
-
-    fix 之前：consumed_seq 跳到 4294967296，所有合法 32-bit seq（≤ 0xFFFFFFFF）
-    都 < 4294967296 → should_accept 全 False，mark_consumed 不触发，pipeline.feed
-    不跑，ASR 不出字——直到 listen:start 重置 SeqTracker。
-
-    fix 之后：mark_consumed(0xFFFFFFFF) 是 no-op，consumed_seq 保持不变，
-    tracker 状态等同于攻击帧没来过，下一帧合法 seq 0 仍可被接受。
-    """
+    """mark_consumed(0xFFFFFFFF) 是 no-op；consumed_seq 保持不变，下一帧合法 seq 0 仍可被接受并正常推进。"""
     t = SeqTracker(consumed_seq=0)
     # 攻击帧
     t.mark_consumed(0xFFFFFFFF)

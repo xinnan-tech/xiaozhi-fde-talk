@@ -121,12 +121,16 @@ describe("api/user — refreshApi", () => {
   beforeEach(() => requestMock.mockClear());
   afterEach(() => requestMock.mockReset());
 
-  it("refreshApi({refresh_token}) → POST /api/v1/auth/refresh", async () => {
-    await refreshApi({ refresh_token: "rt-1" });
-    const [method, url, param] = requestMock.mock.calls[0];
+  it("refreshApi() → POST /api/v1/auth/refresh（HttpOnly 模型下无 body）", async () => {
+    // refresh_token 由浏览器以 HttpOnly cookie 持有，前端
+    // 不再传 refresh_token body——refresh-token cookie 由浏览器自动附。
+    await refreshApi();
+    const [method, url, param, axiosConfig] = requestMock.mock.calls[0];
     expect(method).toBe("post");
     expect(url).toBe("/api/v1/auth/refresh");
-    expect(param).toEqual({ data: { refresh_token: "rt-1" } });
+    expect(param).toBeUndefined();
+    // 标记 _refreshRequest 让响应拦截器看到 401 不二次触发 refresh-on-401
+    expect(axiosConfig).toEqual(expect.objectContaining({ _refreshRequest: true }));
   });
 });
 
@@ -134,11 +138,13 @@ describe("api/user — logoutApi", () => {
   beforeEach(() => requestMock.mockClear());
   afterEach(() => requestMock.mockReset());
 
-  it("logoutApi({refresh_token}) → POST /api/v1/auth/logout", async () => {
-    await logoutApi({ refresh_token: "rt-1" });
+  it("logoutApi() → POST /api/v1/auth/logout（HttpOnly 模型下无 body）", async () => {
+    // refresh_token 在 cookie 里，前端 logout 不再带 body；
+    // refresh-token cookie 由浏览器自动附 → 服务端从 cookie 取 refresh + 撤销。
+    await logoutApi();
     const [method, url, param] = requestMock.mock.calls[0];
     expect(method).toBe("post");
     expect(url).toBe("/api/v1/auth/logout");
-    expect(param).toEqual({ data: { refresh_token: "rt-1" } });
+    expect(param).toBeUndefined();
   });
 });

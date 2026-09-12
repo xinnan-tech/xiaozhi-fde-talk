@@ -20,7 +20,8 @@ import {
   type RouteComponent,
   createRouter
 } from "vue-router";
-import { getToken, removeToken } from "@/utils/auth";
+import { bootstrapSession, isBootstrapped, clearSession } from "@/utils/auth";
+import type { BootstrapResult } from "@/utils/auth";
 
 /** 自动导入全部静态路由，无需再手动引入！匹配 src/router/modules 目录（任何嵌套级别）中具有 .ts 扩展名的所有文件，除了 remaining.ts 文件
  * 如何匹配所有文件请参考 fast-glob 的通配规则说明。
@@ -98,7 +99,7 @@ export function resetRouter() {
 /** 路由白名单 */
 const whiteList = ["/home", "/login", "/about"];
 
-router.beforeEach((to: ToRouteType, _from, next) => {
+router.beforeEach(async (to: ToRouteType, _from, next) => {
   to.meta.loaded = loadedPaths.has(to.path);
 
   if (!to.meta.loaded) {
@@ -125,7 +126,33 @@ router.beforeEach((to: ToRouteType, _from, next) => {
   function toCorrectRoute() {
     to.path === "/login" ? next(_from.fullPath || "/home") : next();
   }
-  if (getToken()?.accessToken) {
+
+  // F5 后 cookie 仍在但内存态已清。守卫首跳前先调 /auth/me 重建
+  // isBootstrapped() 与 Pinia user 字段。三种返回：
+  //   - "authenticated"：cookie 有效，已写 Pinia，isBootstrapped = true → 走下分支
+  //   - "unauthenticated"：cookie 过期 / 缺失，bootstrapSession 已 setBootstrapped(false)
+  //                      → 落到未登录分支跳 /home（登录 dialog 接手）
+  //   - "transient_error"：5xx / 网络错，bootstrapSession 不动 bootstrapped；
+  //                      强制 next() 让用户按原 URL 进入；视图后续 API 调用若
+  //                      仍 5xx 由各 store 自身展示错误态，不要在这里把用户踢回
+  //                      /home——后端短暂抽风期间已登录用户被强制跳登录弹框是
+  //                      坏体验，且与「不清 Pinia」承诺自相矛盾（下面的 else
+  //                      分支会 clearSession()）。
+  let bootstrapResult: BootstrapResult | undefined;
+  if (!isBootstrapped() && to.path !== "/home") {
+    bootstrapResult = await bootstrapSession();
+  }
+  if (bootstrapResult === "transient_error") {
+    console.warn(
+      "[router] bootstrapSession returned transient_error; passing through to",
+      to.path,
+      "Pinia preserved (let next API call reveal real state)"
+    );
+    next();
+    return;
+  }
+
+  if (isBootstrapped()) {
     // meta.roles 守卫：路由声明需要的角色，非授权用户跳 /403
     const requiredRoles = (to.meta?.roles as string[] | undefined) ?? [];
     if (requiredRoles.length > 0) {
@@ -161,7 +188,7 @@ router.beforeEach((to: ToRouteType, _from, next) => {
       if (whiteList.indexOf(to.path) !== -1) {
         next();
       } else {
-        removeToken();
+        clearSession();
         next({ path: "/home" });
       }
     } else {

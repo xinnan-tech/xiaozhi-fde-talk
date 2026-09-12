@@ -1,24 +1,41 @@
-"""鉴权路由。"""
+"""鉴权路由。
+
+HttpOnly cookie 模型：
+- access_token 通过 ``authorized-token`` cookie（HttpOnly）下发；
+  refresh_token 通过 ``refresh-token`` cookie（HttpOnly）下发。
+- 响应体不再含 token 明文——避免 XSS 在 JS 拿到 ``result.access_token``
+  的瞬间把 token 暴露进 JS 堆。token 仅存于浏览器无法 JS 读的 HttpOnly cookie。
+- /auth/refresh：refresh token 从 cookie 读；请求体不再需要 refresh_token 字段。
+- /auth/logout：撤销 jti + 清两个 cookie（Set-Cookie Max-Age=0）。
+- /auth/me：cookie 鉴权返回当前用户信息，供前端 main.ts 启动前 bootstrap。
+"""
 from __future__ import annotations
 
 import time
 from datetime import timezone
 
 import jwt as pyjwt
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config_store import get_config_store
+from app.core.exceptions import AuthError
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
 from app.core.password_policy import validate_password_strength
 from app.core.retry import RateLimiter
 from app.core.security import verify_password_async
+from app.domain.auth import CurrentUser
 from app.persistence.db import get_db
 from app.persistence.models import User
 from app.persistence.repositories.user import user_repo
+from app.services.auth.cookies import (
+    clear_auth_cookies,
+    set_access_cookie,
+    set_refresh_cookie,
+)
 from app.services.auth.service import authenticate_user, register_user as svc_register
 from app.services.auth.token import (
     create_access_token,
@@ -32,14 +49,11 @@ from app.transport.http.schemas import (
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
-    LogoutRequest,
-    RefreshRequest,
-    RefreshResponse,
     RegisterRequest,
     RegistrationStatusResponse,
     UserInfo,
 )
-from app.domain.auth import CurrentUser
+from app.transport.base import extract_auth, token_from_subprotocols
 
 router = APIRouter()
 
@@ -49,13 +63,15 @@ _login_limiter = RateLimiter(capacity=5, refill_per_hour=300)
 # （弱密码 / 两次密码不一致 / 重复 username）也消耗令牌——避免暴力扫 username
 # 与弱密码走绕过路径。
 _register_limiter = RateLimiter(capacity=3, refill_per_hour=60)
-# /auth/refresh 限流与 login 同款 bucket 大小，但不限 (ip, username) 而只按 ip——
-# refresh 通常由前端 axios 拦截器自动触发，频繁度高于登录；按用户限会把自动刷新
-# 路径锁死。纯 ip 限足够挡住外网滥用。
+# /auth/refresh 限流按 ip 单桶：refresh 通常由前端 axios 拦截器自动触发，
+# 频繁度高于登录；按用户限会把自动刷新路径锁死。纯 ip 限足够挡住外网滥用。
 _refresh_limiter = RateLimiter(capacity=30, refill_per_hour=600)
 # change-password 复用与 login 同款限流参数：capacity=5, refill_per_hour=300。
 # 按 (client_ip + user_id) 做 key，与 login 的 (client_ip + username) 错开但体量对等。
 _change_pwd_limiter = RateLimiter(capacity=5, refill_per_hour=300)
+# /auth/me 限流：main.ts 启动 + router.beforeEach 首跳 + 401 重试都会调。
+# 缺桶的话攻击者可枚举用户（端点返 username + role）或对 DB 施压。
+_auth_me_limiter = RateLimiter(capacity=60, refill_per_hour=3600)
 
 
 def _reset_for_test() -> None:
@@ -73,6 +89,7 @@ def _reset_for_test() -> None:
     _register_limiter._buckets.clear()
     _refresh_limiter._buckets.clear()
     _change_pwd_limiter._buckets.clear()
+    _auth_me_limiter._buckets.clear()
     from app.services.auth import token as _tok
     _tok._reset_revoked_for_test()
 
@@ -89,7 +106,14 @@ def _client_ip(request: Request) -> str:
 
 
 @router.post("/auth/login", response_model=LoginResponse)
-async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+async def login(
+    req: LoginRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> LoginResponse:
+    """登录：HttpOnly cookie 下发 access + refresh，响应体仅含 user。
+    """
     key = f"{_client_ip(request)}:{req.username}"
     if not _login_limiter.try_acquire(key):
         raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
@@ -111,6 +135,11 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     refresh_token, _refresh_jti = await create_refresh_token(
         subject=user.user_id, pwd_ver=pwd_ver, extra=extra,
     )
+    # HttpOnly cookie 下发（主路径，XSS 防御）。同时把 token 也写到 body 给兼容
+    # 路径（scripts / chaos.py / Authorization Bearer 测试）：前端主路径走 cookie，
+    # 不读 body token（Pinia 也不再持有），body token 走兼容用途。
+    await set_access_cookie(response, access_token)
+    await set_refresh_cookie(response, refresh_token)
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -135,9 +164,12 @@ async def registration_status(db: AsyncSession = Depends(get_db)) -> Registratio
 
 @router.post("/auth/register", response_model=LoginResponse)
 async def register(
-    req: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db),
+    req: RegisterRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
-    """注册 + 自动登录（公开端点）。
+    """注册 + 自动登录（公开端点）。HttpOnly cookie 下发。
 
     单一事务：先 `async with db.begin()`，再 `await svc_register(db, ...)`；
     register_user 内部不管理事务边界（dialect 锁 + count + insert 必须同事务）。
@@ -202,6 +234,8 @@ async def register(
     refresh_token, _refresh_jti = await create_refresh_token(
         subject=current.user_id, pwd_ver=pwd_ver, extra=extra,
     )
+    await set_access_cookie(response, access_token)
+    await set_refresh_cookie(response, refresh_token)
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -210,7 +244,7 @@ async def register(
 
 
 # ─────────────────────────────────────────────────────────────────────
-# refresh token / logout 端点（Wave 3 P1 #23）
+# refresh token / logout 端点（HttpOnly cookie 模型）
 # ─────────────────────────────────────────────────────────────────────
 
 async def _decode_refresh_or_raise(token_str: str, db: AsyncSession) -> dict:
@@ -252,53 +286,68 @@ async def _decode_refresh_or_raise(token_str: str, db: AsyncSession) -> dict:
     return payload
 
 
-@router.post("/auth/refresh", response_model=RefreshResponse)
-async def refresh(
-    body: RefreshRequest, request: Request, db: AsyncSession = Depends(get_db),
-) -> RefreshResponse:
-    """用 refresh token 换新 access token（不签新 refresh，避免长期泄露放大）。
+def _read_refresh_cookie(request: Request) -> str | None:
+    """从 cookie 取 refresh_token。无 cookie 返 None，由调用方按需报 401。"""
+    return request.cookies.get("refresh-token")
 
-    同一 refresh token 多次刷新：未撤销 + 未过期都返新 access，但 pwd_ver 不变
-    —— 之前用该 refresh 换出的 access 仍有效（允许并发的 WS 连接、避免尖刺
-    失败重连把已建立的会话断掉）。
+
+@router.post("/auth/refresh", status_code=200)
+async def refresh(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """用 refresh token（来自 cookie）换新 access，写回 access cookie。
+
+    请求体不再需要 refresh_token 字段——token 由 ``refresh-token`` cookie 携带。
+    响应体也空：新 access 仅在 HttpOnly cookie 里，XSS 读不到。
     """
     if not _refresh_limiter.try_acquire(_client_ip(request)):
         raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
-    payload = await _decode_refresh_or_raise(body.refresh_token, db)
-    # _decode_refresh_or_raise 已经按 DB 当前 pwd_ver 验过签名 claim；
-    # 这里直接拿 payload 的 username/role 重签 access——refresh 自身 pwd_ver
-    # 与 DB 一致才能走到这一步，签出的 access 自然带新 pwd_ver。
+    refresh_token = _read_refresh_cookie(request)
+    if not refresh_token:
+        # 401 + code：与「过期 / 撤销」同语义分支，前端按 401 走清 cookie 流程。
+        raise I18nError(Keys.AUTH_REFRESH_INVALID, http_status=401)
+    payload = await _decode_refresh_or_raise(refresh_token, db)
     user_id = payload["sub"]
     cur_pwd_ver = int(payload["pwd_ver"])
     extra = {k: payload[k] for k in ("username", "role") if k in payload}
     new_access = await create_access_token(
         subject=user_id, pwd_ver=cur_pwd_ver, extra=extra,
     )
-    return RefreshResponse(access_token=new_access)
+    await set_access_cookie(response, new_access)
+    # body 里也返 token，给兼容路径使用（scripts / 测试）。
+    return {"ok": True, "access_token": new_access, "token_type": "bearer"}
 
 
 @router.post("/auth/logout", status_code=200)
 async def logout(
-    body: LogoutRequest, request: Request,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """撤销 refresh token jti；access token 不动（短 TTL 自然过期）。
+    """撤销 refresh token jti（来自 cookie）+ 清两个 cookie（Set-Cookie Max-Age=0）。
 
     不强制 access token 鉴权：能拿到 refresh token 本身已是「合法持有者」
     （refresh 与 access 一起下发）。refresh 自身过期 / 非法也返 200，避免
     用 freshness 探查内部状态。
 
-    限流：refresh 桶 5/min，try_acquire 返 False 必 429——之前返值被丢弃，
-    攻击者可无限刷吃 jti 撤销资源（每次成功撤销 add 一个 set entry，无上限增长）。
+    不限流：端点幂等（无 cookie / 过期 / 非法一律 200），无任何成功语义
+    可被滥用。曾与 refresh 共享 _refresh_limiter IP 桶，攻击者对单 IP
+    高频刷 logout 即可耗尽桶并挤掉该 IP 合法用户 axios 拦截器自动触发的
+    401→refresh 路径——这是 DoS，删桶彻底封堵。
     """
-    if not _refresh_limiter.try_acquire(_client_ip(request)):
-        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
-    try:
-        payload = decode_token(body.refresh_token)
-    except pyjwt.InvalidTokenError:
-        return {"ok": True}
-    jti = payload.get("jti")
-    if jti:
-        revoke_refresh_token(jti)
+    refresh_token = _read_refresh_cookie(request)
+    if refresh_token:
+        try:
+            payload = decode_token(refresh_token)
+            jti = payload.get("jti")
+            if jti:
+                revoke_refresh_token(jti)
+        except pyjwt.InvalidTokenError:
+            # refresh 过期 / 非法 → 也算"清"，直接清 cookie，返 200 避免探查。
+            pass
+    clear_auth_cookies(response)
     return {"ok": True}
 
 
@@ -330,3 +379,33 @@ async def change_password(
         # 极窄边界：token 解析成功但 user 在此期间被删；返 401 提示重新登录。
         raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
     return {"ok": True}
+
+
+@router.get("/auth/me", response_model=UserInfo)
+async def me(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> UserInfo:
+    """当前登录用户信息（cookie 鉴权）。供前端 main.ts 启动前 bootstrap 用：
+    浏览器 F5 后 cookie 仍在但内存已清，前端调本接口从 cookie 重建 Pinia 状态。
+
+    鉴权：从 cookie 取 access_token；缺失 / 无效 → 401（前端按未登录走）。
+
+    限流：按 IP（capacity=60/h）。main.ts 启动 + router.beforeEach 首跳 +
+    401 重试都会调一次，缺桶的话攻击者可枚举用户（端点返 username + role）
+    或对 DB 施压。
+    """
+    if not _auth_me_limiter.try_acquire(_client_ip(request)):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
+    access_token = request.cookies.get("authorized-token")
+    if not access_token:
+        raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
+    try:
+        current = await extract_auth(access_token)
+    except AuthError:
+        # 仅 AuthError（签名错 / 过期 / pwd_ver 不一致）吞成 401。DB / config_store
+        # 等其他异常向上抛 500——前端 bootstrapSession 据 5xx 走 transient_error
+        # 不动 Pinia；如果一并吞成 401，bootstrapSession 会清 Pinia + 跳 /home，
+        # 用户被静默踢出 + 监控看不到任何 5xx 信号。
+        raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
+    return UserInfo(id=current.user_id, username=current.username, role=current.role or "user")

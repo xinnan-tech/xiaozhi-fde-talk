@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timezone
-from typing import Literal, Optional, Protocol
+from typing import Literal, Mapping, Optional, Protocol
 
 from app.core.exceptions import AuthError
 from app.domain.auth import CurrentUser
@@ -22,6 +22,42 @@ def token_from_subprotocols(subprotocols: Optional[list[str]]) -> Optional[str]:
     for sp in subprotocols or []:
         if sp.startswith("bearer."):
             return sp[len("bearer."):]
+    return None
+
+
+def token_from_ws_handshake(
+    cookies: Mapping[str, str],
+    subprotocols: Optional[list[str]],
+) -> Optional[str]:
+    """WS 握手阶段取 access_token：
+
+    1. HttpOnly cookie ``authorized-token`` —— 浏览器主路径，WS upgrade 时
+       自动附 Cookie 头，FastAPI 解析到 ``ws.cookies``。
+    2. ``bearer.<jwt>`` Sec-WebSocket-Protocol —— 脚本 / chaos 客户端兜底。
+
+    都无 → None，调用方按 AuthError 拒握。两条路径不要在 WS handler 各自
+    复制实现——HttpOnly cookie 迁移后所有 WS（interview / asr / ...）
+    必须走同款顺序，否则浏览器用户在某条路径下永远 1006 拒握。"""
+    cookie_token = cookies.get("authorized-token")
+    if cookie_token:
+        return cookie_token
+    return token_from_subprotocols(subprotocols)
+
+
+def offered_subprotocol_for_token(
+    token: Optional[str],
+    subprotocols: Optional[list[str]],
+) -> Optional[str]:
+    """WS accept 时回传给客户端的 subprotocol。
+
+    仅当客户端**明确**发了 ``bearer.*`` subprotocol 时才回传 ``bearer.<token>``，
+    让脚本 / chaos 客户端能验明用的是哪条路径。客户端没发 subprotocol（cookie
+    路径）时返回 None——浏览器不接受未请求的 subprotocol，传 ``bearer.xxx``
+    会触发协议违规 close。"""
+    if not token:
+        return None
+    if any(sp.startswith("bearer.") for sp in subprotocols or []):
+        return "bearer." + token
     return None
 
 

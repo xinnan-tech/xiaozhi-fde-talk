@@ -1,6 +1,7 @@
 import { onBeforeUnmount, ref, shallowRef } from "vue";
 import { usePcmRecorder } from "@/composables/usePcmRecorder";
-import { useUserStoreHook } from "@/store/modules/user";
+import { isBootstrapped } from "@/utils/auth";
+import { refreshApi } from "@/api/user";
 
 /** 停止后等待尾句转写到达的缓冲时间 */
 const TRAILING_RESULT_DELAY_MS = 800;
@@ -157,6 +158,101 @@ export function useAsrRecorder() {
     state.value = "idle";
   };
 
+  /** WS 401 重连上限：握手阶段 + 已开麦被服务端 close 各允许一次 refresh 后重连。
+   *  refresh 自身若仍 401（refresh cookie 也过期），停止重试，把控制权交还业务
+   *  路径（axios 401 拦截器会清 Pinia + 跳登录）。 */
+  const MAX_RECONNECT_AFTERS = 1;
+
+  /** WS close code 处理策略：只有 1006/1011 才视为「可能是鉴权失效或服务端
+   *  临时抽风」，允许 refreshApi + 重连一次。
+   *
+   *  - 1000 正常关、1001 端点离开（服务重启）、1005 无 status：业务态决定；
+   *    不盲目刷 refresh——服务重启每次录音都刷 refresh 浪费配额。
+   *  - 1008 策略违规：脚本 / chaos 客户端误用 subprotocol 之类，与鉴权无关，
+   *    不重试。
+   *  - 其他 1xxx：服务端 bug，按 1011 同款处理。
+   *
+   * 早版本对所有 close code 一律 refresh + 重连，被服务重启测试场景打到
+   * 后台日志刷一片 refreshApi——记录在 PR 评论里。 */
+  const SHOULD_REFRESH_CLOSE_CODES: ReadonlySet<number> = new Set([1006, 1011]);
+
+  /** 触发 refreshApi 换新 access cookie 后再尝试一次 WS 握手。 */
+  const refreshAccessAndReconnect = async (
+    url: string,
+    attempt: number
+  ): Promise<WebSocket | null> => {
+    if (attempt >= MAX_RECONNECT_AFTERS) return null;
+    try {
+      await refreshApi();
+    } catch (err) {
+      // refresh 也 401：refresh cookie 过期 / 被吊销。axios 401 拦截器会接
+      // 下来清 Pinia + 跳登录；本端无需继续。
+      console.warn(
+        "[useAsrRecorder] refreshApi failed, giving up WS reconnect:",
+        err
+      );
+      return null;
+    }
+    return await openAsrSocketInternal(url, attempt + 1);
+  };
+
+  /** 真正发起 WS 握手 + 挂监听。失败由调用方按 attempt 决定是否触发 refresh。 */
+  const openAsrSocketInternal = (
+    url: string,
+    attempt: number
+  ): Promise<WebSocket | null> => {
+    const socket = new WebSocket(url);
+    socket.binaryType = "arraybuffer";
+    ws.value = socket;
+    return new Promise<WebSocket | null>(resolve => {
+      let settled = false;
+      const settle = (value: WebSocket | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      socket.onopen = () => {
+        // 已开麦前，收到 onopen 才算成功
+        settle(socket);
+        // 装好业务监听（含后续 close code 分支）
+        socket.onmessage = handleServerMessage;
+        socket.onerror = () => socket.close();
+        socket.onclose = async (event: CloseEvent) => {
+          // 服务端中途关闭。按 close code 区分：
+          //   - 1006 / 1011：refresh + 重连一次（鉴权中途吊销 / 服务临时抽风）
+          //   - 其他：业务态已变（用户停 / 服务重启 / 网络错），直接 stop
+          if (ws.value !== socket) return;
+          ws.value = null;
+          const code = event?.code ?? 1005;
+          const shouldRetry =
+            SHOULD_REFRESH_CLOSE_CODES.has(code) &&
+            attempt < MAX_RECONNECT_AFTERS;
+          if (!shouldRetry) {
+            void stop("server");
+            return;
+          }
+          const retried = await refreshAccessAndReconnect(url, attempt);
+          if (!retried) {
+            void stop("server");
+          }
+        };
+      };
+      socket.onerror = () => settle(null);
+      socket.onclose = () => settle(null);
+    });
+  };
+
+  /** WS 握手 + 401 自动续 access 重连。握手失败时 refresh + 重连一次。 */
+  const openAsrSocketWithRefresh = async (
+    url: string,
+    attempt: number
+  ): Promise<WebSocket | null> => {
+    const first = await openAsrSocketInternal(url, attempt);
+    if (first) return first;
+    // 握手阶段就失败（cookie 已过期 / 被吊销）：先 refresh 再来一次
+    return await refreshAccessAndReconnect(url, attempt);
+  };
+
   const start = async () => {
     if (state.value !== "idle") return false;
 
@@ -166,9 +262,11 @@ export function useAsrRecorder() {
       return false;
     }
 
-    // token 走子协议 bearer.<jwt>，服务端在 accept 前校验
-    const token = useUserStoreHook().accessToken;
-    if (!token) {
+    // HttpOnly cookie 由浏览器在 WS upgrade 时自动带——服务端
+    // transport/websocket/asr_handler.py 优先读 cookie 鉴权；前端不传 token 也可。
+    // isBootstrapped() 是「曾成功调过 /auth/me」的乐观判断，cookie 真失效会由
+    // 服务端 WS handshake 返 401 / 403 时再处理（前端会拿到 close event）。
+    if (!isBootstrapped()) {
       error.value = new Error("Not authenticated");
       return false;
     }
@@ -181,37 +279,17 @@ export function useAsrRecorder() {
     everRecorded.value = false;
     error.value = null;
 
-    // 先建 WS，等 onopen 再开麦，避免开头音频帧被丢掉
-    const socket = new WebSocket(url, [`bearer.${token}`]);
-    socket.binaryType = "arraybuffer";
-    ws.value = socket;
-
-    const opened = await new Promise<boolean>(resolve => {
-      let settled = false;
-      const settle = (value: boolean) => {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
-      socket.onopen = () => settle(true);
-      socket.onerror = () => settle(false);
-      socket.onclose = () => settle(false);
-    });
-
-    if (!opened || ws.value !== socket) {
+    // WS 握手 + 401 自动续 access 重连。retry 上限 MAX_RECONNECT_AFTERS：
+    // 握手阶段 + 已开麦后被服务端 close（1006）各允许一次 refreshApi 重连。
+    // 上限不设大是防后端鉴权整体被改坏后无限循环刷 refresh（refresh 自身有 401
+    // 拦截器兜底，但浏览器仍要开 WS、占连接池）。
+    const socket = await openAsrSocketWithRefresh(url, 0);
+    if (!socket) {
       error.value = new Error("ASR WebSocket connection failed");
-      if (ws.value === socket) ws.value = null;
       return false;
     }
-
-    socket.onmessage = handleServerMessage;
-    socket.onerror = () => socket.close();
-    socket.onclose = () => {
-      if (ws.value === socket) {
-        ws.value = null;
-        void stop("server");
-      }
-    };
+    // openAsrSocketWithRefresh 已挂 onmessage/onerror/onclose（含 401 重连分支）
+    // ——直接进开麦。
 
     // 先 acquireStream（getUserMedia + AudioContext + worklet + resume，
     // 全部需在用户手势栈内）再 startRecording。acquireStream 内部

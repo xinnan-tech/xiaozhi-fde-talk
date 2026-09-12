@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import Cookies from "js-cookie";
 
-// storageLocal() 在测试环境 isClient() === false → 走不到 window.localStorage。
-// 在测试里我们模拟一个同形的 storage：基于一个简单的内部 map，提供
-// getItem / setItem / removeItem 三方法，行为与真实接口一致（getItem 不存在
-// 时返回 null，跟 @pureadmin/utils 的 storageLocal 一致）。
+/**
+ * HttpOnly cookie 模型。前端 JS 不持任何 token；本文件回归新合约：
+ *
+ *   - bootstrapSession 调 /auth/me：成功 → isBootstrapped true + Pinia
+ *     SET_USERNAME / SET_USER_ID / SET_ROLE；失败 → false
+ *   - isBootstrapped 默认 false；setBootstrapped 切换
+ *   - hasPerms 等同 isBootstrapped
+ *   - 旧版 setToken/getToken/removeToken/formatToken 不再导出
+ *   - 旧版 localStorage[user-info] 由 migrateStaleStorage 一次清掉
+ *     （在 bootstrapSession 里走）
+ */
+
 const memStore = new Map<string, any>();
 
 vi.mock("@pureadmin/utils", () => ({
@@ -17,236 +24,170 @@ vi.mock("@pureadmin/utils", () => ({
   isFunction: (x: unknown) => typeof x === "function"
 }));
 
-// useUserStoreHook 是 Pinia store 上的钩子，setToken 内部要调它的 SET_* 写动作。
-// 这里 stub 成一个 no-op 对象，让 setToken 不依赖 Pinia 实例。
+// /auth/me 通过 meApi 走 http.request；mock 它避免 axios 打到 localhost。
+const meApiMock = vi.fn();
+vi.mock("@/api/user", () => ({
+  meApi: () => meApiMock()
+}));
+
+// user store SET_* 是 no-op stub——本测试只关心「被调过」，不关心字段值。
 vi.mock("@/store/modules/user", () => ({
   useUserStoreHook: () => ({
-    SET_ACCESS_TOKEN: vi.fn(),
     SET_USERNAME: vi.fn(),
     SET_USER_ID: vi.fn(),
-    SET_ROLE: vi.fn(),
-    accessToken: ""
+    SET_ROLE: vi.fn()
   })
 }));
 
-import { setToken, getToken, removeToken, formatToken, userKey, TokenKey } from "@/utils/auth";
+import {
+  isBootstrapped,
+  setBootstrapped,
+  bootstrapSession,
+  hasPerms,
+  clearSession
+} from "@/utils/auth";
 
 function clearAll() {
+  // 复位模块级 bootstrap 标志——auth.ts 里的 let bootstrapped 是模块状态
+  setBootstrapped(false);
   memStore.clear();
-  // js-cookie 没有提供 clearAll，但 remove 已知键即可
-  Cookies.remove(TokenKey);
-  // 也清一下 happy-dom 自己的 localStorage，避免跨 spec 串扰
   window.localStorage.clear();
+  meApiMock.mockReset();
 }
 
-describe("utils/auth — setToken / getToken / removeToken", () => {
-  beforeEach(() => clearAll());
-  afterEach(() => clearAll());
+describe("utils/auth — bootstrapSession / isBootstrapped", () => {
+  beforeEach(clearAll);
+  afterEach(clearAll);
 
-  it("setToken 写入内存 + Cookie", () => {
-    setToken({
-      accessToken: "tok-1",
+  it("isBootstrapped 默认 false，hasPerms 同 false", () => {
+    expect(isBootstrapped()).toBe(false);
+    expect(hasPerms("any")).toBe(false);
+  });
+
+  it("bootstrapSession 成功（/auth/me 返 user）→ isBootstrapped true + Pinia SET_* 调用", async () => {
+    meApiMock.mockResolvedValue({
+      id: "u-1",
       username: "alice",
-      userId: "u-1",
       role: "admin"
     });
-    expect(memStore.get(userKey)).toEqual({
-      accessToken: "tok-1",
-      username: "alice",
-      userId: "u-1",
-      role: "admin"
+    const result = await bootstrapSession();
+    expect(result).toBe("authenticated");
+    expect(isBootstrapped()).toBe(true);
+    expect(hasPerms("any")).toBe(true);
+  });
+
+  it("bootstrapSession 失败（cookie 失效 / 401）→ isBootstrapped false", async () => {
+    meApiMock.mockRejectedValue({
+      response: { status: 401 },
+      message: "Request failed with status code 401"
     });
-    expect(Cookies.get(TokenKey)).toBe(
-      JSON.stringify({
-        accessToken: "tok-1",
-        username: "alice",
-        userId: "u-1",
-        role: "admin"
-      })
-    );
+    const result = await bootstrapSession();
+    expect(result).toBe("unauthenticated");
+    expect(isBootstrapped()).toBe(false);
   });
 
-  it("setToken 后 getToken 返回完整 DataInfo", () => {
-    setToken({
-      accessToken: "tok-2",
-      username: "bob",
-      userId: "u-2",
-      role: "user"
+  it("setBootstrapped 切换标志", () => {
+    setBootstrapped(true);
+    expect(isBootstrapped()).toBe(true);
+    setBootstrapped(false);
+    expect(isBootstrapped()).toBe(false);
+  });
+
+  it("bootstrapSession 5xx → transient_error（保留 Pinia）", async () => {
+    setBootstrapped(true);
+    meApiMock.mockRejectedValue({
+      response: { status: 500 },
+      message: "Internal Server Error"
     });
-    expect(getToken()).toEqual({
-      accessToken: "tok-2",
-      username: "bob",
-      userId: "u-2",
-      role: "user"
+    const result = await bootstrapSession();
+    expect(result).toBe("transient_error");
+    expect(isBootstrapped()).toBe(true); // 不动 Pinia
+  });
+
+  it("bootstrapSession network error（无 response.status）→ transient_error", async () => {
+    // ERR_NETWORK / CORS 预检失败：axios 没拿到 response，但 message 可能含
+    // 任何字符串（含上游 502/504 错误页 body 里偶尔夹带的 "401"）。
+    // 旧版 message.includes("401") 兜底会在这种情况把已登录用户误判为
+    // unauthenticated → 清 Pinia。回归钉死：必须返回 transient_error。
+    setBootstrapped(true);
+    meApiMock.mockRejectedValue({
+      message: "Network Error or proxy body containing 401 Unauthorized"
     });
+    const result = await bootstrapSession();
+    expect(result).toBe("transient_error");
+    expect(isBootstrapped()).toBe(true);
   });
 
-  it("getToken：localStorage 旧 token 缺 role → removeToken + 返回 null", () => {
-    memStore.set(userKey, { accessToken: "old", username: "x" });
-    expect(getToken()).toBeNull();
-    expect(memStore.has(userKey)).toBe(false);
-  });
-
-  it("getToken：localStorage 旧 token 缺 userId → removeToken + 返回 null", () => {
-    memStore.set(userKey, {
-      accessToken: "old",
-      username: "x",
-      role: "user"
+  it("bootstrapSession 每次启动会先清掉旧版残留 localStorage[user-info]", async () => {
+    memStore.set("user-info", { accessToken: "leaked", refreshToken: "leaked" });
+    meApiMock.mockRejectedValue({
+      response: { status: 401 },
+      message: "Request failed with status code 401"
     });
-    expect(getToken()).toBeNull();
-    expect(memStore.has(userKey)).toBe(false);
-  });
-
-  it("getToken：localStorage 为空但 cookie 仍存在 → 清 cookie + 返回 null", () => {
-    Cookies.set(TokenKey, "stale-cookie-value");
-    expect(getToken()).toBeNull();
-    expect(Cookies.get(TokenKey)).toBeUndefined();
-  });
-
-  it("getToken：完全空 → 返回 null", () => {
-    expect(getToken()).toBeNull();
-  });
-
-  it("removeToken 清空内存 + Cookie", () => {
-    setToken({
-      accessToken: "tok-3",
-      username: "carol",
-      userId: "u-3",
-      role: "user"
-    });
-    expect(memStore.has(userKey)).toBe(true);
-    expect(Cookies.get(TokenKey)).toBeTruthy();
-    removeToken();
-    expect(memStore.has(userKey)).toBe(false);
-    expect(Cookies.get(TokenKey)).toBeUndefined();
-  });
-
-  it("setToken 写 Cookie 时挂 Secure + SameSite=Strict（缓解 XSS 一次性偷 refresh）", () => {
-    // document.cookie 不暴露 Secure / SameSite 这些属性（它们只在 Set-Cookie 头里），
-    // 所以直接 spyOn Cookies.set 抓 options 参数来断言。
-    const spy = vi.spyOn(Cookies, "set");
-    try {
-      setToken({
-        accessToken: "tok-sec",
-        refreshToken: "rt-sec",
-        username: "alice",
-        userId: "u-1",
-        role: "user"
-      });
-      expect(spy).toHaveBeenCalledWith(
-        TokenKey,
-        expect.any(String),
-        expect.objectContaining({
-          secure: true,
-          sameSite: "Strict"
-        })
-      );
-    } finally {
-      spy.mockRestore();
-    }
-  });
-
-  it("setToken：role / userId 缺省时存原值（undefined，不强行给默认值）", () => {
-    // 源码：storageLocal().setItem(userKey, { accessToken, username, userId, role })，
-    // 没有 userId/role 时直接是 undefined；默认 "" / "user" 只作用于 store 的 SET_USER_ID / SET_ROLE，
-    // 不写到存储介质里。这样 getToken 下次还能命中「缺 role/userId → 强制重登」的升级兼容分支。
-    setToken({ accessToken: "tok-4", username: "dave" });
-    const stored = memStore.get(userKey);
-    expect(stored.userId).toBeUndefined();
-    expect(stored.role).toBeUndefined();
-    expect(stored.refreshToken).toBeUndefined();
-  });
-
-  it("setToken 写入 refreshToken + getToken 完整 round-trip", () => {
-    // 401 静默续 access 的前提：refreshToken 跟 accessToken 一起落盘，重启浏览器后还能取到。
-    setToken({
-      accessToken: "at-1",
-      refreshToken: "rt-1",
-      username: "alice",
-      userId: "u-1",
-      role: "user"
-    });
-    const got = getToken();
-    expect(got?.accessToken).toBe("at-1");
-    expect(got?.refreshToken).toBe("rt-1");
-    expect(got?.userId).toBe("u-1");
-    expect(got?.role).toBe("user");
-  });
-
-  it("setToken 写入 refreshToken 时 localStorage 不含 refreshToken（openrz P1.1）", () => {
-    // refreshToken 不再落 localStorage（明文 JS 可读、无网络层缓解），
-    // 只走 cookie（Secure + SameSite=Strict）。
-    setToken({
-      accessToken: "at-p11",
-      refreshToken: "rt-p11-secret",
-      username: "alice",
-      userId: "u-1",
-      role: "user"
-    });
-    const stored = memStore.get(userKey);
-    // 关键断言：localStorage 里不能有 refreshToken
-    expect(stored.refreshToken).toBeUndefined();
-    expect(JSON.stringify(stored)).not.toContain("rt-p11-secret");
-    // 其他字段照常落
-    expect(stored.accessToken).toBe("at-p11");
-    expect(stored.username).toBe("alice");
-    expect(stored.userId).toBe("u-1");
-    expect(stored.role).toBe("user");
-    // cookie 仍含 refreshToken（401 静默续 access 还要从 cookie 拼回）
-    const cookieRaw = Cookies.get(TokenKey);
-    expect(cookieRaw).toBeTruthy();
-    expect(JSON.parse(cookieRaw!).refreshToken).toBe("rt-p11-secret");
-  });
-
-  it("getToken：localStorage 无 refreshToken 时从 cookie 拼回（401 静默续 access 路径）", () => {
-    // 模拟「旧 session 升级后 localStorage 已无 refreshToken，但 cookie 仍存」的场景：
-    // 例如本次升级前留下的 localStorage 数据（无 refreshToken 字段）。
-    memStore.set(userKey, {
-      accessToken: "at-mix",
-      username: "alice",
-      userId: "u-1",
-      role: "user"
-    });
-    Cookies.set(TokenKey, JSON.stringify({
-      accessToken: "at-mix",
-      refreshToken: "rt-mix",
-      username: "alice",
-      userId: "u-1",
-      role: "user"
-    }));
-    const got = getToken();
-    expect(got?.accessToken).toBe("at-mix");
-    expect(got?.refreshToken).toBe("rt-mix");
-  });
-
-  it("getToken：localStorage 有 refreshToken 时优先用 localStorage（防御 cookie 被外部改写）", () => {
-    // 如果两条路径都写：localStorage 已有 refreshToken → 直接用，cookie
-    // 即便被篡改也不影响返回值。
-    memStore.set(userKey, {
-      accessToken: "at-d",
-      refreshToken: "rt-local",
-      username: "alice",
-      userId: "u-1",
-      role: "user"
-    });
-    Cookies.set(TokenKey, JSON.stringify({
-      accessToken: "at-d",
-      refreshToken: "rt-cookie-tampered",
-      username: "alice",
-      userId: "u-1",
-      role: "user"
-    }));
-    const got = getToken();
-    expect(got?.refreshToken).toBe("rt-local");
+    await bootstrapSession();
+    // 幂等清理：即便 bootstrap 失败也要先清掉历史残留
+    expect(memStore.get("user-info")).toBeUndefined();
   });
 });
 
-describe("utils/auth — formatToken", () => {
-  it('formatToken("x") → "Bearer x"', () => {
-    expect(formatToken("abc")).toBe("Bearer abc");
+describe("utils/auth — clearSession", () => {
+  beforeEach(clearAll);
+  afterEach(clearAll);
+
+  it("重置 bootstrap 标志 + Pinia 清空", () => {
+    setBootstrapped(true);
+    clearSession();
+    expect(isBootstrapped()).toBe(false);
+  });
+});
+
+describe("utils/auth — hasPerms 语义", () => {
+  beforeEach(clearAll);
+  afterEach(clearAll);
+
+  it("未 bootstrap → false", () => {
+    expect(hasPerms("admin")).toBe(false);
+    expect(hasPerms(["admin", "user"])).toBe(false);
   });
 
-  it("formatToken(空串) → 'Bearer '", () => {
-    expect(formatToken("")).toBe("Bearer ");
+  it("已 bootstrap → true（参数 value 不参与判权，鉴权交由后端）", () => {
+    setBootstrapped(true);
+    expect(hasPerms("admin")).toBe(true);
+    expect(hasPerms(["admin", "user"])).toBe(true);
+    expect(hasPerms("anything-else")).toBe(true);
+  });
+});
+
+/** e2e 回归钉死：isBootstrapped() 必须是响应式（Vue ref）而不是普通 let。
+ *
+ * 失败原因（修复前）：utils/auth.ts 用 ``let bootstrapped = false``，home 视图
+ * 的 ``isLoggedIn = computed(() => isBootstrapped() && ...)`` 第一次算过后
+ * 不再追依赖；登录成功后 setBootstrapped(true) 改了普通 let，computed 不重算，
+ * ``.user-avatar.online`` 永远不出现——e2e 场景 A / D-1 / incognito-login 三
+ * 处同时翻车。改为 ref 后 .value 访问被 Vue 追踪，computed 重新求值。
+ */
+describe("utils/auth — isBootstrapped 响应式（e2e 翻车回归）", () => {
+  beforeEach(clearAll);
+  afterEach(clearAll);
+
+  it("computed(() => isBootstrapped() && user.username) 在 setBootstrapped(true) 后重算为 true", async () => {
+    const { computed, ref, effectScope } = await import("vue");
+    const scope = effectScope();
+    const username = ref("");
+    const isLoggedIn = computed(() => isBootstrapped() && Boolean(username.value));
+    scope.run(() => {
+      // 初始：未 bootstrap，isLoggedIn = false
+      expect(isLoggedIn.value).toBe(false);
+      // 只设 username：依赖 username 但 bootstrapped 仍 false，computed 重算后仍 false
+      username.value = "alice";
+      expect(isLoggedIn.value).toBe(false);
+      // 设 setBootstrapped(true)：必须触发 computed 重算，且重算后读到新值
+      setBootstrapped(true);
+      expect(isLoggedIn.value).toBe(true);
+      // 反向：清回 false 也必须重算
+      setBootstrapped(false);
+      expect(isLoggedIn.value).toBe(false);
+    });
+    scope.stop();
   });
 });

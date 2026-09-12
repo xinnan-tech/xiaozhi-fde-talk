@@ -35,8 +35,10 @@ def _resolve_cors_origins(settings) -> list[str]:
     - prod：留空 → 抛 RuntimeError，强制显式配置
     - 任意环境：显式设值 → 解析为白名单列表
 
-    上公网前在 .env / 环境变量里显式列白名单（逗号分隔 origin），自动切回严格模式：
-    allow_credentials 重新启用，未来若改用 cookie 鉴权也能无缝接上。
+    HttpOnly cookie 鉴权需要 ``allow_credentials=True``，
+    FastAPI 强制要求 ``allow_credentials=True`` 时 ``allow_origins`` 不能为 ``*``
+    ——必须显式白名单。所以生产环境 CORS_ORIGINS 是硬约束，已设即匹配上述三档；
+    dev/test 自动 fallback 到 localhost 白名单（也满足 allow_credentials）。
     """
     raw = (settings.cors_origins or "").strip()
     origins = [o.strip() for o in raw.split(",") if o.strip()]
@@ -134,6 +136,23 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await _lifespan_startup(app)
+        # 披露限流器进程内实现对多 worker 的影响：每 worker 各自持一份
+        # RateLimiter._buckets，capacity 实际退化为 N × capacity；lifespan 重启
+        # 清空各进程桶，攻击者对齐启动时机即可重置配额。当前 PR 范围内仅披露，
+        # 长期方案走 Redis 共享桶（限流改动需同步 review，故单独 PR）。
+        import logging
+        import os
+        _logger = logging.getLogger("app.app")
+        _workers_env = os.environ.get("WEB_CONCURRENCY") or os.environ.get(
+            "UVICORN_WORKERS"
+        )
+        if _workers_env and _workers_env not in ("1", ""):
+            _logger.warning(
+                "RateLimiter 是进程内桶：当前 workers=%s，限流 capacity "
+                "实际为 N×配置值（每个 worker 各持一份桶）。攻击者只要对齐启动"
+                "时机即可重置配额。生产环境若 N>1 应改 Redis 共享桶。",
+                _workers_env,
+            )
         try:
             yield
         finally:
@@ -194,10 +213,12 @@ def create_app() -> FastAPI:
     from fastapi.middleware.cors import CORSMiddleware
     settings = get_settings()
     origins = _resolve_cors_origins(settings)
-    # CORS_ORIGINS 留空时返回 ["*"]，FastAPI 强制要求 * 模式下 allow_credentials=False
-    # （否则启动报 ValueError）。本项目鉴权走 Authorization header，cookie 不关键，
-    # 留空模式不带 cookie 无影响；显式白名单模式下重新启用 credentials。
-    allow_all = origins == ["*"]
+    # HttpOnly cookie 鉴权需要 ``allow_credentials=True``。
+    # FastAPI 强制要求 ``allow_credentials=True`` 时 ``allow_origins`` 不能为
+    # ``*``（否则启动报 ValueError）。_resolve_cors_origins 已经保证 dev/test
+    # 至少返 ["http://localhost:5173"]、prod 强制显式白名单——这里直接设
+    # allow_credentials=True，不再做 wildcard 短路。
+    #
     # 显式方法/请求头白名单：通配 "*" 锁定到 RESTful 标准 + 当前路由实际用到的
     # 自定义头（X-Lang 多语请求；X-Request-ID 由中间件生成回传，便于客户端核对）。
     # expose 同步回写 X-Request-ID，否则浏览器 JS 拿不到该响应头，对账失败。
@@ -206,7 +227,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_credentials=not allow_all,
+        allow_credentials=True,
         allow_methods=_ALLOWED_METHODS,
         allow_headers=_ALLOWED_HEADERS,
         expose_headers=["X-Request-ID"],

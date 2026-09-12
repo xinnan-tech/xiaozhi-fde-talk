@@ -8,24 +8,22 @@ import {
   registerApi,
   logoutApi
 } from "@/api/user";
-import { getToken, setToken, removeToken } from "@/utils/auth";
+import {
+  bootstrapSession,
+  isBootstrapped,
+  setBootstrapped
+} from "@/utils/auth";
 
 export const useUserStore = defineStore("pure-user", {
+  /** 状态只剩 user 元数据——accessToken / refreshToken 由 HttpOnly cookie 持有，
+   * JS 不可读也不应在 Pinia 留副本。F5 / 关页面后调 bootstrapSession()
+   * 从 /auth/me 重建 user 字段。 */
   state: (): userType => ({
-    accessToken: getToken()?.accessToken ?? "",
-    refreshToken: getToken()?.refreshToken ?? "",
-    username: getToken()?.username ?? "",
-    userId: getToken()?.userId ?? "",
-    role: getToken()?.role ?? "user"
+    username: "",
+    userId: "",
+    role: "user"
   }),
   actions: {
-    SET_ACCESS_TOKEN(accessToken: string) {
-      this.accessToken = accessToken;
-    },
-    /** 用 refresh token 换到新 access 后回填；refresh 自身不变。 */
-    SET_REFRESH_TOKEN(refreshToken: string) {
-      this.refreshToken = refreshToken;
-    },
     SET_USERNAME(username: string) {
       this.username = username;
     },
@@ -38,74 +36,55 @@ export const useUserStore = defineStore("pure-user", {
 
     async loginByUsername(data: LoginRequest): Promise<LoginResult> {
       const result = await loginApi(data);
-      if (result?.access_token) {
-        this.SET_ACCESS_TOKEN(result.access_token);
-        this.SET_REFRESH_TOKEN(result.refresh_token ?? "");
+      if (result?.user) {
         this.SET_USERNAME(data.username);
         this.SET_USER_ID(result.user.id);
         this.SET_ROLE(result.user.role);
-        setToken({
-          accessToken: result.access_token,
-          refreshToken: result.refresh_token,
-          username: data.username,
-          userId: result.user.id,
-          role: result.user.role
-        });
+        setBootstrapped(true);
       }
       return result;
     },
 
     async registerByUsername(data: RegisterRequest): Promise<LoginResult> {
       const result = await registerApi(data);
-      if (result?.access_token) {
-        this.SET_ACCESS_TOKEN(result.access_token);
-        this.SET_REFRESH_TOKEN(result.refresh_token ?? "");
+      if (result?.user) {
         this.SET_USERNAME(result.user.username);
         this.SET_USER_ID(result.user.id);
         this.SET_ROLE(result.user.role);
-        setToken({
-          accessToken: result.access_token,
-          refreshToken: result.refresh_token,
-          username: result.user.username,
-          userId: result.user.id,
-          role: result.user.role
-        });
+        setBootstrapped(true);
       }
       return result;
     },
 
-    /** 主动登出：先 enqueue 后端撤销（fire-and-forget），同时立刻清本地状态并跳转。
+    /** 主动登出：调后端撤销 refresh jti + 清 HttpOnly cookie + 清 Pinia + 跳转。
      *
-     * 注意：撤销请求是 fire-and-forget，不 await。原因：
-     * 1. 后端撤销（写 jti 黑名单）失败不应阻塞用户登出体验——本地 token 反正已废弃；
-     * 2. 如果 await，PureHttp 默认 60s 超时期间用户卡在原路由、菜单仍为登录态；
-     * 3. 关页面后 refresh_token 没被清，下次开页面用户仍是登录态——「登出没生效」。
+     * 不 await 撤销的原因（见 README：fire-and-forget 设计）：
+     *  - 后端撤销失败不应阻塞用户体验；本地 cookie 反正已清；
+     *  - await 期间 PureHttp 60s 超时卡住路由；
+     *  - 不立刻清 cookie → 关页面后 refresh 还在，30 天 TTL 内可换 access。
      *
-     * catch 至少 console.warn 上报，避免后端撤销失败（429 / 5xx）被静默吃掉，
-     * 留下 refresh token 在剩余 TTL（默认 30 天）内仍可换 access 的口子。
+     * console.warn 只打 status / message，避免传整个 AxiosError 时
+     * e.config.headers.Authorization 落进日志聚合器泄露 token
+     * （openrz P1.2）。
      *
-     * openrz P1.2：console.warn 不传整个 AxiosError。e.config.data.refresh_token
-     * 与 e.config.headers.Authorization 会随对象展开落进浏览器 console 与日志
-     * 聚合器（Sentry/Datadog 等），refresh/access token 直接被持久化。改为只
-     * 打 status / message，避免泄露 token。
+     * 直接用 ``this`` 写 Pinia 字段（不是 clearSession() 通过 useUserStoreHook
+     * 写单例 pinia）——Vue/Pinia 的 ``this`` 指向当前活跃 pinia 实例本身，
+     * 兼容测试里 setActivePinia 的隔离；clearSession() 里的 useUserStoreHook
+     * 只动单例 pinia，会漏改活跃实例。
      */
     logOut() {
-      const refreshToken = this.refreshToken;
-      if (refreshToken) {
-        logoutApi({ refresh_token: refreshToken }).catch(e => {
+      logoutApi()
+        .catch(e => {
           // eslint-disable-next-line no-console
           console.warn(
             "[user.logOut] revoke failed:",
             e?.response?.status ?? e?.message ?? "unknown"
           );
         });
-      }
-      this.accessToken = "";
-      this.refreshToken = "";
       this.username = "";
       this.userId = "";
       this.role = "user";
-      removeToken();
+      setBootstrapped(false);
       router.push("/home");
     }
   }
@@ -114,3 +93,6 @@ export const useUserStore = defineStore("pure-user", {
 export function useUserStoreHook() {
   return useUserStore(store);
 }
+
+/** 暴露给 main.ts / Router 守卫复用：F5 后从 /auth/me 重建会话。 */
+export { bootstrapSession, isBootstrapped };

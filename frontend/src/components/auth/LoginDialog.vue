@@ -87,7 +87,10 @@ async function submit(formEl: FormInstance | undefined) {
         username: ruleForm.username,
         password: ruleForm.password
       });
-      if (!r?.access_token) {
+      // HttpOnly cookie 由后端 Set-Cookie 下发，前端 JS
+      // 看不到 access_token。改判 user 字段——后端 login 失败时 response
+      // body 不含 user。
+      if (!r?.user) {
         ElMessage({ message: t("auth.login_invalid"), type: "error" });
         return;
       }
@@ -98,7 +101,7 @@ async function submit(formEl: FormInstance | undefined) {
         password: ruleForm.password,
         confirm_password: ruleForm.confirmPassword
       });
-      if (!r?.access_token) {
+      if (!r?.user) {
         ElMessage({ message: t("auth.register_failed"), type: "error" });
         return;
       }

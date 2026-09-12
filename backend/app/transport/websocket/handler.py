@@ -28,7 +28,11 @@ from app.core.policies import get_policy
 from app.domain.session import SessionStatus
 from app.services.sessions.manager import ConcurrentLimitError, manager
 from app.services.sessions.runtime import SessionRuntime, registry
-from app.transport.base import extract_auth, token_from_subprotocols
+from app.transport.base import (
+    extract_auth,
+    offered_subprotocol_for_token,
+    token_from_ws_handshake,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,12 +141,27 @@ class WSHandler:
     async def _send(self, obj: dict) -> None:
         await self.ws.send_json(obj)
 
+    def _extract_token_for_handshake(self) -> Optional[str]:
+        """从 cookie（首选）或 Sec-WebSocket-Protocol 取 access_token。
+
+        转调 ``transport.base.token_from_ws_handshake``——所有 WS 握手
+        必须走同一顺序（cookie > subprotocol），避免某条路径漏 cookie
+        导致浏览器用户被 1006 拒握。"""
+        return token_from_ws_handshake(
+            self.ws.cookies,
+            self.ws.scope.get("subprotocols"),
+        )
+
     # ---- 生命周期 ----
     async def run(self) -> None:
-        # 鉴权在 accept 之前：token 只认子协议 bearer.<jwt>，缺失/无效直接拒绝握手
-        # （uvicorn 回 HTTP 403），未认证连接连 WS 层都进不来。不读消息体 token——
-        # 收消息必须先完成握手，accept-then-auth 会给无凭证连接留存活窗口。
-        token = token_from_subprotocols(self.ws.scope.get("subprotocols"))
+        # 鉴权在 accept 之前：缺失/无效直接拒绝握手（uvicorn 回 HTTP 403），
+        # 未认证连接连 WS 层都进不来。不读消息体 token——收消息必须先完成握手，
+        # accept-then-auth 会给无凭证连接留存活窗口。
+        #
+        # 优先级：HttpOnly cookie ``authorized-token`` >
+        # Sec-WebSocket-Protocol ``bearer.<token>``。前端主路径走 cookie
+        # （浏览器自动带上）；保留 subprotocol 作为脚本 / chaos 客户端兜底。
+        token = self._extract_token_for_handshake()
         try:
             self._user = await extract_auth(token)
         except AuthError as e:
@@ -152,7 +171,15 @@ class WSHandler:
             await self.ws.close()
             logger.info("WS 握手被拒（鉴权失败）：session=%s 原因=%s", self.session_id, e)
             return
-        await self.ws.accept(subprotocol="bearer." + token)
+        # 仅当客户端发送了 ``bearer.*`` subprotocol 时才回应同款 subprotocol。
+        # cookie 路径下客户端没发 subprotocol，服务器若强行 accept 一个未请求的
+        # subprotocol 会被浏览器以协议违规关闭连接。
+        await self.ws.accept(
+            subprotocol=offered_subprotocol_for_token(
+                token,
+                self.ws.scope.get("subprotocols"),
+            )
+        )
         try:
             if not await self._handshake():
                 return

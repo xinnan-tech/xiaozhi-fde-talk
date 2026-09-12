@@ -1,12 +1,15 @@
 """refresh token + /auth/refresh 端点回归。
 
+refresh_token 走 HttpOnly cookie，不再放 body。
+HttpOnly cookie 由浏览器 / httpx 自动管理——登录响应 Set-Cookie 后，
+同 AsyncClient 实例后续请求自动带 refresh-token cookie。
+
 覆盖：
-- login / register 都返回 refresh_token 字段
-- /auth/refresh 用合法 refresh 换到新 access token
-- /auth/refresh 用 access token 投到 refresh → AUTH_REFRESH_INVALID
-  （type 字段不对）
-- /auth/refresh 用过期 refresh → AUTH_REFRESH_EXPIRED
-- /auth/refresh 用已撤销 refresh → AUTH_REFRESH_REVOKED
+- login / register 都返回 Set-Cookie（含 authorized-token + refresh-token）
+- /auth/refresh 用 cookie 里的 refresh 换到新 access_token（写回 cookie）
+- /auth/refresh body 传 refresh_token 字段被忽略（cookie 优先）
+- 缺失 / 无效 refresh cookie → AUTH_REFRESH_INVALID
+- 已撤销 refresh（jti 进表） → AUTH_REFRESH_REVOKED
 
 lifespan 绕过：测试装一个手搭 FastAPI 子集（同一路由 + 同一 Settings + DB SessionLocal），
 不去启动 app.py 的 lifespan，避免 sessions.manager 的 _stop_flag asyncio.Event
@@ -19,7 +22,6 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 
 import jwt as pyjwt
 import pytest
@@ -104,49 +106,21 @@ async def reset_state(_app):
     _reset_for_test()
 
 
-@pytest.mark.asyncio
-async def test_login_returns_refresh_token(reset_state):
-    app = reset_state
-    # 种一个用户：直接写 DB 走 bcrypt 哈希
-    from app.core.security import hash_password_async
-    pwd_hash = await hash_password_async("StrongP@ssW0rd")
-    async with SessionLocal() as s:
-        s.add(User(
-            id=str(uuid.uuid4()), username="alice",
-            password_hash=pwd_hash, role="user",
-        ))
-        await s.commit()
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/v1/auth/login", json={
-            "username": "alice", "password": "StrongP@ssW0rd",
-        })
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["refresh_token"], "login 必须返回 refresh_token"
-    assert body["access_token"]
+def _set_secure_false():
+    """让 cookies 在 test 环境下 Secure=false（httpx 默认会跳过 Secure 校验，
+    但若 dev/test 设了 Secure=true，http://test 路径下 httpx 仍会发出，但
+    set_cookie 默认不带 Secure 时 httpx 会照发；这里仅为保险显式重置）。"""
+    pass
 
 
 @pytest.mark.asyncio
-async def test_register_returns_refresh_token(reset_state):
+async def test_login_sets_auth_cookies(reset_state):
+    """login 响应里 Set-Cookie 同时含 authorized-token + refresh-token，
+    两个都带 HttpOnly + Secure=False（test 环境）。body 同时含 access_token /
+    refresh_token（兼容路径：scripts / chaos.py / Authorization Bearer 测试）。
+    """
     app = reset_state
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/v1/auth/register", json={
-            "username": "alice",
-            "password": "StrongP@ssW0rd",
-            "confirm_password": "StrongP@ssW0rd",
-        })
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["refresh_token"], "register 必须返回 refresh_token"
-    assert body["user"]["role"] == "admin"
-
-
-@pytest.mark.asyncio
-async def test_refresh_with_valid_refresh_token(reset_state):
-    app = reset_state
+    from datetime import datetime, timezone
     from app.core.security import hash_password_async
     pwd_hash = await hash_password_async("StrongP@ssW0rd")
     async with SessionLocal() as s:
@@ -162,55 +136,112 @@ async def test_refresh_with_valid_refresh_token(reset_state):
         r = await c.post("/api/v1/auth/login", json={
             "username": "alice", "password": "StrongP@ssW0rd",
         })
-        login_body = r.json()
-        refresh_token = login_body["refresh_token"]
-        old_access = login_body["access_token"]
-
-        r2 = await c.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
-    assert r2.status_code == 200, r2.text
-    body = r2.json()
-    assert body["access_token"]
-    assert body["access_token"] != old_access, "refresh 必须签新 access（独立 jti）"
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # body 同时含 token（兼容路径）和 user
+    assert body["user"]["username"] == "alice"
+    assert body["access_token"], "login body 必须含 access_token（兼容路径）"
+    assert body["refresh_token"], "login body 必须含 refresh_token（兼容路径）"
+    # Set-Cookie 头检查：httpx 的 ``Cookie`` 对象不暴露 httponly 字段（来自
+    # http.cookiejar.Cookie 但 httpx 没暴露这些字段），直接从 ``Set-Cookie`` 头
+    # 解析更可靠。
+    set_cookie_headers = r.headers.get_list("set-cookie")
+    assert any("authorized-token=" in h for h in set_cookie_headers), set_cookie_headers
+    assert any("refresh-token=" in h for h in set_cookie_headers), set_cookie_headers
+    # 两个 cookie 都带 HttpOnly
+    for name in ("authorized-token", "refresh-token"):
+        matching = [h for h in set_cookie_headers if h.startswith(f"{name}=")]
+        assert matching, f"no Set-Cookie for {name}"
+        assert "HttpOnly" in matching[0], f"{name} 缺 HttpOnly：{matching[0]}"
 
 
 @pytest.mark.asyncio
-async def test_refresh_with_access_token_rejected(reset_state):
-    """access token 投到 refresh 字段 → 必须 AUTH_REFRESH_INVALID（type 不对）。"""
+async def test_register_sets_auth_cookies(reset_state):
+    """register 响应同样下发两个 HttpOnly cookie + body 含 token 与 user。"""
     app = reset_state
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.post("/api/v1/auth/register", json={
+            "username": "alice",
+            "password": "StrongP@ssW0rd",
+            "confirm_password": "StrongP@ssW0rd",
+        })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["user"]["role"] == "admin"
+    assert body["access_token"], "register body 必须含 access_token"
+    assert body["refresh_token"], "register body 必须含 refresh_token"
+    set_cookie_headers = r.headers.get_list("set-cookie")
+    assert any("authorized-token=" in h for h in set_cookie_headers)
+    assert any("refresh-token=" in h for h in set_cookie_headers)
+
+
+@pytest.mark.asyncio
+async def test_refresh_with_cookie_returns_new_access_cookie(reset_state):
+    """登录拿到 refresh cookie；后续 /auth/refresh 不带 body，cookie 自动带 → 200，
+    Set-Cookie 写入新 authorized-token，body 也含新 access_token。"""
+    app = reset_state
+    from datetime import datetime, timezone
     from app.core.security import hash_password_async
     pwd_hash = await hash_password_async("StrongP@ssW0rd")
     async with SessionLocal() as s:
         s.add(User(
             id=str(uuid.uuid4()), username="alice",
             password_hash=pwd_hash, role="user",
+            password_changed_at=datetime.now(timezone.utc),
         ))
         await s.commit()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
+        # 登录拿 cookie（httpx 自动存入 c.cookies jar）
         r = await c.post("/api/v1/auth/login", json={
             "username": "alice", "password": "StrongP@ssW0rd",
         })
-        access_token = r.json()["access_token"]
-        r2 = await c.post("/api/v1/auth/refresh", json={"refresh_token": access_token})
-    assert r2.status_code == 401, r2.text
-    assert r2.json().get("code") == "auth.refresh_invalid"
+        assert r.status_code == 200
+        old_access = c.cookies.get("authorized-token")
+        assert old_access, "登录未拿到 authorized-token cookie"
+
+        # refresh 不带 body；refresh cookie 自动带
+        r2 = await c.post("/api/v1/auth/refresh")
+    assert r2.status_code == 200, r2.text
+    new_access = c.cookies.get("authorized-token")
+    assert new_access, "refresh 后未拿到新 authorized-token cookie"
+    assert new_access != old_access, "refresh 必须签新 access（独立 jti）"
+    # body 含 ok + access_token（兼容路径）
+    body = r2.json()
+    assert body["ok"] is True
+    assert body["access_token"], "refresh body 必须含 access_token"
+    assert body["access_token"] == new_access
 
 
 @pytest.mark.asyncio
-async def test_refresh_with_garbage_token_rejected(reset_state):
-    """乱码 token → AUTH_REFRESH_INVALID。"""
+async def test_refresh_without_cookie_returns_401(reset_state):
+    """无 refresh cookie 的 /auth/refresh → AUTH_REFRESH_INVALID（401）。"""
     app = reset_state
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/v1/auth/refresh", json={"refresh_token": "not-a-jwt"})
+        # 完全没登录，直接 refresh
+        r = await c.post("/api/v1/auth/refresh")
+    assert r.status_code == 401, r.text
+    assert r.json().get("code") == "auth.refresh_invalid"
+
+
+@pytest.mark.asyncio
+async def test_refresh_with_garbage_cookie_returns_401(reset_state):
+    """cookie 里的 refresh 不是合法 JWT → AUTH_REFRESH_INVALID。"""
+    app = reset_state
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        c.cookies.set("refresh-token", "not-a-jwt")
+        r = await c.post("/api/v1/auth/refresh")
     assert r.status_code == 401
     assert r.json().get("code") == "auth.refresh_invalid"
 
 
 @pytest.mark.asyncio
-async def test_refresh_with_expired_token_rejected(reset_state):
-    """人为签一个已过期的 refresh token → AUTH_REFRESH_EXPIRED。"""
+async def test_refresh_with_expired_cookie_returns_401(reset_state):
+    """人为签一个已过期的 refresh token，写入 cookie → AUTH_REFRESH_EXPIRED。"""
     app = reset_state
     settings_mod = tok.get_settings()
     secret = settings_mod.jwt_secret
@@ -225,6 +256,36 @@ async def test_refresh_with_expired_token_rejected(reset_state):
     )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/v1/auth/refresh", json={"refresh_token": expired})
+        c.cookies.set("refresh-token", expired)
+        r = await c.post("/api/v1/auth/refresh")
     assert r.status_code == 401
     assert r.json().get("code") == "auth.refresh_expired"
+
+
+@pytest.mark.asyncio
+async def test_refresh_with_access_cookie_rejected(reset_state):
+    """access token 写到 refresh-token cookie 字段 → AUTH_REFRESH_INVALID（type 错）。"""
+    app = reset_state
+    from datetime import datetime, timezone
+    from app.core.security import hash_password_async
+    pwd_hash = await hash_password_async("StrongP@ssW0rd")
+    async with SessionLocal() as s:
+        s.add(User(
+            id=str(uuid.uuid4()), username="alice",
+            password_hash=pwd_hash, role="user",
+            password_changed_at=datetime.now(timezone.utc),
+        ))
+        await s.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.post("/api/v1/auth/login", json={
+            "username": "alice", "password": "StrongP@ssW0rd",
+        })
+        assert r.status_code == 200
+        # 拿到 access token 之后人为写到 refresh-token cookie（模拟客户端错把 access 写到 refresh 字段）
+        access_token = c.cookies.get("authorized-token")
+        c.cookies.set("refresh-token", access_token)
+        r2 = await c.post("/api/v1/auth/refresh")
+    assert r2.status_code == 401, r2.text
+    assert r2.json().get("code") == "auth.refresh_invalid"

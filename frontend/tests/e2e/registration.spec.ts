@@ -316,17 +316,13 @@ test.describe("场景 D-1: admin 改 bob 密码 → bob 新密码登录成功", 
       timeout: 15_000,
     })
 
-    // 2) 取 admin token（前端 auth.ts:39 setToken 写 localStorage[user-info]）
-    const adminToken = await page.evaluate(() => {
-      const v = localStorage.getItem("user-info")
-      if (!v) return ""
-      try {
-        const obj = JSON.parse(v) as { accessToken?: string }
-        return obj.accessToken ?? ""
-      } catch {
-        return ""
-      }
-    })
+    // 2) 取 admin token：access_token / refresh_token 由
+    //    HttpOnly cookie 持有；out-of-band API 调用拿不到 cookie（Playwright
+    //    request 不带 context cookie），直接调 loginViaApi 从 body 兼容路径
+    //    拿 token。后端 LoginResponse 仍返 access_token 字段（scripts / 测试
+    //    用），前端不读。
+    const adminToken = (await loginViaApi(ADMIN_USER, ADMIN_PWD))?.access_token ?? ""
+    expect(adminToken, "admin 登录失败").toBeTruthy()
 
     // 3) 确保 bob 存在（开 allow_registration → 注册 bob）
     await setAuthFlag(adminToken, "allow_registration", "true")

@@ -10,6 +10,10 @@ transport/websocket/resume.py 仅做向后兼容 re-export。
 from __future__ import annotations
 
 
+# 32-bit 上限 +1；mark_consumed 接近上限时静默丢弃，避免越界后污染听音窗。
+_SEQ_MAX_EXCLUSIVE: int = 0x100000000
+
+
 class SeqTracker:
     def __init__(self, consumed_seq: int = 0) -> None:
         self.consumed_seq = consumed_seq  # 下一个期望 seq
@@ -23,6 +27,9 @@ class SeqTracker:
         return seq >= self.consumed_seq
 
     def mark_consumed(self, seq: int) -> None:
-        """收到 seq 后，下一个期望 = seq + 1（取 max 防回退）。"""
-        if seq + 1 > self.consumed_seq:
-            self.consumed_seq = seq + 1
+        """取 max 防回退；越界静默 no-op。"""
+        next_seq = seq + 1
+        if next_seq >= _SEQ_MAX_EXCLUSIVE:
+            return
+        if next_seq > self.consumed_seq:
+            self.consumed_seq = next_seq

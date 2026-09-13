@@ -63,6 +63,11 @@ _login_limiter = RateLimiter(capacity=5, refill_per_hour=300)
 # （弱密码 / 两次密码不一致 / 重复 username）也消耗令牌——避免暴力扫 username
 # 与弱密码走绕过路径。
 _register_limiter = RateLimiter(capacity=3, refill_per_hour=60)
+# 注册另起一条按 IP 单键的桶：(ip, username) 双键会被 IP 池绕过（每个新 IP
+# 跟同一组 username 组合都是新桶），单 IP 桶卡住「同一出口 IP 上无论换 username
+# 都不让无限制打」。capacity=5、refill_per_hour=20 比双键宽——双键继续把单
+# username 暴力打严住，IP 桶负责守住 IP 池兜底。
+_register_ip_limiter = RateLimiter(capacity=5, refill_per_hour=20)
 # /auth/refresh 限流按 ip 单桶：refresh 通常由前端 axios 拦截器自动触发，
 # 频繁度高于登录；按用户限会把自动刷新路径锁死。纯 ip 限足够挡住外网滥用。
 _refresh_limiter = RateLimiter(capacity=30, refill_per_hour=600)
@@ -87,6 +92,7 @@ def _reset_for_test() -> None:
         return
     _login_limiter._buckets.clear()
     _register_limiter._buckets.clear()
+    _register_ip_limiter._buckets.clear()
     _refresh_limiter._buckets.clear()
     _change_pwd_limiter._buckets.clear()
     _auth_me_limiter._buckets.clear()
@@ -94,15 +100,40 @@ def _reset_for_test() -> None:
     _tok._reset_revoked_for_test()
 
 
-def _client_ip(request: Request) -> str:
-    """经反向代理（nginx 等）部署时，request.client.host 是代理地址：
-    所有真实用户共享一个桶，一人刷爆全员 429。取可信的 X-Forwarded-For
-    首跳；无该头（直连）回落到 socket 地址。
+def _trusted_proxy_ips() -> set[str]:
+    """解析 settings.trusted_proxies 为 IP 集合。
+
+    缓存：settings 是 lru_cache 单例，CSV 不变就一直用同一份集合。env 改了
+    需要重启进程（限流桶跨重启本来就无意义——重启清空）。
     """
+    from app.core.settings import get_settings
+
+    csv = get_settings().trusted_proxies.strip()
+    if not csv:
+        return set()
+    return {x.strip() for x in csv.split(",") if x.strip()}
+
+
+def _client_ip(request: Request) -> str:
+    """取真实客户端 IP，必须先验前置代理可信才读 XFF。
+
+    直连：socket 地址即客户端 IP，永远可信。
+    经反向代理：socket 是代理地址，不能直接当客户端用——必须验 request.client.host
+    在 trusted_proxies 白名单里、且 XFF 首跳存在，才采用 XFF。攻击者塞伪造
+    XFF 时，socket 不是 trusted proxy（如公网直接打后端），白名单未命中就
+    走 socket 路径，伪造 XFF 被忽略。
+
+    CIDR（如 10.0.0.0/8）不支持——白名单只列裸 IP。理由：1) 内部代理一般就
+    几台 LB/反代，IP 数量有限；2) CIDR 解析要拉 ipaddress 库增加依赖面；
+    3) 上层 nginx 已可做白名单 CIDR 收敛。
+    """
+    socket_ip = request.client.host if request.client else "unknown"
+    if socket_ip not in _trusted_proxy_ips():
+        return socket_ip
     xff = request.headers.get("x-forwarded-for")
     if xff:
         return xff.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return socket_ip
 
 
 @router.post("/auth/login", response_model=LoginResponse)
@@ -190,6 +221,11 @@ async def register(
     # 限流先于 confirm 比对与弱密码校验：失败路径同样消耗令牌，避免枚举绕路
     rl_key = f"{_client_ip(request)}:{req.username}"
     if not _register_limiter.try_acquire(rl_key):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
+    # IP 单键桶：防 IP 池换源绕开 (ip, username) 双键——换 IP 后每个 username
+    # 仍是新组合的双键桶，但 IP 桶基于同一出口 IP 仍命中。先 IP 后双键：IP 桶
+    # 比双键更宽松（capacity=5 vs 3），先卡 IP 池滥用，双键继续卡单 username 暴力。
+    if not _register_ip_limiter.try_acquire(_client_ip(request)):
         raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
 
     if req.password != req.confirm_password:

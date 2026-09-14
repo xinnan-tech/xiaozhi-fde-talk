@@ -1,6 +1,7 @@
 {
   "http.auth.rate_limited": "Quá nhiều lần đăng nhập, vui lòng thử lại sau",
   "http.auth.invalid_credentials": "Tên đăng nhập hoặc mật khẩu không đúng",
+  "http.auth.not_authenticated": "Vui lòng đăng nhập trước",
   "http.template.not_found": "Không tìm thấy mẫu",
   "http.session.not_found": "Không tìm thấy phỏng vấn",
   "http.session.title.default": "Phỏng vấn chưa đặt tên",

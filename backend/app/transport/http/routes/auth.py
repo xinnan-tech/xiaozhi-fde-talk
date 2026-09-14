@@ -435,7 +435,7 @@ async def me(
         raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
     access_token = request.cookies.get("authorized-token")
     if not access_token:
-        raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
+        raise I18nError(Keys.HTTP_AUTH_NOT_AUTHENTICATED, http_status=401)
     try:
         current = await extract_auth(access_token)
     except AuthError:

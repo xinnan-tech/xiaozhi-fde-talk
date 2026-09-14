@@ -13,6 +13,7 @@ class Keys(StrEnum):
     # ---- HTTP routes ----
     HTTP_AUTH_RATE_LIMITED = "http.auth.rate_limited"
     HTTP_AUTH_INVALID_CREDENTIALS = "http.auth.invalid_credentials"
+    HTTP_AUTH_NOT_AUTHENTICATED = "http.auth.not_authenticated"
     HTTP_TEMPLATE_NOT_FOUND = "http.template.not_found"
     HTTP_SESSION_NOT_FOUND = "http.session.not_found"
     HTTP_SESSION_TITLE_DEFAULT = "http.session.title.default"

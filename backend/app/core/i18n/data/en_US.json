@@ -1,6 +1,7 @@
 {
   "http.auth.rate_limited": "Too many login attempts, please try again later",
   "http.auth.invalid_credentials": "Invalid username or password",
+  "http.auth.not_authenticated": "Please sign in first",
   "http.template.not_found": "Template not found",
   "http.session.not_found": "Interview not found",
   "http.session.title.default": "Untitled interview",

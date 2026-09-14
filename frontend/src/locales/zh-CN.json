@@ -457,6 +457,8 @@
   "report.loading_description": "请稍候，报告即将呈现",
   "report.error_title": "报告暂时无法展示",
   "report.error_description": "请稍后重试",
+  "report.not_ready_title": "访谈进行中",
+  "report.not_ready_description": "访谈结束后将自动生成报告，请稍后再来查看",
   "report.reload": "重新加载",
   "report.ai": "AI",
   "report.regenerate": "重新生成报告",

@@ -44,6 +44,7 @@ const md = new MarkdownIt({
 const reportMarkdown = ref("");
 const reportLoading = ref(true);
 const reportError = ref(false);
+const interviewNotReady = ref(false);
 
 const renderedReport = computed(() => md.render(reportMarkdown.value));
 const canExportReport = computed(
@@ -88,11 +89,8 @@ const tabValue = ref(0);
 const interviewDetail = ref<InterviewDetailType>();
 const suggestions = ref<InterviewDetailItem[]>([]);
 
-// 报告可用闸门：访谈须已结束（ended）或已完成报告生成（extracting/done）。
-// 与后端 _REPORT_READY_STATUSES（backend/app/transport/http/routes/reports.py:25）
-// 同口径——早期状态（created/setting_up/in_progress/suspended）下 /report 与
-// /export 都会 409 http.report.not_ready，页面的导出/重新生成/删除按钮提前禁用，
-// 避免点了才收到报错 toast。与访谈页 isTerminalStatus 的终态集合一致。
+// 报告可用状态与后端 _REPORT_READY_STATUSES
+//（backend/app/transport/http/routes/reports.py:25）保持一致。
 const isReportReady = computed(() => {
   const status = interviewDetail.value?.status;
   return status === "ended" || status === "extracting" || status === "done";
@@ -190,18 +188,21 @@ const getInterviewReport = async () => {
   if (!id) {
     reportLoading.value = false;
     reportError.value = true;
+    interviewNotReady.value = false;
     return;
   }
 
-  // 访谈未结束：不请求 /report（后端必 409），直接走错误视图。
+  // 访谈未结束：不请求 /report（后端必 409），显示明确的业务状态。
   if (!isReportReady.value) {
     reportLoading.value = false;
-    reportError.value = true;
+    reportError.value = false;
+    interviewNotReady.value = true;
     return;
   }
 
   reportLoading.value = true;
   reportError.value = false;
+  interviewNotReady.value = false;
 
   try {
     const res = await getInterviewReportApi(id);
@@ -212,6 +213,11 @@ const getInterviewReport = async () => {
   } finally {
     reportLoading.value = false;
   }
+};
+
+const handleReloadReport = async () => {
+  await getInterviewDetail();
+  await getInterviewReport();
 };
 
 /** 获取访谈详情 */
@@ -313,7 +319,7 @@ const handleDeleteInterview = async () => {
  */
 const handleRegenerateReport = async () => {
   if (reportLoading.value) return; // 防双击：loading 中直接吞掉点击
-  // 未结束访谈无报告可重生，按钮已禁用，此处兜底键盘 Tab+Enter 等路径。
+  // 状态可能在渲染后发生变化，调用前再次确认报告已就绪。
   if (!isReportReady.value) return;
   try {
     await ElMessageBox.confirm(
@@ -365,17 +371,19 @@ onMounted(async () => {
         <div class="round-box share-action">
           <component :is="shareIcon" />
         </div>
-        <div
+        <button
+          type="button"
           class="round-box regen-action"
           :class="{
             'is-loading': reportLoading,
             'not-allowed': !isReportReady
           }"
+          :disabled="!isReportReady || reportLoading"
           :title="t('report.regenerate')"
           @click="handleRegenerateReport"
         >
           <component :is="refreshIcon" />
-        </div>
+        </button>
         <Select :options="moreOptions" @change="handleMoreChange">
           <div class="round-box more-action">
             <component :is="moreIcon" />
@@ -444,6 +452,21 @@ onMounted(async () => {
                   <p>{{ t("report.loading_description") }}</p>
                 </div>
               </div>
+              <div v-else-if="interviewNotReady" class="report-error">
+                <div class="error-mark">i</div>
+                <h2>{{ t("report.not_ready_title") }}</h2>
+                <p>{{ t("report.not_ready_description") }}</p>
+                <el-button
+                  type="primary"
+                  class="report-retry-button"
+                  :icon="refreshIcon"
+                  :title="t('report.reload')"
+                  disabled
+                  @click="handleReloadReport"
+                >
+                  {{ t("report.reload") }}
+                </el-button>
+              </div>
               <div v-else-if="reportError" class="report-error">
                 <div class="error-mark">!</div>
                 <h2>{{ t("report.error_title") }}</h2>
@@ -453,7 +476,7 @@ onMounted(async () => {
                   class="report-retry-button"
                   :icon="refreshIcon"
                   :title="t('report.reload')"
-                  @click="getInterviewReport"
+                  @click="handleReloadReport"
                 >
                   {{ t("report.reload") }}
                 </el-button>
@@ -558,13 +581,17 @@ onMounted(async () => {
       cursor: not-allowed;
     }
 
-    &.regen-action.is-loading {
-      cursor: not-allowed;
-      opacity: 0.6;
-    }
-
+    &.regen-action.is-loading,
     &.not-allowed {
       cursor: not-allowed;
+    }
+
+    &.regen-action:disabled {
+      cursor: not-allowed;
+    }
+
+    &.regen-action.is-loading {
+      opacity: 0.6;
     }
   }
 

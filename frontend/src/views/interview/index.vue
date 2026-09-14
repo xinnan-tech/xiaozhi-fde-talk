@@ -219,6 +219,7 @@ type SuggestionCard = {
   ignoreCountdown: number | null;
   ignoreIntervalId: number | null;
   ignoreTimeoutId: number | null;
+  ignorePreviousStatus: SuggestionStatus | null;
 };
 
 type TranscriptEntry = {
@@ -308,7 +309,8 @@ const createSuggestionCardsFromItems = (
       hint: item.desc || "",
       ignoreCountdown: null,
       ignoreIntervalId: null,
-      ignoreTimeoutId: null
+      ignoreTimeoutId: null,
+      ignorePreviousStatus: null
     };
   });
 };
@@ -605,8 +607,9 @@ const restoreIgnoredSuggestion = (itemId: string) => {
   if (!card) return;
 
   clearIgnoreTimer(card);
-  card.status = "todo";
-  card.tag = "todo";
+  card.status = card.ignorePreviousStatus ?? "todo";
+  card.ignorePreviousStatus = null;
+  card.tag = card.status;
   card.tagClass = "warning";
 };
 
@@ -1030,11 +1033,11 @@ const resumeInterviewAfterReload = async (detail: InterviewDetailType) => {
 const handleIgnoreSuggestion = (itemId: string) => {
   const card = suggestionCards.value.find(item => item.itemId === itemId);
   if (!card || !isPendingStatus(card.status)) return;
-  // 终态（ended/extracting/done）下不可再忽略：按钮已禁用，此处兜底
-  // 异步路径（如 countdown 倒计时入口前的极小窗口）。
+  // 终态下按钮已禁用，setTimeout 回调内再做一次终态检查。
   if (isTerminalStatus.value) return;
 
   clearIgnoreTimer(card);
+  card.ignorePreviousStatus = card.status;
   card.ignoreCountdown = 3;
   card.ignoreIntervalId = window.setInterval(() => {
     if (card.ignoreCountdown !== null && card.ignoreCountdown > 1) {
@@ -1053,6 +1056,7 @@ const handleIgnoreSuggestion = (itemId: string) => {
       if (!websocket.ignoreCoachingItem(card.itemId)) {
         await ignoreInterviewItemApi(getInterviewSessionId(), card.itemId);
       }
+      card.ignorePreviousStatus = null;
     } catch (e: unknown) {
       restoreIgnoredSuggestion(itemId);
       // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
@@ -1232,7 +1236,7 @@ const handleEndInterview = async () => {
   } catch {
     return;
   }
-  // 弹框等待期间后端可能已推 session.ended 或进入提取中，再调 end API 已无意义。
+  // 二次保护：confirm 等待期间状态可能已变。
   if (isTerminalStatus.value) return;
 
   try {

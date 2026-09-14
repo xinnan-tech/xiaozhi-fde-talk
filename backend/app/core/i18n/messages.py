@@ -13,7 +13,6 @@ class Keys(StrEnum):
     # ---- HTTP routes ----
     HTTP_AUTH_RATE_LIMITED = "http.auth.rate_limited"
     HTTP_AUTH_INVALID_CREDENTIALS = "http.auth.invalid_credentials"
-    # 未登录态专用：cookie 缺失且无任何凭据，不应复用"用户名或密码错误"误导用户。
     HTTP_AUTH_NOT_AUTHENTICATED = "http.auth.not_authenticated"
     HTTP_TEMPLATE_NOT_FOUND = "http.template.not_found"
     HTTP_SESSION_NOT_FOUND = "http.session.not_found"

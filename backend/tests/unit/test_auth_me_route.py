@@ -1,9 +1,4 @@
-"""GET /auth/me 三态断言：未登录 / 凭据无效 / 已登录。
-
-未登录态不应复用「用户名或密码错误」提示——前者语义是「请先登录」，
-后者语义是「已登录尝试凭据失败」。两个语义用不同 i18n key 区分，
-避免前端拦截器在首访无 cookie 时误弹「用户名或密码错误」toast。
-"""
+"""GET /auth/me 三态：未登录 / 凭据无效 / 已登录。"""
 from __future__ import annotations
 
 import pytest
@@ -50,11 +45,7 @@ async def empty_db(_lifespan_app):
 
 
 async def test_auth_me_no_cookie_returns_not_authenticated(empty_db):
-    """无 cookie 首访：401 + code=http.auth.not_authenticated。
-
-    校验点：detail.code 不能是 invalid_credentials——前者会触发前端
-    「用户名或密码错误」toast，后者文案是「请先登录」。
-    """
+    """无 cookie 调 /auth/me：401 + code=http.auth.not_authenticated。"""
     app = empty_db
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -66,7 +57,7 @@ async def test_auth_me_no_cookie_returns_not_authenticated(empty_db):
 
 
 async def test_auth_me_invalid_cookie_returns_invalid_credentials(empty_db):
-    """cookie 存在但 JWT 非法：401 + invalid_credentials（语义是凭据失败）。"""
+    """JWT 非法 cookie 调 /auth/me：401 + code=http.auth.invalid_credentials。"""
     app = empty_db
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:

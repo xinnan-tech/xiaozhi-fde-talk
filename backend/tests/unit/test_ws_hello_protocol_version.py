@@ -39,6 +39,9 @@ async def test_handshake_hello_includes_protocol_version(monkeypatch):
     rt.bind = AsyncMock()
     rt._send_fn = None
     rt._bound_client_id = None
+    rt._fsm.is_terminated = False  # 必须显式置位：MagicMock 默认 truthy，
+    # 不置 False 会被新加的 is_terminated 守卫误判 terminated → _handshake 直接 _fail。
+    # 真 SessionRuntime 的 _fsm 由 RuntimeStateMachine 管理，默认 LIVE_PAUSED → 非 terminated。
     monkeypatch.setattr(h_mod.registry, "get_or_create", lambda *a, **k: rt)
     monkeypatch.setattr(h_mod.registry, "is_terminating", lambda sid: False)
 

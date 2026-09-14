@@ -61,6 +61,7 @@ class SessionRuntime:
         )
         self._send_fn: Optional[SendFn] = None
         self._send_lock = asyncio.Lock()
+        # 锁顺序：handshake_lock → _send_lock（详见 manager.get_handshake_lock）。
         # owner 身份（前端 sessionStorage client_id）+ 被踢时关其 WS 的回调。
         # 连接竞争按 client_id 判定：同身份=同一端的刷新/断网重连（无缝复用），
         # 不同身份=另一端接管（takeover 踢旧 owner）。
@@ -99,26 +100,69 @@ class SessionRuntime:
         client_id 标识发起连接的客户端（前端 sessionStorage，每标签/每设备唯一）。
         同身份覆盖仍存活的 send_fn 属异常（旧 handler 未及 unbind 的 zombie 竞态）→ 告警；
         不同身份的覆盖只应发生在 takeover() 路径（已先踢人），这里仅兜底记 info。
+
+        并发：handler 路径通过 manager.get_handshake_lock(session_id) 串行化；
+        不同身份覆盖由 _bind_core 自动踢旧 owner（issue #199）。其他模块若直接
+        调本方法，须自行保证串行。
         """
         await self._bind_core(send, client_id, evict_fn)
 
     async def _bind_core(self, send: SendFn, client_id: Optional[str],
                          evict_fn: Optional[Callable[..., Awaitable[None]]]) -> None:
+        # terminated 后 bind 无意义：后续 FSM transition 会拒，提前挡掉避免把
+        # 调用方拖崩（handler 锁内已重检，此处 defense-in-depth）。
+        if self._fsm.is_terminated:
+            logger.warning(
+                "bind 拒绝：runtime 已终止：session=%s",
+                self.state.session.id,
+            )
+            return
         if self._send_fn is not None:
             if client_id is not None and self._bound_client_id == client_id:
                 logger.warning(
                     "运行时 bind 覆盖了同身份仍存活的 send_fn（疑似 zombie）：session=%s client=%s",
                     self.state.session.id, client_id,
                 )
+                self._send_dead = False
+                self._send_fn = send
+                self._bound_client_id = client_id
+                self._evict_fn = evict_fn
             else:
+                # 不同身份覆盖：takeover() / 并发握手撞进来都走这里（issue #199），
+                # 必须踢旧 owner 否则留「鬼连接」。
+                # 顺序：① 发 kicked → ② 覆盖 owner 字段 → ③ await 旧 evict。
+                # ② 必须在 ③ 前——旧 owner _cleanup 看到 _send_fn 已变会被
+                # ownership 守卫直接 no-op 拦住（见 _cleanup / unbind）。
+                old_evict = self._evict_fn
+                try:
+                    await self._raw_send({
+                        "type": "connection.kicked",
+                        "reason": i18n_t(Keys.WS_CONNECTION_KICKED,
+                                         locale=self.state.locale),
+                        "i18n_key": Keys.WS_CONNECTION_KICKED.value,
+                        "i18n_params": {},
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
                 logger.info(
                     "运行时连接被接管：session=%s old_client=%s new_client=%s",
                     self.state.session.id, self._bound_client_id, client_id,
                 )
-        self._send_dead = False
-        self._send_fn = send
-        self._bound_client_id = client_id
-        self._evict_fn = evict_fn
+                self._send_dead = False
+                self._send_fn = send
+                self._bound_client_id = client_id
+                self._evict_fn = evict_fn
+                if old_evict is not None:
+                    try:
+                        await old_evict()
+                    except Exception:  # noqa: BLE001
+                        pass
+        else:
+            # 无现役 owner：首次 bind / 重连取回 park 的 runtime。
+            self._send_dead = False
+            self._send_fn = send
+            self._bound_client_id = client_id
+            self._evict_fn = evict_fn
         self.engine.on_bind()
         # 重连时 replay critical 事件
         for msg in self.outbound.critical_for_replay():
@@ -147,36 +191,18 @@ class SessionRuntime:
                     self.state.session.id, self._fsm.state.value, client_id)
 
     async def takeover(self, send: SendFn, client_id: str,
-                       evict_fn: Callable[..., Awaitable[None]],
-                       reason: str = "连接已被另一个客户端接管") -> None:
-        """踢旧 owner 后绑新 owner（不同身份连接竞争接管）。
+                       evict_fn: Callable[..., Awaitable[None]]) -> None:
+        """接管：踢旧 owner + 绑新 owner（不同身份连接竞争接管）。
 
-        顺序严格：① 给旧 owner 发 connection.kicked（其仍在 receive，能收到）→
-        ② _bind_core 绑新 owner（覆盖 _send_fn）→ ③ 调旧 owner 的 evict_fn 关其 WS。
-        ② 先于③：旧 owner 随后的 _cleanup 看到 _send_fn 已是新 owner 的 send →
-        ownership 不符 → 整体 no-op，不会把会话误转 suspended / 寄存掉。
-        若此刻 _send_fn 已空（旧 owner 待决期间自行离开），跳过踢人、直接绑新。
+        实际踢人逻辑（kicked 帧 + 关闭旧 WS）由 _bind_core 内部统一处理：
+        同身份覆盖属 zombie（warning），不同身份覆盖必须踢旧 owner（issue #199
+        防御）。若 _send_fn 已空（旧 owner 待决期间自行离开），_bind_core 跳过踢人、
+        直接绑新。
+
+        并发安全：handler 层用 manager.get_handshake_lock(session_id) 把 takeover 与
+        握手包在同一把锁下，确保「kicked + bind + evict」与并发的 _handshake 原子。
         """
-        old_evict = self._evict_fn
-        old_client_id = self._bound_client_id
-        should_kick = self._send_fn is not None and old_client_id != client_id
-        if should_kick:
-            try:
-                await self._raw_send({
-                    "type": "connection.kicked",
-                    "reason": i18n_t(Keys.WS_CONNECTION_KICKED,
-                                     locale=self.state.locale),
-                    "i18n_key": Keys.WS_CONNECTION_KICKED.value,
-                    "i18n_params": {},
-                })
-            except Exception:  # noqa: BLE001
-                pass
         await self._bind_core(send, client_id, evict_fn)
-        if should_kick and old_evict is not None:
-            try:
-                await old_evict()
-            except Exception:  # noqa: BLE001
-                pass
 
     async def unbind(self, send: Optional[SendFn] = None) -> bool:
         """解除连接绑定：强制落盘 + engine.on_unbind + null _send_fn + 转 SUSPENDED_LOCAL（管线/引擎保留）。

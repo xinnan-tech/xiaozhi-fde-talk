@@ -167,6 +167,9 @@ async def test_handshake_sends_connection_conflict_with_i18n_params(monkeypatch)
     rt._bound_client_id = "clientA"   # 与 hello 里的 clientB 不同 → 触发 conflict
     rt.state = state
     rt.ainit = lambda: None
+    rt._fsm.is_terminated = False  # 必须显式置位：MagicMock 默认 truthy，
+    # 不置 False 会被新加的 is_terminated 守卫误判 terminated → _handshake 直接 _fail。
+    # 真 SessionRuntime 的 _fsm 由 RuntimeStateMachine 管理，默认 LIVE_PAUSED → 非 terminated。
     monkeypatch.setattr(h_mod.registry, "get_or_create", MagicMock(return_value=rt))
     monkeypatch.setattr(h_mod.registry, "is_terminating", lambda sid: False)
     monkeypatch.setattr(h_mod, "get_policy",

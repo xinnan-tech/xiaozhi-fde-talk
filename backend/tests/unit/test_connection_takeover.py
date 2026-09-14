@@ -218,6 +218,9 @@ async def test_on_takeover_reactivates_parked_runtime_when_owner_gone(monkeypatc
 
     reactivated = MagicMock()
     reactivated._fsm.is_terminated = False
+    reactivated._send_fn = None  # 必须显式置位：MagicMock 默认 truthy，会被
+    # _on_takeover 锁内新增的冲突守卫误判为「已被并发绑定」（issue #199 reviewer #1）
+    reactivated._bound_client_id = None
     reactivated.state = MagicMock()
     reactivated.seq.resume_from_seq = 7
     reactivated.takeover = AsyncMock()

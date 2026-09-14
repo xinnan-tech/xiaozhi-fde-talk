@@ -1,6 +1,7 @@
 {
   "http.auth.rate_limited": "嘗試過於頻繁，請稍後再試",
   "http.auth.invalid_credentials": "使用者名稱或密碼錯誤",
+  "http.auth.not_authenticated": "請先登入",
   "http.template.not_found": "範本不存在",
   "http.session.not_found": "會話不存在",
   "http.session.title.default": "未命名訪談",

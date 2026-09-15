@@ -457,6 +457,8 @@
   "report.loading_description": "Please wait, your report will be ready shortly",
   "report.error_title": "The report is temporarily unavailable",
   "report.error_description": "Please try again later",
+  "report.not_ready_title": "Interview in progress",
+  "report.not_ready_description": "The report will be generated after the interview ends. Please check back later.",
   "report.reload": "Reload",
   "report.ai": "AI",
   "report.regenerate": "Regenerate report",

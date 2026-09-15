@@ -44,6 +44,7 @@ const md = new MarkdownIt({
 const reportMarkdown = ref("");
 const reportLoading = ref(true);
 const reportError = ref(false);
+const interviewNotReady = ref(false);
 
 const renderedReport = computed(() => md.render(reportMarkdown.value));
 const canExportReport = computed(
@@ -61,28 +62,39 @@ const moreOptions = computed(() => [
   {
     value: "md-md",
     label: t("report.export", { extension: "md" }),
-    icon: downloadIcon
+    icon: downloadIcon,
+    disabled: !isReportReady.value
   },
   {
     value: "html-html",
     label: t("report.export", { extension: "html" }),
-    icon: downloadIcon
+    icon: downloadIcon,
+    disabled: !isReportReady.value
   },
   {
     value: "word-docx",
     label: t("report.export", { extension: "docx" }),
-    icon: downloadIcon
+    icon: downloadIcon,
+    disabled: !isReportReady.value
   },
   {
     value: "delete",
     label: t("report.delete"),
-    icon: deleteIcon
+    icon: deleteIcon,
+    disabled: !isReportReady.value
   }
 ]);
 
 const tabValue = ref(0);
 const interviewDetail = ref<InterviewDetailType>();
 const suggestions = ref<InterviewDetailItem[]>([]);
+
+// 报告可用状态与后端 _REPORT_READY_STATUSES
+//（backend/app/transport/http/routes/reports.py:25）保持一致。
+const isReportReady = computed(() => {
+  const status = interviewDetail.value?.status;
+  return status === "ended" || status === "extracting" || status === "done";
+});
 
 // 派生报告页左上 3 块指标。
 // 不走新接口——interviewDetail 里已经带了 transcript + items 完整数据，
@@ -176,11 +188,21 @@ const getInterviewReport = async () => {
   if (!id) {
     reportLoading.value = false;
     reportError.value = true;
+    interviewNotReady.value = false;
+    return;
+  }
+
+  // 访谈未结束：不请求 /report（后端必 409），显示明确的业务状态。
+  if (!isReportReady.value) {
+    reportLoading.value = false;
+    reportError.value = false;
+    interviewNotReady.value = true;
     return;
   }
 
   reportLoading.value = true;
   reportError.value = false;
+  interviewNotReady.value = false;
 
   try {
     const res = await getInterviewReportApi(id);
@@ -193,18 +215,43 @@ const getInterviewReport = async () => {
   }
 };
 
+const handleReloadReport = async () => {
+  reportLoading.value = true;
+  reportError.value = false;
+  interviewNotReady.value = false;
+  const detailLoaded = await getInterviewDetail();
+  if (detailLoaded) await getInterviewReport();
+};
+
 /** 获取访谈详情 */
 const getInterviewDetail = async () => {
   const id = route.params.id as string;
-  if (!id) return;
-  const res = await getInterviewDetailApi(id);
-  interviewDetail.value = res;
-  suggestions.value = res?.items.map(item => item);
+  if (!id) {
+    reportLoading.value = false;
+    reportError.value = true;
+    interviewNotReady.value = false;
+    return false;
+  }
+
+  try {
+    const res = await getInterviewDetailApi(id);
+    interviewDetail.value = res;
+    suggestions.value = res?.items.map(item => item);
+    return true;
+  } catch {
+    reportLoading.value = false;
+    reportError.value = true;
+    interviewNotReady.value = false;
+    return false;
+  }
 };
 
 const getInterviewId = () => route.params.id as string;
 
 const handleMoreChange = (option: SelectOption) => {
+  // 未到终态时导出/删除均不可用（后端 _REPORT_READY_STATUSES 守卫 / 访谈
+  // 进行中不允许删），选项已禁用，此处兜底。
+  if (!isReportReady.value) return;
   if (option.value === "delete") {
     handleDeleteInterview();
   } else {
@@ -224,6 +271,7 @@ const handleExportReport = async (
 ) => {
   const id = getInterviewId();
   if (!id || !canExportReport.value) return;
+  if (!isReportReady.value) return;
 
   try {
     const report = await exportInterviewReportApi(id, format);
@@ -251,6 +299,8 @@ const handleExportReport = async (
 const handleDeleteInterview = async () => {
   const id = getInterviewId();
   if (!id) return;
+  // 未结束的访谈不可删除：菜单项已禁用，此处兜底。
+  if (!isReportReady.value) return;
 
   try {
     await ElMessageBox.confirm(
@@ -286,6 +336,8 @@ const handleDeleteInterview = async () => {
  */
 const handleRegenerateReport = async () => {
   if (reportLoading.value) return; // 防双击：loading 中直接吞掉点击
+  // 状态可能在渲染后发生变化，调用前再次确认报告已就绪。
+  if (!isReportReady.value) return;
   try {
     await ElMessageBox.confirm(
       t("report.regenerate_message"),
@@ -316,8 +368,8 @@ const handleRegenerateReport = async () => {
 };
 
 onMounted(async () => {
-  await getInterviewDetail();
-  await getInterviewReport();
+  const detailLoaded = await getInterviewDetail();
+  if (detailLoaded) await getInterviewReport();
 });
 </script>
 
@@ -336,16 +388,19 @@ onMounted(async () => {
         <div class="round-box share-action">
           <component :is="shareIcon" />
         </div>
-        <div
+        <button
+          type="button"
           class="round-box regen-action"
-          :class="{ 'is-loading': reportLoading }"
+          :class="{
+            'is-loading': reportLoading,
+            'not-allowed': !isReportReady
+          }"
+          :disabled="!isReportReady || reportLoading"
           :title="t('report.regenerate')"
-          role="button"
-          tabindex="0"
           @click="handleRegenerateReport"
         >
           <component :is="refreshIcon" />
-        </div>
+        </button>
         <Select :options="moreOptions" @change="handleMoreChange">
           <div class="round-box more-action">
             <component :is="moreIcon" />
@@ -414,6 +469,21 @@ onMounted(async () => {
                   <p>{{ t("report.loading_description") }}</p>
                 </div>
               </div>
+              <div v-else-if="interviewNotReady" class="report-error">
+                <div class="error-mark">i</div>
+                <h2>{{ t("report.not_ready_title") }}</h2>
+                <p>{{ t("report.not_ready_description") }}</p>
+                <el-button
+                  type="primary"
+                  class="report-retry-button"
+                  :icon="refreshIcon"
+                  :title="t('report.reload')"
+                  disabled
+                  @click="handleReloadReport"
+                >
+                  {{ t("report.reload") }}
+                </el-button>
+              </div>
               <div v-else-if="reportError" class="report-error">
                 <div class="error-mark">!</div>
                 <h2>{{ t("report.error_title") }}</h2>
@@ -423,7 +493,7 @@ onMounted(async () => {
                   class="report-retry-button"
                   :icon="refreshIcon"
                   :title="t('report.reload')"
-                  @click="getInterviewReport"
+                  @click="handleReloadReport"
                 >
                   {{ t("report.reload") }}
                 </el-button>
@@ -528,8 +598,16 @@ onMounted(async () => {
       cursor: not-allowed;
     }
 
-    &.regen-action.is-loading {
+    &.regen-action.is-loading,
+    &.not-allowed {
       cursor: not-allowed;
+    }
+
+    &.regen-action:disabled {
+      cursor: not-allowed;
+    }
+
+    &.regen-action.is-loading {
       opacity: 0.6;
     }
   }

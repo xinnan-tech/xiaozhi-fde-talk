@@ -457,6 +457,8 @@
   "report.loading_description": "Vui lòng đợi, báo cáo sẽ sẵn sàng sau ít phút",
   "report.error_title": "Báo cáo tạm thời không khả dụng",
   "report.error_description": "Vui lòng thử lại sau",
+  "report.not_ready_title": "Cuộc phỏng vấn đang diễn ra",
+  "report.not_ready_description": "Báo cáo sẽ được tạo sau khi cuộc phỏng vấn kết thúc. Vui lòng quay lại sau.",
   "report.reload": "Tải lại",
   "report.ai": "AI",
   "report.regenerate": "Tạo lại báo cáo",

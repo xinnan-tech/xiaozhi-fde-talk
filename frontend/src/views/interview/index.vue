@@ -219,6 +219,7 @@ type SuggestionCard = {
   ignoreCountdown: number | null;
   ignoreIntervalId: number | null;
   ignoreTimeoutId: number | null;
+  ignorePreviousStatus: SuggestionStatus | null;
 };
 
 type TranscriptEntry = {
@@ -308,7 +309,8 @@ const createSuggestionCardsFromItems = (
       hint: item.desc || "",
       ignoreCountdown: null,
       ignoreIntervalId: null,
-      ignoreTimeoutId: null
+      ignoreTimeoutId: null,
+      ignorePreviousStatus: null
     };
   });
 };
@@ -605,8 +607,9 @@ const restoreIgnoredSuggestion = (itemId: string) => {
   if (!card) return;
 
   clearIgnoreTimer(card);
-  card.status = "todo";
-  card.tag = "todo";
+  card.status = card.ignorePreviousStatus ?? "todo";
+  card.ignorePreviousStatus = null;
+  card.tag = card.status;
   card.tagClass = "warning";
 };
 
@@ -1030,8 +1033,12 @@ const resumeInterviewAfterReload = async (detail: InterviewDetailType) => {
 const handleIgnoreSuggestion = (itemId: string) => {
   const card = suggestionCards.value.find(item => item.itemId === itemId);
   if (!card || !isPendingStatus(card.status)) return;
+  // 终态下按钮已禁用，setTimeout 回调内再做一次终态检查。
+  if (isTerminalStatus.value) return;
 
   clearIgnoreTimer(card);
+  // 保留忽略前状态，供后续 unignore 恢复 new/todo。
+  card.ignorePreviousStatus = card.status;
   card.ignoreCountdown = 3;
   card.ignoreIntervalId = window.setInterval(() => {
     if (card.ignoreCountdown !== null && card.ignoreCountdown > 1) {
@@ -1040,6 +1047,11 @@ const handleIgnoreSuggestion = (itemId: string) => {
   }, 1000);
   card.ignoreTimeoutId = window.setTimeout(async () => {
     clearIgnoreTimer(card);
+    // 倒计时期间会话进入终态：不再调 ignore API，恢复卡片待追问状态。
+    if (isTerminalStatus.value) {
+      restoreIgnoredSuggestion(itemId);
+      return;
+    }
     setIgnoredSuggestion(card);
     try {
       if (!websocket.ignoreCoachingItem(card.itemId)) {
@@ -1065,6 +1077,7 @@ const handleUndoIgnore = (itemId: string) => {
 const handleUnignoreSuggestion = async (itemId: string) => {
   const card = suggestionCards.value.find(item => item.itemId === itemId);
   if (!card || card.status !== "ignored") return;
+  if (isTerminalStatus.value) return;
 
   try {
     await unignoreInterviewItemApi(getInterviewSessionId(), itemId);
@@ -1208,6 +1221,8 @@ function handleExportSignature() {
 }
 
 const handleEndInterview = async () => {
+  // 终态（ended/extracting/done）下不可再次结束：按钮已禁用，此处兜底。
+  if (isTerminalStatus.value) return;
   try {
     await ElMessageBox.confirm(
       t("interview.end_confirm"),
@@ -1221,6 +1236,8 @@ const handleEndInterview = async () => {
   } catch {
     return;
   }
+  // 二次保护：confirm 等待期间状态可能已变。
+  if (isTerminalStatus.value) return;
 
   try {
     await endInterviewApi(getInterviewSessionId());
@@ -1347,6 +1364,7 @@ onMounted(() => {
             type="primary"
             class="session-action-button session-action-primary"
             :icon="SwitchButton"
+            :disabled="isTerminalStatus"
             @click="handleEndInterview"
           >
             <span class="session-action-label">{{
@@ -1467,6 +1485,7 @@ onMounted(() => {
                       type="button"
                       class="suggestion-ignore-button"
                       :class="{ countdown: item.ignoreCountdown !== null }"
+                      :disabled="isTerminalStatus"
                       :aria-label="
                         $t(
                           item.ignoreCountdown !== null
@@ -2082,6 +2101,15 @@ onMounted(() => {
     box-shadow: 0 8px 16px rgb(59 130 246 / 12%);
   }
 
+  .suggestion-ignore-button:disabled {
+    color: #94a3b8;
+    cursor: not-allowed;
+    background: rgb(241 245 249 / 60%);
+    border-color: rgb(203 213 225 / 70%);
+    box-shadow: none;
+    transform: none;
+  }
+
   .suggestion-ignore-icon {
     width: 14px;
     height: 14px;
@@ -2482,6 +2510,15 @@ onMounted(() => {
     color: #fff;
     background: #ef4444;
     border-color: #ef4444;
+  }
+
+  .session-action-primary.el-button.is-disabled,
+  .session-action-primary.el-button.is-disabled:hover,
+  .session-action-primary.el-button.is-disabled:focus-visible {
+    color: #fff;
+    cursor: not-allowed;
+    background: #fca5a5;
+    border-color: #fca5a5;
   }
 
   .transcript-card {

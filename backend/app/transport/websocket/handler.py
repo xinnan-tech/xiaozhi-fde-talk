@@ -516,6 +516,13 @@ class WSHandler:
                     self.session_id, rt._bound_client_id, self.client_id)
                 return
             await rt.takeover(self._send, self.client_id, self._self_evict)
+            # 锁内出口重检 terminated：takeover 内部 await 让出期间，runtime 可能被并发
+            # 路径（_suspend_idle 等）置 TERMINATED → _bind_core 静默 return → _send_fn
+            # 未绑。再判一次避免锁外发 hello 制造「B 收 hello 但 send_fn 未绑」的鬼连接
+            # （issue #199 同质）。
+            if rt._fsm.is_terminated:
+                await _fail(self.ws, code="session_ended", close_code=4406)
+                return
         logger.info("连接已接管会话：session=%s client=%s", self.session_id, self.client_id)
         # 接管成功 → 回 hello（含 resume_from_seq），前端据此开麦发 listen:start。
         # takeover 内部已 bind（推了 coaching snapshot），hello 随后到，前端正常开麦。

@@ -1037,6 +1037,7 @@ const handleIgnoreSuggestion = (itemId: string) => {
   if (isTerminalStatus.value) return;
 
   clearIgnoreTimer(card);
+  // 保留忽略前状态，供后续 unignore 恢复 new/todo。
   card.ignorePreviousStatus = card.status;
   card.ignoreCountdown = 3;
   card.ignoreIntervalId = window.setInterval(() => {
@@ -1056,7 +1057,6 @@ const handleIgnoreSuggestion = (itemId: string) => {
       if (!websocket.ignoreCoachingItem(card.itemId)) {
         await ignoreInterviewItemApi(getInterviewSessionId(), card.itemId);
       }
-      card.ignorePreviousStatus = null;
     } catch (e: unknown) {
       restoreIgnoredSuggestion(itemId);
       // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。

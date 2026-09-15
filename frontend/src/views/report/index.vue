@@ -216,17 +216,34 @@ const getInterviewReport = async () => {
 };
 
 const handleReloadReport = async () => {
-  await getInterviewDetail();
-  await getInterviewReport();
+  reportLoading.value = true;
+  reportError.value = false;
+  interviewNotReady.value = false;
+  const detailLoaded = await getInterviewDetail();
+  if (detailLoaded) await getInterviewReport();
 };
 
 /** 获取访谈详情 */
 const getInterviewDetail = async () => {
   const id = route.params.id as string;
-  if (!id) return;
-  const res = await getInterviewDetailApi(id);
-  interviewDetail.value = res;
-  suggestions.value = res?.items.map(item => item);
+  if (!id) {
+    reportLoading.value = false;
+    reportError.value = true;
+    interviewNotReady.value = false;
+    return false;
+  }
+
+  try {
+    const res = await getInterviewDetailApi(id);
+    interviewDetail.value = res;
+    suggestions.value = res?.items.map(item => item);
+    return true;
+  } catch {
+    reportLoading.value = false;
+    reportError.value = true;
+    interviewNotReady.value = false;
+    return false;
+  }
 };
 
 const getInterviewId = () => route.params.id as string;
@@ -351,8 +368,8 @@ const handleRegenerateReport = async () => {
 };
 
 onMounted(async () => {
-  await getInterviewDetail();
-  await getInterviewReport();
+  const detailLoaded = await getInterviewDetail();
+  if (detailLoaded) await getInterviewReport();
 });
 </script>
 

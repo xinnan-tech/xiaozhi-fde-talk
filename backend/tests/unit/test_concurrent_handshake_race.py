@@ -30,6 +30,9 @@ from app.services.sessions.runtime import SessionRuntime
 from app.transport.websocket.handler import WSHandler
 from app.domain.session import SessionStatus
 
+# 每个测试清 manager._handshake_locks——跨 event loop 复用 asyncio.Lock 会 RuntimeError。
+pytestmark = pytest.mark.usefixtures("_reset_handshake_locks")
+
 
 def _stub_runtime(rt: SessionRuntime) -> None:
     """挂最小桩，让 bind/takeover/_raw_send 走通而不触网/不落盘。"""
@@ -329,22 +332,16 @@ async def test_concurrent_takeover_and_handshake_same_runtime(
     assert "hello" in winner_sent, f"winner 必收到 hello；winner_sent={winner_sent}"
 
 
-# ── 旧 owner _cleanup 在 await old_evict() 期间并发跑的覆盖（reviewer 提的盲区）
+# ── 旧 owner _cleanup 在 await old_evict() 期间并发跑的覆盖 ──────────────
 
 
 async def test_bind_core_state_flip_before_old_evict_await(make_state):
-    """reviewer 提的顺序约束：② 状态翻转必须在 ③ await old_evict() 之前。
-
-    旧 owner A 的 _loop 在 await old_evict() 期间会被 disconnect 触发 _cleanup，
-    _cleanup 第一道守卫 `if self.runtime._send_fn != self._send: return` 看到
-    _send_fn 已变 → no-op → 不会 unbind + park 把 runtime 误拆到 _parked。
-
-    如果 _send_fn 还在 A 自己手里（A._cleanup 通过第一道守卫），它会跑
-    unbind → 把 _send_fn 置 None → handler._cleanup 第二道守卫也失效 → park 到
-    _parked → B 实质上绑到 parked runtime，TTL 到期后被 end() 误踢。
+    """状态翻转必须在 await old_evict() 之前——否则旧 owner _cleanup 撞过
+    ownership 守卫把 _send_fn 置 None、把 runtime 误拆到 _parked，TTL 到期
+    后被 end() 误踢。
 
     用 side_effect 拦 evictA：调用时记录 _send_fn 的当前值。若 _send_fn 已
-    是 sendB（B 的 send），说明 ② 已完成；否则就是 ② 排在 ③ 之后的 bug。
+    是 sendB（B 的 send），说明状态翻转已完成。
     """
     rt = SessionRuntime(make_state())
     _stub_runtime(rt)
@@ -365,13 +362,11 @@ async def test_bind_core_state_flip_before_old_evict_await(make_state):
     # 关键断言：旧 owner evict 跑的时候，_send_fn 已经是 sendB 了。
     # 若此断言失败，runtime 在 await old_evict() 期间还有窗口被旧 _cleanup unbind。
     assert len(observed) == 1 and observed[0] is sendB, (
-        f"② 状态翻转必须在 ③ await old_evict() 之前——否则旧 _cleanup 会 unbind "
+        f"状态翻转必须在 await old_evict() 之前——否则旧 _cleanup 会 unbind "
         f"把 runtime 误拆到 _parked；observed={observed}"
     )
-    # 副断言（非本 PR 改动覆盖）：runtime.unbind 的 ownership 守卫。
-    # 这条覆盖的是 unbind 既有守卫，不在 #199 改动范围内——写在这里是顺带验证
-    # _bind_core 状态翻转后旧 owner 的迟到 unbind 还能被 unbind 守卫兜住。
-    # reviewer 别误判为 #199 改动引入的回归测试。
+    # 副断言：覆盖 runtime.unbind 的 ownership 守卫——_bind_core 状态翻转后
+    # 旧 owner 的迟到 unbind 还能被 unbind 守卫兜住。
     assert await rt.unbind(sendA) is False, "旧 owner 迟到 unbind 必须因 ownership 不符 no-op"
     # 新 owner 仍是 B（确认 unbind 没踩坏）
     assert rt._send_fn is sendB
@@ -385,23 +380,19 @@ async def test_two_concurrent_takeovers_second_yields_conflict(
     monkeypatch, make_state
 ):
     """两个 pending 连接 B、C 同时进 _on_takeover（旧 owner A 已 parked）→
-
-    ⚠️ DO NOT REMOVE the `await asyncio.sleep(0)` in `_fake_get` below！
-    这是测试有效的关键：mock 环境下 await 若同步 resolve，asyncio.gather 的并发
-    不存在——B 会跑完 reactivation + 锁 + 部分 takeover 之后 C 才启动，C 的 entry
-    检查看到的是 B 已设的 sendB，reactivated 误设 False，冲突守卫不触发，整个
-    测试退化为 second-kicks-first 旧行为。真生产环境无此问题（网络/DB await 真
-    挂起，并发自然生效），仅测试基础设施需要这层强制让出。重构 PR review 时
-    若看到这行 `sleep(0)` 怀疑"无关紧要"想要删除，请回到本测试目的判断。
-
-    方案 A 后：第一个抢到锁的（先入 reactivation 拿 rt）正常 takeover；
-    第二个进入锁时 _send_fn 已被第一个覆盖且 client_id 不同 → 锁内冲突
-    守卫命中 → 发 connection.conflict 给本端，不踢人，pending 等决策。
+    先入 reactivation 拿 rt 者正常 takeover；后入锁时 _send_fn 已被覆盖且
+    client_id 不同 → 锁内冲突守卫命中 → 发 connection.conflict，不踢人。
 
     这与 _handshake 路径行为对称：「不是自己的 → conflict 不踢」。
 
-    client_id 必须不同（client-B vs client-C）——若相同 _on_takeover 走正常路径
-    （_send_fn 已变 + client_id 一致 = 自己就是 owner）不发 conflict。
+    client_id 必须不同（client-B vs client-C）——若相同 _on_takeover 走正常
+    路径（_send_fn 已变 + client_id 一致 = 自己就是 owner）不发 conflict。
+
+    `_fake_get` 里的 `await asyncio.sleep(0)` 是必需的：mock 环境下若 await
+    同步 resolve，B 会同步跑完 reactivation 后 C 才启动，C 的 entry 检查
+    `rt._send_fn is None` 看到的是 B 已设的 sendB，reactivated 误设 False，
+    冲突守卫不触发，整个测试退化为 second-kicks-first 旧行为。真生产环境
+    网络/DB await 真挂起，并发自然生效；测试里需这层强制让出。
     """
     import app.transport.websocket.handler as h_mod
 
@@ -415,14 +406,9 @@ async def test_two_concurrent_takeovers_second_yields_conflict(
     fake_state = MagicMock()
     fake_state.session.user_id = "u1"
     fake_state.session.id = "two-tk-sid"
-    # ⚠️ sleep(0) 是这个测试的关键——别去掉！
-    # 不加的话，asyncio.gather 的并发在 mock 环境里其实不存在：B 会同步跑完
-    # reactivation + 拿锁 + 部分 takeover 之后，C 才启动；C 的 entry 检查
-    # `rt._send_fn is None` 看到的是 B 已设的 sendB，reactivated 误设 False，
-    # 冲突守卫不触发，整个测试退化为 second-kicks-first（旧行为）。
-    # 真生产环境无此问题：网络/DB await 真挂起，并发自然生效。这里只在测试里
-    # 模拟这种挂起，否则这个测试无法测出方案 A 的真正行为。
+
     async def _fake_get(sid):
+        # sleep(0) 强制让出——见本测试 docstring
         await asyncio.sleep(0)
         return fake_state
     monkeypatch.setattr(h_mod.manager, "get", _fake_get)
@@ -457,7 +443,7 @@ async def test_two_concurrent_takeovers_second_yields_conflict(
     )
 
 
-# ── _handshake is_terminated 守卫（reviewer #3 对称性补全）───────────────
+# ── _handshake is_terminated 守卫（与 _on_takeover 守卫对称）───────────────
 
 
 @pytest.mark.asyncio

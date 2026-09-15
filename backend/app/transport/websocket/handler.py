@@ -361,6 +361,11 @@ class WSHandler:
                 "audio_params": msg.get("audio_params", {}),
                 "resume_from_seq": self.runtime.seq.resume_from_seq,
             })
+            # hello 发送期间 runtime 可能被并发置 TERMINATED——再判一次避免「hello 已发但
+            # _bind_core 静默 return → send_fn 未绑」的鬼连接（_bind_core 内部仍保 defense-in-depth）。
+            if self.runtime._fsm.is_terminated:
+                await _fail(self.ws, code="session_ended", close_code=4406)
+                return False
             if is_reconnect:
                 logger.info(
                     "WebSocket 重连接管已有会话：session=%s resume_from_seq=%d",

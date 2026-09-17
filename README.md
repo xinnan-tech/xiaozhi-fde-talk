@@ -29,7 +29,7 @@
 
 <table>
   <tr>
-    <td width="20%">
+    <td width="30%">
       <a href="https://www.bilibili.com/video/BV1wZeT6jEyg" target="_blank">
         <picture>
           <img alt="小智AI参与到需求访谈中，成为生产力工具，帮助产品经理、FDE、售前等人员做好访谈

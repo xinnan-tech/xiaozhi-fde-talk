@@ -25,6 +25,24 @@ Các công cụ ghi âm thông thường chỉ giúp bạn tổng hợp sau bu�
 
 ***
 
+<table>
+  <tr>
+    <td width="20%">
+      <a href="https://www.bilibili.com/video/BV1wZeT6jEyg" target="_blank">
+        <picture>
+          <img alt="Xiaozhi AI tham gia phỏng vấn yêu cầu, trở thành công cụ năng suất giúp quản lý sản phẩm, FDE và pre-sales thực hiện phỏng vấn tốt hơn
+" src="../images/demo01.png" /></picture>
+      </a>
+    </td>
+    <td>&nbsp;</td>
+    <td>&nbsp;</td>
+    <td>&nbsp;</td>
+    <td>&nbsp;</td>
+  </tr>
+</table>
+
+***
+
 <a id="quick-start"></a>
 
 ## 🚀 Ba câu để chạy

@@ -43,10 +43,11 @@ test.describe("login flow", () => {
     // 错误文案候选：后端 I18nError 在 zh-CN 是「用户名或密码错误」，
     // en-US 是 "Username or password is incorrect"；旧的兜底 i18n
     // 是「登录失败，请稍后重试」/ "Sign-in failed. Please try again later."。
-    // 只断言"出现了某个用户可见的错误"，不绑死具体文案。
-    await expect(page.locator(".el-message")).toContainText(
-      /登录失败|登录|Sign-in failed|failed|失败|invalid|error|用户名或密码|Username or password/i,
-      { timeout: 5_000 }
-    )
+    // 必须用具体短语 + getByText：home 未登录访问会先弹 "Please sign in first"
+    // / "请先登录"（http.auth.not_authenticated），跟"登录"沾边且还在 fade，
+    // 只匹配 .el-message 会撞 strict mode 并可能误判。
+    await expect(
+      page.getByText(/登录失败|用户名或密码|Sign-in failed|Username or password|Login failed/i)
+    ).toBeVisible({ timeout: 5_000 })
   })
 })

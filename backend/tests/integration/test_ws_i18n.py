@@ -7,7 +7,6 @@ tests/conftest.py, which restore the prior contextvar after each test.
 """
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,11 +18,10 @@ from app.transport.websocket.handler import _fail
 @pytest.mark.asyncio
 async def test_fail_localizes_message_in_zh_cn(zh_cn_locale):
     ws = MagicMock()
-    ws.send = AsyncMock()
+    ws.send_json = AsyncMock()
     ws.close = AsyncMock()
     await _fail(ws, code="bad_handshake", close_code=4000)
-    args, _ = ws.send.call_args
-    payload = json.loads(args[0])
+    payload = ws.send_json.call_args.args[0]
     assert payload["code"] == "bad_handshake"
     assert payload["i18n_key"] == "ws.bad_handshake"
     assert payload["message"] == "握手失败"
@@ -32,13 +30,13 @@ async def test_fail_localizes_message_in_zh_cn(zh_cn_locale):
 @pytest.mark.asyncio
 async def test_fail_parametric_key_in_en_us(en_locale):
     ws = MagicMock()
-    ws.send = AsyncMock()
+    ws.send_json = AsyncMock()
     ws.close = AsyncMock()
     await _fail(
         ws, code="asr_unavailable",
         i18n_key=Keys.WS_ASR_CONNECT_FAIL, reason="connection refused",
     )
-    payload = json.loads(ws.send.call_args.args[0])
+    payload = ws.send_json.call_args.args[0]
     assert payload["code"] == "asr_unavailable"
     assert payload["i18n_key"] == Keys.WS_ASR_CONNECT_FAIL.value
     assert payload["message"] == "Voice recognition (ASR) connection failed: connection refused"
@@ -47,13 +45,13 @@ async def test_fail_parametric_key_in_en_us(en_locale):
 @pytest.mark.asyncio
 async def test_fail_parametric_key_in_zh_tw(zh_tw_locale):
     ws = MagicMock()
-    ws.send = AsyncMock()
+    ws.send_json = AsyncMock()
     ws.close = AsyncMock()
     await _fail(
         ws, code="asr_unavailable",
         i18n_key=Keys.WS_ASR_CONNECT_FAIL, reason="connection refused",
     )
-    payload = json.loads(ws.send.call_args.args[0])
+    payload = ws.send_json.call_args.args[0]
     assert payload["message"] == "語音識別（ASR）連線失敗：connection refused"
 
 
@@ -65,7 +63,7 @@ async def test_close_reason_carries_localized_message(en_locale):
     shorter `ws.close.session_ended` ("Interview ended") is reserved for
     runtime.py eviction (separate code path that doesn't go through _fail)."""
     ws = MagicMock()
-    ws.send = AsyncMock()
+    ws.send_json = AsyncMock()
     ws.close = AsyncMock()
     await _fail(ws, code="session_ended", close_code=4406)
     close_kwargs = ws.close.call_args.kwargs
@@ -82,7 +80,7 @@ async def test_close_reason_carries_localized_message_zh_cn(zh_cn_locale):
     the wire code, not English fallback). Verifies the encoder branch in
     `_fail()` that calls `.encode("utf-8")`."""
     ws = MagicMock()
-    ws.send = AsyncMock()
+    ws.send_json = AsyncMock()
     ws.close = AsyncMock()
     await _fail(ws, code="session_ended", close_code=4406)
     reason = ws.close.call_args.kwargs["reason"]

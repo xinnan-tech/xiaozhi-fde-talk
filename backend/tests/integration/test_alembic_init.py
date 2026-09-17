@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,8 +22,10 @@ def _run_alembic(*args: str, db_url: str | None = None) -> subprocess.CompletedP
     env = {**os.environ, "APP_DB_USE_ALEMBIC": "1"}
     if db_url is not None:
         env["DATABASE_URL"] = db_url
+    # 用 `python -m alembic` 而非裸 `alembic`：env 脚本目录不一定在 PATH
+    # （conda 环境跑测试时 alembic.exe 在 env/Scripts，子进程找不到）。
     return subprocess.run(
-        ["alembic", *args],
+        [sys.executable, "-m", "alembic", *args],
         cwd=BACKEND_ROOT,
         capture_output=True,
         text=True,

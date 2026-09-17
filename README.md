@@ -27,6 +27,24 @@
 
 ***
 
+<table>
+  <tr>
+    <td width="20%">
+      <a href="https://www.bilibili.com/video/BV1wZeT6jEyg" target="_blank">
+        <picture>
+          <img alt="小智AI参与到需求访谈中，成为生产力工具，帮助产品经理、FDE、售前等人员做好访谈
+" src="docs/images/demo01.png" /></picture>
+      </a>
+    </td>
+    <td>&nbsp;</td>
+    <td>&nbsp;</td>
+    <td>&nbsp;</td>
+    <td>&nbsp;</td>
+  </tr>
+</table>
+
+***
+
 <a id="quick-start"></a>
 
 ## 🚀 三句话跑起来

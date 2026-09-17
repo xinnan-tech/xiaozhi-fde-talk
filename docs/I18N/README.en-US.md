@@ -25,6 +25,24 @@ Regular recording tools only help you clean up after the interview. This one lis
 
 ***
 
+<table>
+  <tr>
+    <td width="20%">
+      <a href="https://www.bilibili.com/video/BV1wZeT6jEyg" target="_blank">
+        <picture>
+          <img alt="Xiaozhi AI joins requirements interviews as a productivity tool that helps product managers, FDEs, and pre-sales engineers run better interviews
+" src="../images/demo01.png" /></picture>
+      </a>
+    </td>
+    <td>&nbsp;</td>
+    <td>&nbsp;</td>
+    <td>&nbsp;</td>
+    <td>&nbsp;</td>
+  </tr>
+</table>
+
+***
+
 <a id="quick-start"></a>
 
 ## 🚀 Three lines to start

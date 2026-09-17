@@ -11,11 +11,33 @@ E2E_PASSWORD='<服务实际密码>'（用户名仍是 admin）。
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import uuid
 
 import httpx
 import pytest
+
+logger = logging.getLogger(__name__)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _warm_templates():
+    """部分集成测试直接构造 SessionRuntime（不经 HTTP），依赖模板缓存有种子。
+
+    单元 conftest 也 warm 了一份，但 unit conftest 不在 integration 集合下加载；
+    这里再 warm 一次——与 unit conftest 同策略：DB 未就绪时降级为缓存空，需要
+    模板的测试会拿到 None 并立即失败（不会被静默跳过），便于定位。
+    """
+    try:
+        from app.services.template import loader
+        asyncio.run(loader.warm())
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "integration conftest._warm_templates 跳过：%s：%s",
+            type(e).__name__, e,
+        )
 
 BASE_URL = "http://localhost:8000"
 WS_BASE = "ws://localhost:8000"

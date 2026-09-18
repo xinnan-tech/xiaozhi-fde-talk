@@ -84,12 +84,28 @@ class SessionManager:
         #（并发口径是全局 = FunASR 房间容量，故不同用户并发 start 也须串行）。
         # 多 worker 推迟 v2（需 Redis 共享计数 + 分布式锁）。
         self._start_lock = asyncio.Lock()
+        # 握手 + 接管共用的会话级锁（issue #199）：让 conflict 检查 + bind 与
+        # takeover 的 kicked + bind + evict 原子化，消除并发握手留下的鬼连接。
+        # end()/delete() 释放；suspended 故意保留（reconnect 仍需串行化）。
+        self._handshake_locks: dict[str, asyncio.Lock] = {}
 
     # ---- 查询 ----
     async def get(self, session_id: str) -> Optional[SessionState]:
         if session_id in self._active:
             return self._active[session_id]
         return await interview_repo.get_state_auto(session_id)
+
+    def get_handshake_lock(self, session_id: str) -> asyncio.Lock:
+        """取会话级握手锁：让 _handshake 与 _on_takeover 的 critical section
+        原子化（issue #199）。同一会话内串行，跨会话不互锁。
+
+        锁顺序：handshake_lock → _send_lock（_bind_core 的 kicked 走 _raw_send）。
+        禁止新代码反过来在 _send_lock 持有期间调握手路径，否则死锁。
+        """
+        lock = self._handshake_locks.get(session_id)
+        if lock is None:
+            lock = self._handshake_locks[session_id] = asyncio.Lock()
+        return lock
 
     async def list_for_user(
         self, user_id: str, statuses: Optional[list[SessionStatus]] = None
@@ -219,7 +235,12 @@ class SessionManager:
             await self._transition(state, SessionStatus.ENDED)
         if state.session.ended_at is None:
             state.session.ended_at = datetime.now(timezone.utc)
-        await interview_repo.save_state_auto(state)
+        try:
+            await interview_repo.save_state_auto(state)
+        finally:
+            # 释放握手锁：会话已结束，留着 Lock 占内存无意义。try/finally 保证
+            # save 异常时也释放。
+            self._handshake_locks.pop(session_id, None)
         log_event("session_ended", session=session_id, user=state.user_id,
                   reason="manual", status="ended")
         return state
@@ -240,6 +261,8 @@ class SessionManager:
         await interview_repo.save_state_auto(state)
         log_event("session_suspended", session=session_id, user=state.user_id,
                   reason="manual", status="suspended")
+        # 故意不 pop：suspended 会话可由用户 resume 重新握手，runtime 可能仍存活，
+        # 保留锁让 reconnect 与并发 takeover 继续串行化。end()/delete() 才释放。
         return state
 
     async def resume(self, session_id: str) -> SessionState:
@@ -366,7 +389,11 @@ class SessionManager:
         self._active.pop(session_id, None)
         self._last_activity_at.pop(session_id, None)
         self._cancel_grace(session_id)
-        await interview_repo.delete_auto(session_id)
+        try:
+            await interview_repo.delete_auto(session_id)
+        finally:
+            # 释放握手锁：见 end()。try/finally 防异常路径下锁残留。
+            self._handshake_locks.pop(session_id, None)
         log_event("session_deleted", session=session_id, user=state.user_id,
                   status="deleted")
 

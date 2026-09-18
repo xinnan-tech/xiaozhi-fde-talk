@@ -12,8 +12,13 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from app.services.sessions.runtime import SessionRuntime
 from app.transport.websocket.handler import WSHandler
+
+# 每个测试清 manager._handshake_locks——跨 event loop 复用 asyncio.Lock 会 RuntimeError。
+pytestmark = pytest.mark.usefixtures("_reset_handshake_locks")
 
 
 def _binds(rt: SessionRuntime) -> None:
@@ -183,6 +188,10 @@ async def test_on_takeover_reactivates_parked_runtime_when_owner_gone(monkeypatc
 
     reactivated = MagicMock()
     reactivated._fsm.is_terminated = False
+    # MagicMock 默认 truthy，必须显式置 None，否则 _on_takeover 锁内冲突守卫
+    # 误判已绑定。
+    reactivated._send_fn = None
+    reactivated._bound_client_id = None
     reactivated.state = MagicMock()
     reactivated.seq.resume_from_seq = 7
     reactivated.takeover = AsyncMock()
@@ -213,3 +222,48 @@ async def test_on_takeover_refuses_if_terminated(monkeypatch):
     await h._on_takeover()
     assert fails == ["session_ended"]
     rt.takeover.assert_not_called()
+
+
+async def test_on_takeover_refuses_if_terminated_during_takeover(monkeypatch):
+    """接管 await 让出期间 runtime 被并发路径置 TERMINATED（_suspend_idle 等）→
+    锁内出口重检捕获，回 session_ended + 4406，不发 hello（issue #199 同质鬼连接）。
+
+    与 test_on_takeover_refuses_if_terminated 的区别：入口重检 is_terminated=False 通过、
+    takeover 被调用、takeover 内部 await 让出期间 _fsm 翻 True → 醒来后必须重检，
+    否则 _bind_core 已静默 return → 锁外照发 hello → B 收 hello 但 _send_fn 未绑。
+    """
+    import app.transport.websocket.handler as h_mod
+
+    fake_ws = AsyncMock()
+    h = WSHandler(fake_ws, "s1")
+    h.client_id = "clientB"
+
+    rt = MagicMock()
+    rt._fsm.is_terminated = False   # 入口守卫视 false → 不立即 _fail
+    rt._send_fn = AsyncMock()       # 有旧 owner（reactivated=False）→ 不走 conflict 守卫
+
+    async def takeover_side_effect(send, client_id, evict_fn, reason=""):
+        # 模拟并发 _suspend_idle 抢在 _bind_core 之前完成 _teardown
+        rt._fsm.is_terminated = True
+
+    rt.takeover = AsyncMock(side_effect=takeover_side_effect)
+    rt.state = MagicMock()
+    h.runtime = rt
+
+    fails = []
+
+    async def fake_fail(ws, state=None, *, code, i18n_key=None, close_code=None, **params):
+        fails.append((code, close_code))
+
+    monkeypatch.setattr(h_mod, "_fail", fake_fail)
+
+    await h._on_takeover()
+
+    rt.takeover.assert_awaited_once()
+    # 出口重检命中 → 回 session_ended + 4406
+    assert fails == [("session_ended", 4406)]
+    # hello 严禁发出——否则就是 issue #199 同质鬼连接
+    hello_frames = [c for c in fake_ws.send_json.call_args_list
+                    if c.args and isinstance(c.args[0], dict)
+                    and c.args[0].get("type") == "hello"]
+    assert hello_frames == []

@@ -331,35 +331,49 @@ class WSHandler:
         # 决定是否接管。同身份（同标签刷新/断网重连，client_id 相同）不算竞争，走下方
         # 正常 bind 无缝复用 runtime。pending 期间不调 manager副作用已在 start/on_reconnect
         # 完成且对 IN_PROGRESS 幂等；pending 断连时 _cleanup 因 _send_fn != self._send 而 no-op。
-        if (self.runtime._send_fn is not None
-                and self.runtime._bound_client_id != self.client_id):
-            await self._send({
-                "type": "connection.conflict",
-                "i18n_key": Keys.WS_CONNECTION_CONFLICT.value,
-                "i18n_params": {},
-                "message": i18n_t(Keys.WS_CONNECTION_CONFLICT, locale=state.locale),
-            })
-            logger.info("连接检测到已有 owner，进入待决（pending）：session=%s owner=%s new=%s",
-                        self.session_id, self.runtime._bound_client_id, self.client_id)
-            return True  # 进入 _loop 等 connection.takeover；未 bind
+        #
+        # 锁住 conflict 检查 + hello + bind（issue #199）：防止并发握手双方都看到
+        # _send_fn is None 都 bind，留下 TCP 开着但消息被静默丢弃的「鬼连接」。
+        async with manager.get_handshake_lock(self.session_id):
+            # 防御性重检 terminated：并发路径（idle suspend / REST end / liveness
+            # 过期）可能在锁前把 runtime 置 TERMINATED。
+            if self.runtime._fsm.is_terminated:
+                await _fail(self.ws, code="session_ended", close_code=4406)
+                return False
+            if (self.runtime._send_fn is not None
+                    and self.runtime._bound_client_id != self.client_id):
+                await self._send({
+                    "type": "connection.conflict",
+                    "i18n_key": Keys.WS_CONNECTION_CONFLICT.value,
+                    "i18n_params": {},
+                    "message": i18n_t(Keys.WS_CONNECTION_CONFLICT, locale=state.locale),
+                })
+                logger.info("连接检测到已有 owner，进入待决（pending）：session=%s owner=%s new=%s",
+                            self.session_id, self.runtime._bound_client_id, self.client_id)
+                return True  # 进入 _loop 等 connection.takeover；未 bind
 
-        # 先回 hello，再 bind（bind 会触发首算 coaching.update / 重连 snapshot replay）。
-        # 顺序保证客户端先收到 hello（含 resume_from_seq），再收到 coaching（design：hello 后首算失败不影响连接）
-        await self._send({
-            "type": "hello",
-            "session_id": self.session_id,
-            "protocol_version": PROTOCOL_VERSION,
-            "audio_params": msg.get("audio_params", {}),
-            "resume_from_seq": self.runtime.seq.resume_from_seq,
-        })
-        if is_reconnect:
-            logger.info(
-                "WebSocket 重连接管已有会话：session=%s resume_from_seq=%d",
-                self.session_id, self.runtime.seq.resume_from_seq,
-            )
-        else:
-            logger.info("WebSocket 新建会话连接：session=%s", self.session_id)
-        await self.runtime.bind(self._send, self.client_id, self._self_evict)
+            # 先回 hello，再 bind（bind 会触发首算 coaching.update / 重连 snapshot replay）。
+            # 顺序保证客户端先收到 hello（含 resume_from_seq），再收到 coaching（design：hello 后首算失败不影响连接）
+            await self._send({
+                "type": "hello",
+                "session_id": self.session_id,
+                "protocol_version": PROTOCOL_VERSION,
+                "audio_params": msg.get("audio_params", {}),
+                "resume_from_seq": self.runtime.seq.resume_from_seq,
+            })
+            # hello 发送期间 runtime 可能被并发置 TERMINATED——再判一次避免「hello 已发但
+            # _bind_core 静默 return → send_fn 未绑」的鬼连接（_bind_core 内部仍保 defense-in-depth）。
+            if self.runtime._fsm.is_terminated:
+                await _fail(self.ws, code="session_ended", close_code=4406)
+                return False
+            if is_reconnect:
+                logger.info(
+                    "WebSocket 重连接管已有会话：session=%s resume_from_seq=%d",
+                    self.session_id, self.runtime.seq.resume_from_seq,
+                )
+            else:
+                logger.info("WebSocket 新建会话连接：session=%s", self.session_id)
+            await self.runtime.bind(self._send, self.client_id, self._self_evict)
         return True
 
     async def _loop(self) -> None:
@@ -456,6 +470,9 @@ class WSHandler:
 
         只能由 pending（未 bind）连接走到（owner 的常规入站走不到这里：其
         _send_fn == self._send，_dispatch 在 ownership 守卫前已分流 takeover）。
+
+        与 _handshake 共用 manager.get_handshake_lock（issue #199）：takeover 的
+        kicked + bind + evict 必须与并发握手 / 接管原子。
         """
         rt = self.runtime
         if rt is None:
@@ -463,15 +480,49 @@ class WSHandler:
         if rt._fsm.is_terminated:
             await _fail(self.ws, code="session_ended", close_code=4406)
             return
+        # 进入时同步读 rt._send_fn 决定走不走冲突守卫。必须放在第一次 await 之前——
+        # asyncio.gather 并发下延后读取会被 _bind_core 同步写覆盖、把「并发 takeover」
+        # 错认成「合法接管」。
+        reactivated = rt._send_fn is None
         # 旧 owner 可能在待决期间自行离开（runtime 已 unbind / 被 park）。重新取回：
         # 取消 park 的存活窗口定时器，并让寄存账目回到 _active，避免接管后无人回收。
         # 传 manager 现值而非 rt.state——待决期间用户可能 PATCH 过 base_info/goal。
-        if rt._send_fn is None:
+        if reactivated:
             fresh = await manager.get(self.session_id) or rt.state
             rt = registry.get_or_create(self.session_id, fresh, get_policy("ws"))
             rt.ainit()
             self.runtime = rt
-        await rt.takeover(self._send, self.client_id, self._self_evict)
+        async with manager.get_handshake_lock(self.session_id):
+            rt = self.runtime
+            # 防御性重检 terminated（当前路径不触发，parked terminated 会 fall through 新建）。
+            if rt._fsm.is_terminated:
+                await _fail(self.ws, code="session_ended", close_code=4406)
+                return
+            # 冲突守卫：仅 reactivated 路径。旧 owner 已 gone，锁内发现 _send_fn 已被
+            # 并发 takeover 覆盖（非自己 client_id）→ 不踢，发 conflict 让本端决策。
+            # 合法接管（A 仍 bound，reactivated=False）不走此守卫，B 正常接管 A。
+            if (reactivated
+                    and rt._send_fn is not None
+                    and rt._bound_client_id != self.client_id):
+                await self._send({
+                    "type": "connection.conflict",
+                    "i18n_key": Keys.WS_CONNECTION_CONFLICT.value,
+                    "i18n_params": {},
+                    "message": i18n_t(
+                        Keys.WS_CONNECTION_CONFLICT, locale=rt.state.locale),
+                })
+                logger.info(
+                    "接管检测到并发抢占，进入 pending：session=%s owner=%s new=%s",
+                    self.session_id, rt._bound_client_id, self.client_id)
+                return
+            await rt.takeover(self._send, self.client_id, self._self_evict)
+            # 锁内出口重检 terminated：takeover 内部 await 让出期间，runtime 可能被并发
+            # 路径（_suspend_idle 等）置 TERMINATED → _bind_core 静默 return → _send_fn
+            # 未绑。再判一次避免锁外发 hello 制造「B 收 hello 但 send_fn 未绑」的鬼连接
+            # （issue #199 同质）。
+            if rt._fsm.is_terminated:
+                await _fail(self.ws, code="session_ended", close_code=4406)
+                return
         logger.info("连接已接管会话：session=%s client=%s", self.session_id, self.client_id)
         # 接管成功 → 回 hello（含 resume_from_seq），前端据此开麦发 listen:start。
         # takeover 内部已 bind（推了 coaching snapshot），hello 随后到，前端正常开麦。

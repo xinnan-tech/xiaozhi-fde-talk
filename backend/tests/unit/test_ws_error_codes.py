@@ -11,6 +11,9 @@ from app.core.exceptions import IllegalTransitionError  # noqa: F401
 from app.domain.session import SessionStatus
 from app.transport.websocket.handler import WSHandler
 
+# 每个测试清 manager._handshake_locks——跨 event loop 复用 asyncio.Lock 会 RuntimeError。
+pytestmark = pytest.mark.usefixtures("_reset_handshake_locks")
+
 
 async def test_internal_error_does_not_leak_detail(monkeypatch):
     """内部异常回前端的 message 不含 str(e)。"""
@@ -167,6 +170,9 @@ async def test_handshake_sends_connection_conflict_with_i18n_params(monkeypatch)
     rt._bound_client_id = "clientA"   # 与 hello 里的 clientB 不同 → 触发 conflict
     rt.state = state
     rt.ainit = lambda: None
+    # MagicMock 默认 truthy，必须显式置 False，否则 _handshake 锁内 is_terminated
+    # 守卫误判 → 直接 _fail。
+    rt._fsm.is_terminated = False
     monkeypatch.setattr(h_mod.registry, "get_or_create", MagicMock(return_value=rt))
     monkeypatch.setattr(h_mod.registry, "is_terminating", lambda sid: False)
     monkeypatch.setattr(h_mod, "get_policy",

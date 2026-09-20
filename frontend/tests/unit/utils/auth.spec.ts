@@ -43,6 +43,7 @@ import {
   isBootstrapped,
   setBootstrapped,
   bootstrapSession,
+  retryBootstrapSession,
   hasPerms,
   clearSession
 } from "@/utils/auth";
@@ -116,6 +117,27 @@ describe("utils/auth — bootstrapSession / isBootstrapped", () => {
     const result = await bootstrapSession();
     expect(result).toBe("transient_error");
     expect(isBootstrapped()).toBe(true);
+  });
+
+  it("transient_error 在受控重试成功后恢复登录态，并在冷却期内合并请求", async () => {
+    meApiMock.mockRejectedValueOnce({
+      response: { status: 503 },
+      message: "Service Unavailable"
+    });
+    expect(await bootstrapSession()).toBe("transient_error");
+
+    meApiMock.mockResolvedValueOnce({
+      id: "u-2",
+      username: "alice",
+      role: "admin"
+    });
+    expect(await retryBootstrapSession()).toBe("authenticated");
+    expect(isBootstrapped()).toBe(true);
+    expect(meApiMock).toHaveBeenCalledTimes(2);
+
+    // 已恢复后不应再发起新的 /auth/me。
+    expect(await retryBootstrapSession()).toBe("authenticated");
+    expect(meApiMock).toHaveBeenCalledTimes(2);
   });
 
   it("bootstrapSession 每次启动会先清掉旧版残留 localStorage[user-info]", async () => {

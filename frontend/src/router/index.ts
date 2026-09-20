@@ -20,7 +20,12 @@ import {
   type RouteComponent,
   createRouter
 } from "vue-router";
-import { isBootstrapped, clearSession, getBootstrapResult } from "@/utils/auth";
+import {
+  isBootstrapped,
+  clearSession,
+  getBootstrapResult,
+  retryBootstrapSession
+} from "@/utils/auth";
 
 /** 自动导入全部静态路由，无需再手动引入！匹配 src/router/modules 目录（任何嵌套级别）中具有 .ts 扩展名的所有文件，除了 remaining.ts 文件
  * 如何匹配所有文件请参考 fast-glob 的通配规则说明。
@@ -126,11 +131,18 @@ router.beforeEach(async (to: ToRouteType, _from, next) => {
     to.path === "/login" ? next(_from.fullPath || "/home") : next();
   }
 
-  // 会话只在应用启动时 bootstrap 一次。启动时若遇到网络/5xx，保留原有
-  // 的 transient_error 语义：允许当前路由进入，避免把临时故障误判成未登录。
-  if (!isBootstrapped() && getBootstrapResult() === "transient_error") {
-    next();
-    return;
+  // 会话只在应用启动时 bootstrap 一次。启动时若遇到网络/5xx，访问受保护
+  // 路由时做一次带冷却和并发合并的重试；白名单页面不触发 /auth/me。
+  if (
+    !isBootstrapped() &&
+    getBootstrapResult() === "transient_error" &&
+    !whiteList.includes(to.path)
+  ) {
+    const retryResult = await retryBootstrapSession();
+    if (retryResult === "transient_error") {
+      next();
+      return;
+    }
   }
 
   if (isBootstrapped()) {

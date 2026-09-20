@@ -13,8 +13,8 @@ import { storageLocal } from "@pureadmin/utils";
  *   - WS 握手升级时浏览器自动带（同源路径），后端优先读 cookie + 兼容
  *     bearer.<token> subprotocol 兜底（脚本 / chaos 客户端）。
  *   - 401 静默续 access：调 POST /auth/refresh，refresh cookie 自动附，无 body。
- *   - F5 / 关页面后 cookie 仍在；main.ts 启动 + 路由守卫首跳前各调一次
- *     bootstrapSession() 重建 Pinia 用户字段（username / role / userId）。
+ *   - F5 / 关页面后 cookie 仍在；应用启动时调用 bootstrapSession() 重建
+ *     Pinia 用户字段（username / role / userId），路由守卫只做受控重试。
  *
  * 本文件只剩「会话生命周期」API：bootstrapSession / isBootstrapped /
  * setBootstrapped / clearSession / hasPerms。setToken / getToken / removeToken
@@ -37,6 +37,9 @@ function migrateStaleStorage(): void {
  *  isBootstrapped() && ...)`` 靠 .value 访问让 Vue 追踪响应式依赖。*/
 const bootstrapped = ref(false);
 let lastBootstrapResult: BootstrapResult | undefined;
+let transientRetryPromise: Promise<BootstrapResult> | null = null;
+let lastTransientRetryAt = 0;
+const TRANSIENT_RETRY_COOLDOWN_MS = 10_000;
 
 export function isBootstrapped(): boolean {
   return bootstrapped.value;
@@ -44,6 +47,11 @@ export function isBootstrapped(): boolean {
 
 export function setBootstrapped(v: boolean): void {
   bootstrapped.value = v;
+  if (v) {
+    lastBootstrapResult = "authenticated";
+  } else {
+    lastBootstrapResult = "unauthenticated";
+  }
 }
 
 export function getBootstrapResult(): BootstrapResult | undefined {
@@ -65,8 +73,8 @@ export type BootstrapResult =
  *  - 401 / cookie 缺失：bootstrapResult = "unauthenticated"，应清 session。
  *  - 5xx / 网络错：bootstrapResult = "transient_error"，保留 Pinia 当前态。
  *
- * 必须在 main.ts 启动 + Router 守卫里各调一次：main.ts 启动时建立首屏态，
- *  守卫负责 F5 后首跳。 */
+ * 应用启动时调用一次；路由守卫只在启动阶段遇到 transient_error 且访问
+ * 受保护路由时调用 retryBootstrapSession() 做受控重试。 */
 export async function bootstrapSession(): Promise<BootstrapResult> {
   migrateStaleStorage();
   try {
@@ -104,6 +112,30 @@ export async function bootstrapSession(): Promise<BootstrapResult> {
     lastBootstrapResult = "transient_error";
     return "transient_error";
   }
+}
+
+/**
+ * transient_error 的受控重试：共享并发请求，并设置冷却时间，避免每次路由
+ * 切换都重新请求 /auth/me。401 会转为 unauthenticated，成功会恢复会话。
+ */
+export async function retryBootstrapSession(): Promise<BootstrapResult> {
+  if (lastBootstrapResult !== "transient_error") {
+    return lastBootstrapResult ?? "unauthenticated";
+  }
+
+  const now = Date.now();
+  if (now - lastTransientRetryAt < TRANSIENT_RETRY_COOLDOWN_MS) {
+    return "transient_error";
+  }
+
+  if (!transientRetryPromise) {
+    lastTransientRetryAt = now;
+    transientRetryPromise = bootstrapSession().finally(() => {
+      transientRetryPromise = null;
+    });
+  }
+
+  return transientRetryPromise;
 }
 
 /** 清 Pinia + 重置 bootstrap 标志。logout / 401 过期路径复用。

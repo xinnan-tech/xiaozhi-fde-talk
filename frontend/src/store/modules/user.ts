@@ -94,5 +94,5 @@ export function useUserStoreHook() {
   return useUserStore(store);
 }
 
-/** 暴露给 main.ts / Router 守卫复用：F5 后从 /auth/me 重建会话。 */
+/** 暴露给 main.ts 复用：应用启动时从 /auth/me 重建会话。 */
 export { bootstrapSession, isBootstrapped };

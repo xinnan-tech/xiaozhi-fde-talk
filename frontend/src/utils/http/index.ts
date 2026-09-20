@@ -236,8 +236,8 @@ class PureHttp {
 
    * HttpOnly cookie 由后端清，浏览器收到 Set-Cookie Max-Age=0 后自动移除。
    * 前端不接管 cookie；只清 Pinia 的 user 元数据 + bootstrap 标志。
-   * isBootstrapped() 在 main.ts / Router 守卫里作为「是否调用 /auth/me
-   * 重建会话」的判据。*/
+   * isBootstrapped() 由 main.ts 启动 bootstrap 及其受控重试维护，路由守卫
+   * 只读取会话状态，不在普通路由切换时重复调用 /auth/me。*/
   private static clearSession() {
     clearSession();
   }

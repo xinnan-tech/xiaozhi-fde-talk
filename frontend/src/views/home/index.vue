@@ -246,7 +246,6 @@ const clearLocalViewState = () => {
 
 const logOut = () => {
   userStore.logOut();
-  clearLocalViewState();
 };
 
 /** 获取访谈统计 */

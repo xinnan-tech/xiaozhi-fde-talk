@@ -48,7 +48,10 @@ async def test_export_route_offloads_export_to_thread(monkeypatch):
 
     monkeypatch.setattr(reports_route, "export_report", slow_export)
 
-    resp = await reports_route.export_interview_report("sess-1", "md", user=object())
+    resp = await reports_route.export_interview_report(
+        "sess-1", "md",
+        user=SimpleNamespace(user_id="u-1", role="admin"),
+    )
 
     assert resp.status_code == 200
     assert seen_thread, "export 未被调用"

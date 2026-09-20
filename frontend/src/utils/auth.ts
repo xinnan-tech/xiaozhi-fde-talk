@@ -36,6 +36,7 @@ function migrateStaleStorage(): void {
  * 必须是 ref（不是 plain let）：home 视图 ``isLoggedIn = computed(() =>
  *  isBootstrapped() && ...)`` 靠 .value 访问让 Vue 追踪响应式依赖。*/
 const bootstrapped = ref(false);
+let lastBootstrapResult: BootstrapResult | undefined;
 
 export function isBootstrapped(): boolean {
   return bootstrapped.value;
@@ -43,6 +44,10 @@ export function isBootstrapped(): boolean {
 
 export function setBootstrapped(v: boolean): void {
   bootstrapped.value = v;
+}
+
+export function getBootstrapResult(): BootstrapResult | undefined {
+  return lastBootstrapResult;
 }
 
 /** bootstrap 结果分类——告诉调用方为什么失败，路由守卫据此决定是否清 session。
@@ -71,6 +76,7 @@ export async function bootstrapSession(): Promise<BootstrapResult> {
     store.SET_USER_ID(me.id);
     store.SET_ROLE(me.role);
     setBootstrapped(true);
+    lastBootstrapResult = "authenticated";
     return "authenticated";
   } catch (err) {
     // 只信任 response.status === 401 —— 这是后端显式告知「cookie 真过期 /
@@ -88,12 +94,14 @@ export async function bootstrapSession(): Promise<BootstrapResult> {
       ?.status;
     if (status === 401) {
       setBootstrapped(false);
+      lastBootstrapResult = "unauthenticated";
       return "unauthenticated";
     }
     console.warn(
       "[bootstrapSession] transient error, keeping session:",
       status ?? (err as Error)?.message
     );
+    lastBootstrapResult = "transient_error";
     return "transient_error";
   }
 }
@@ -102,6 +110,7 @@ export async function bootstrapSession(): Promise<BootstrapResult> {
  *  HttpOnly cookie 由后端通过 Set-Cookie Max-Age=0 清除，前端不动 cookie。 */
 export function clearSession(): void {
   setBootstrapped(false);
+  lastBootstrapResult = "unauthenticated";
   const store = useUserStoreHook();
   store.SET_USERNAME("");
   store.SET_USER_ID("");

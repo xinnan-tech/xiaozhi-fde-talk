@@ -237,12 +237,16 @@ const handleAvatarSelectChange = (option: SelectOption) => {
   }
 };
 
-const logOut = () => {
-  userStore.logOut();
+const clearLocalViewState = () => {
   statusList.value.forEach(item => {
     item.count = 0;
   });
   interviewList.value = [];
+};
+
+const logOut = () => {
+  userStore.logOut();
+  clearLocalViewState();
 };
 
 /** 获取访谈统计 */
@@ -309,7 +313,8 @@ watch(
   isLoggedIn,
   async (loggedIn: boolean) => {
     if (!loggedIn) {
-      logOut();
+      // 初始未登录是正常状态，只清理页面数据，不调用后端 logout。
+      clearLocalViewState();
       return;
     }
     await refreshAfterCreateDebounced();

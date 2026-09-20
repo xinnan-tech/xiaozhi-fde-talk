@@ -4,9 +4,14 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from app.domain.session import SessionStatus
 from app.transport.websocket import handler as h_mod
 from app.transport.websocket.handler import WSHandler
+
+# 每个测试清 manager._handshake_locks——跨 event loop 复用 asyncio.Lock 会 RuntimeError。
+pytestmark = pytest.mark.usefixtures("_reset_handshake_locks")
 
 
 def _mock_ws():
@@ -39,6 +44,9 @@ async def test_handshake_hello_includes_protocol_version(monkeypatch):
     rt.bind = AsyncMock()
     rt._send_fn = None
     rt._bound_client_id = None
+    # MagicMock 默认 truthy，必须显式置 False，否则 _handshake 锁内 is_terminated
+    # 守卫误判 → 直接 _fail。
+    rt._fsm.is_terminated = False
     monkeypatch.setattr(h_mod.registry, "get_or_create", lambda *a, **k: rt)
     monkeypatch.setattr(h_mod.registry, "is_terminating", lambda sid: False)
 

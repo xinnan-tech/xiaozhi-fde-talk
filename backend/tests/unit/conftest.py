@@ -61,3 +61,17 @@ def wait_for_tasks():
     async def _wait() -> None:
         await asyncio.sleep(0.15)
     return _wait
+
+
+@pytest.fixture
+def _reset_handshake_locks():
+    """pytest-asyncio auto 模式每个测试一个 event loop，跨 loop 复用 asyncio.Lock
+    会 RuntimeError——每个测试清掉一次。
+
+    非 autouse：仅涉及 _handshake / _on_takeover 的测试用 pytestmark.usefixtures
+    显式 opt-in，避免侵入与握手锁无关的旧测试。
+    """
+    from app.services.sessions.manager import manager
+    manager._handshake_locks.clear()
+    yield
+    manager._handshake_locks.clear()

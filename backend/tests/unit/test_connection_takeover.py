@@ -12,9 +12,14 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from app.core.i18n.messages import Keys
 from app.services.sessions.runtime import SessionRuntime
 from app.transport.websocket.handler import WSHandler
+
+# 每个测试清 manager._handshake_locks——跨 event loop 复用 asyncio.Lock 会 RuntimeError。
+pytestmark = pytest.mark.usefixtures("_reset_handshake_locks")
 
 
 def _binds(rt: SessionRuntime) -> None:
@@ -218,6 +223,10 @@ async def test_on_takeover_reactivates_parked_runtime_when_owner_gone(monkeypatc
 
     reactivated = MagicMock()
     reactivated._fsm.is_terminated = False
+    # MagicMock 默认 truthy，必须显式置 None，否则 _on_takeover 锁内冲突守卫
+    # 误判已绑定。
+    reactivated._send_fn = None
+    reactivated._bound_client_id = None
     reactivated.state = MagicMock()
     reactivated.seq.resume_from_seq = 7
     reactivated.takeover = AsyncMock()

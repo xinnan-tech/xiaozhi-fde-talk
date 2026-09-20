@@ -11,11 +11,30 @@ E2E_PASSWORD='<服务实际密码>'（用户名仍是 admin）。
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 
 import httpx
 import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _warm_templates():
+    """部分集成测试直接构造 SessionRuntime（不经 HTTP），依赖模板缓存有种子。
+
+    单元 conftest 也 warm 了一份，但 unit conftest 不在 integration 集合下加载；
+    集成测试反正要 DB，warm 失败就 fail-fast——而不是让 `_cache` 空着、错误位置
+    甩到用例层 `tpl.coaching.must_ask` 的 NPE。
+    """
+    from app.services.template import loader
+    try:
+        asyncio.run(loader.warm())
+    except Exception as e:
+        pytest.fail(
+            f"integration tests require DB-backed template warm: "
+            f"{type(e).__name__}: {e}"
+        )
 
 BASE_URL = "http://localhost:8000"
 WS_BASE = "ws://localhost:8000"

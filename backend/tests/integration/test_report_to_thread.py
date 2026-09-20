@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from app.domain.session import SessionStatus
 from app.transport.http.routes import reports as reports_route
 
 
@@ -22,19 +24,23 @@ from app.transport.http.routes import reports as reports_route
 async def test_export_route_offloads_export_to_thread(monkeypatch):
     """导出路由必须把 export offload 到工作线程。"""
     # 绕开归属校验与报告生成（本测试只关心 export 的执行线程）
-    async def _noop(*args, **kwargs):
-        return None
+    fake_state = SimpleNamespace(
+        session=SimpleNamespace(status=SessionStatus.DONE),
+    )
+
+    async def _own(*args, **kwargs):
+        return fake_state
 
     async def _ready(*args, **kwargs):
         return ("ready", "# 报告\n\n正文")
 
-    monkeypatch.setattr(reports_route, "_own_session_or_404", _noop)
+    monkeypatch.setattr(reports_route, "_own_session_or_404", _own)
     monkeypatch.setattr(reports_route, "get_or_generate", _ready)
 
     main_thread = threading.main_thread()
     seen_thread: list[threading.Thread] = []
 
-    def slow_export(md, fmt):
+    def slow_export(md, fmt, language="en"):
         # time.sleep 占住调用线程：若在事件循环线程，则冻住整个循环
         seen_thread.append(threading.current_thread())
         time.sleep(0.03)
@@ -42,7 +48,10 @@ async def test_export_route_offloads_export_to_thread(monkeypatch):
 
     monkeypatch.setattr(reports_route, "export_report", slow_export)
 
-    resp = await reports_route.export_interview_report("sess-1", "md", user=object())
+    resp = await reports_route.export_interview_report(
+        "sess-1", "md",
+        user=SimpleNamespace(user_id="u-1", role="admin"),
+    )
 
     assert resp.status_code == 200
     assert seen_thread, "export 未被调用"

@@ -10,6 +10,7 @@ import {
 } from "@/api/user";
 import {
   bootstrapSession,
+  invalidateSessionRequests,
   isBootstrapped,
   setBootstrapped
 } from "@/utils/auth";
@@ -35,6 +36,7 @@ export const useUserStore = defineStore("pure-user", {
     },
 
     async loginByUsername(data: LoginRequest): Promise<LoginResult> {
+      invalidateSessionRequests();
       const result = await loginApi(data);
       if (result?.user) {
         this.SET_USERNAME(data.username);
@@ -46,6 +48,7 @@ export const useUserStore = defineStore("pure-user", {
     },
 
     async registerByUsername(data: RegisterRequest): Promise<LoginResult> {
+      invalidateSessionRequests();
       const result = await registerApi(data);
       if (result?.user) {
         this.SET_USERNAME(result.user.username);
@@ -73,14 +76,13 @@ export const useUserStore = defineStore("pure-user", {
      * 只动单例 pinia，会漏改活跃实例。
      */
     logOut() {
-      logoutApi()
-        .catch(e => {
-          // eslint-disable-next-line no-console
-          console.warn(
-            "[user.logOut] revoke failed:",
-            e?.response?.status ?? e?.message ?? "unknown"
-          );
-        });
+      invalidateSessionRequests();
+      logoutApi().catch(e => {
+        console.warn(
+          "[user.logOut] revoke failed:",
+          e?.response?.status ?? e?.message ?? "unknown"
+        );
+      });
       this.username = "";
       this.userId = "";
       this.role = "user";

@@ -37,6 +37,7 @@ function migrateStaleStorage(): void {
  *  isBootstrapped() && ...)`` 靠 .value 访问让 Vue 追踪响应式依赖。*/
 const bootstrapped = ref(false);
 let lastBootstrapResult: BootstrapResult | undefined;
+let sessionGeneration = 0;
 let transientRetryPromise: Promise<BootstrapResult> | null = null;
 let lastTransientRetryAt = 0;
 const TRANSIENT_RETRY_COOLDOWN_MS = 10_000;
@@ -58,6 +59,11 @@ export function getBootstrapResult(): BootstrapResult | undefined {
   return lastBootstrapResult;
 }
 
+/** 使正在进行的 bootstrap 请求失效，避免旧响应覆盖新的登录/退出操作。 */
+export function invalidateSessionRequests(): void {
+  sessionGeneration += 1;
+}
+
 /** bootstrap 结果分类——告诉调用方为什么失败，路由守卫据此决定是否清 session。
  *
  *  - ``authenticated``：cookie 有效 + /auth/me 返 user；Pinia 已写入。
@@ -76,9 +82,13 @@ export type BootstrapResult =
  * 应用启动时调用一次；路由守卫只在启动阶段遇到 transient_error 且访问
  * 受保护路由时调用 retryBootstrapSession() 做受控重试。 */
 export async function bootstrapSession(): Promise<BootstrapResult> {
+  const generation = sessionGeneration;
   migrateStaleStorage();
   try {
     const me = await meApi();
+    if (generation !== sessionGeneration) {
+      return lastBootstrapResult ?? "unauthenticated";
+    }
     const store = useUserStoreHook();
     store.SET_USERNAME(me.username);
     store.SET_USER_ID(me.id);
@@ -100,6 +110,9 @@ export async function bootstrapSession(): Promise<BootstrapResult> {
     // 与 nginx 错误页 body 都可能塞 "401" 字样，导致已登录用户被误清 Pinia。
     const status = (err as { response?: { status?: number } })?.response
       ?.status;
+    if (generation !== sessionGeneration) {
+      return lastBootstrapResult ?? "unauthenticated";
+    }
     if (status === 401) {
       setBootstrapped(false);
       lastBootstrapResult = "unauthenticated";
@@ -123,6 +136,8 @@ export async function retryBootstrapSession(): Promise<BootstrapResult> {
     return lastBootstrapResult ?? "unauthenticated";
   }
 
+  if (transientRetryPromise) return transientRetryPromise;
+
   const now = Date.now();
   if (now - lastTransientRetryAt < TRANSIENT_RETRY_COOLDOWN_MS) {
     return "transient_error";
@@ -141,6 +156,7 @@ export async function retryBootstrapSession(): Promise<BootstrapResult> {
 /** 清 Pinia + 重置 bootstrap 标志。logout / 401 过期路径复用。
  *  HttpOnly cookie 由后端通过 Set-Cookie Max-Age=0 清除，前端不动 cookie。 */
 export function clearSession(): void {
+  invalidateSessionRequests();
   setBootstrapped(false);
   lastBootstrapResult = "unauthenticated";
   const store = useUserStoreHook();

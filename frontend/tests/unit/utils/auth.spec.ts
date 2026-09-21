@@ -44,6 +44,7 @@ import {
   setBootstrapped,
   bootstrapSession,
   retryBootstrapSession,
+  invalidateSessionRequests,
   hasPerms,
   clearSession
 } from "@/utils/auth";
@@ -119,6 +120,39 @@ describe("utils/auth — bootstrapSession / isBootstrapped", () => {
     expect(isBootstrapped()).toBe(true);
   });
 
+  it("旧 bootstrap 成功返回时不能覆盖退出后的会话状态", async () => {
+    let resolveMe!: (value: unknown) => void;
+    meApiMock.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveMe = resolve;
+      })
+    );
+
+    const pending = bootstrapSession();
+    clearSession();
+    resolveMe({ id: "u-old", username: "old-user", role: "admin" });
+
+    expect(await pending).toBe("unauthenticated");
+    expect(isBootstrapped()).toBe(false);
+  });
+
+  it("旧 bootstrap 的 401 不能覆盖新登录后的会话状态", async () => {
+    let rejectMe!: (reason: unknown) => void;
+    meApiMock.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectMe = reject;
+      })
+    );
+
+    const pending = bootstrapSession();
+    invalidateSessionRequests();
+    setBootstrapped(true);
+    rejectMe({ response: { status: 401 } });
+
+    expect(await pending).toBe("authenticated");
+    expect(isBootstrapped()).toBe(true);
+  });
+
   it("transient_error 在受控重试成功后恢复登录态，并在冷却期内合并请求", async () => {
     meApiMock.mockRejectedValueOnce({
       response: { status: 503 },
@@ -140,8 +174,37 @@ describe("utils/auth — bootstrapSession / isBootstrapped", () => {
     expect(meApiMock).toHaveBeenCalledTimes(2);
   });
 
+  it("受控重试期间的并发调用共享同一个 /auth/me 请求", async () => {
+    meApiMock.mockRejectedValueOnce({ response: { status: 503 } });
+    expect(await bootstrapSession()).toBe("transient_error");
+
+    let resolveMe!: (value: unknown) => void;
+    meApiMock.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveMe = resolve;
+      })
+    );
+
+    const realNow = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(realNow + 10_001);
+    const first = retryBootstrapSession();
+    const second = retryBootstrapSession();
+    expect(meApiMock).toHaveBeenCalledTimes(2);
+
+    resolveMe({ id: "u-3", username: "shared", role: "user" });
+    expect(await Promise.all([first, second])).toEqual([
+      "authenticated",
+      "authenticated"
+    ]);
+    expect(meApiMock).toHaveBeenCalledTimes(2);
+    nowSpy.mockRestore();
+  });
+
   it("bootstrapSession 每次启动会先清掉旧版残留 localStorage[user-info]", async () => {
-    memStore.set("user-info", { accessToken: "leaked", refreshToken: "leaked" });
+    memStore.set("user-info", {
+      accessToken: "leaked",
+      refreshToken: "leaked"
+    });
     meApiMock.mockRejectedValue({
       response: { status: 401 },
       message: "Request failed with status code 401"
@@ -196,7 +259,9 @@ describe("utils/auth — isBootstrapped 响应式（e2e 翻车回归）", () => 
     const { computed, ref, effectScope } = await import("vue");
     const scope = effectScope();
     const username = ref("");
-    const isLoggedIn = computed(() => isBootstrapped() && Boolean(username.value));
+    const isLoggedIn = computed(
+      () => isBootstrapped() && Boolean(username.value)
+    );
     scope.run(() => {
       // 初始：未 bootstrap，isLoggedIn = false
       expect(isLoggedIn.value).toBe(false);

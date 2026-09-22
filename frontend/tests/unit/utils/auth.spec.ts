@@ -46,7 +46,8 @@ import {
   retryBootstrapSession,
   invalidateSessionRequests,
   hasPerms,
-  clearSession
+  clearSession,
+  needsSessionHydration
 } from "@/utils/auth";
 
 function clearAll() {
@@ -93,6 +94,12 @@ describe("utils/auth — bootstrapSession / isBootstrapped", () => {
     expect(isBootstrapped()).toBe(true);
     setBootstrapped(false);
     expect(isBootstrapped()).toBe(false);
+  });
+
+  it("认证标记存在但 Pinia 用户为空时要求重新 hydration", () => {
+    expect(needsSessionHydration()).toBe(false);
+    setBootstrapped(true);
+    expect(needsSessionHydration()).toBe(true);
   });
 
   it("bootstrapSession 5xx → transient_error（保留 Pinia）", async () => {

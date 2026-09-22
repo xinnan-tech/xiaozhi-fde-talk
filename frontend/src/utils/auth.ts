@@ -78,6 +78,15 @@ export function getBootstrapResult(): BootstrapResult | undefined {
   return lastBootstrapResult;
 }
 
+/**
+ * HMR / 应用热替换可能保留模块级认证标记，却重建 Pinia 用户状态。
+ * 这种状态不能直接当作已登录，否则首页等依赖 username 的页面会显示匿名，
+ * 而只依赖接口响应的管理页仍然可用。调用方在应用挂载后用它补一次 /auth/me。
+ */
+export function needsSessionHydration(): boolean {
+  return isBootstrapped() && !useUserStoreHook().username;
+}
+
 /** 使正在进行的 bootstrap 请求失效，避免旧响应覆盖新的登录/退出操作。 */
 export function invalidateSessionRequests(): void {
   sessionGeneration += 1;

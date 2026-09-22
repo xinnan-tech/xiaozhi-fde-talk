@@ -18,7 +18,7 @@ import LoginDialog from "@/components/auth/LoginDialog.vue";
 import { saveInterviewApi, type CreateInterviewForm } from "@/api/interview";
 import { interviewRouteTarget } from "@/utils/interview";
 import { registrationStatusApi } from "@/api/user";
-import { bootstrapSession, needsSessionHydration } from "@/utils/auth";
+import { hydrateSessionIfNeeded } from "@/utils/auth";
 
 const { locale, t } = useI18n();
 const currentLocale = computed(() => {
@@ -91,9 +91,7 @@ const initRoutes = () => {
 onMounted(() => {
   // HMR 可能保留 auth.ts 的 bootstrapped 标记，但 Pinia 用户字段已被重建为空。
   // 应用挂载后补一次 /auth/me，保证首页、系统配置页和管理接口看到同一会话。
-  if (needsSessionHydration()) {
-    void bootstrapSession();
-  }
+  void hydrateSessionIfNeeded();
   initRoutes();
   void fetchRegistrationStatus();
 });

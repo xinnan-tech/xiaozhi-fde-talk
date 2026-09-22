@@ -47,7 +47,9 @@ import {
   invalidateSessionRequests,
   hasPerms,
   clearSession,
-  needsSessionHydration
+  needsSessionHydration,
+  hydrateSessionIfNeeded,
+  refreshSessionFromCookie
 } from "@/utils/auth";
 
 function clearAll() {
@@ -100,6 +102,47 @@ describe("utils/auth — bootstrapSession / isBootstrapped", () => {
     expect(needsSessionHydration()).toBe(false);
     setBootstrapped(true);
     expect(needsSessionHydration()).toBe(true);
+  });
+
+  it("bootstrap 标记为空但最近一次请求非未登录时仍要求 hydration", async () => {
+    meApiMock.mockRejectedValue({
+      response: { status: 503 },
+      message: "Service Unavailable"
+    });
+    expect(await bootstrapSession()).toBe("transient_error");
+    expect(isBootstrapped()).toBe(false);
+    expect(needsSessionHydration()).toBe(true);
+  });
+
+  it("需要 hydration 时共享同一个 /auth/me 请求", async () => {
+    setBootstrapped(true);
+    meApiMock.mockResolvedValue({
+      id: "u-hmr",
+      username: "hmr-user",
+      role: "admin"
+    });
+
+    const first = hydrateSessionIfNeeded();
+    const second = hydrateSessionIfNeeded();
+
+    expect(first).toBe(second);
+    expect(await first).toBe("authenticated");
+    expect(meApiMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("从 cookie 恢复会话时共享同一个 /auth/me 请求", async () => {
+    meApiMock.mockResolvedValue({
+      id: "u-cookie",
+      username: "cookie-user",
+      role: "user"
+    });
+
+    const first = refreshSessionFromCookie();
+    const second = refreshSessionFromCookie();
+
+    expect(first).toBe(second);
+    expect(await first).toBe("authenticated");
+    expect(meApiMock).toHaveBeenCalledTimes(1);
   });
 
   it("bootstrapSession 5xx → transient_error（保留 Pinia）", async () => {

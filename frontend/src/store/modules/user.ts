@@ -1,4 +1,4 @@
-import { defineStore } from "pinia";
+import { acceptHMRUpdate, defineStore } from "pinia";
 import { type userType, store, router } from "../utils";
 import {
   type LoginRequest,
@@ -91,6 +91,13 @@ export const useUserStore = defineStore("pure-user", {
     }
   }
 });
+
+// 页面脚本 HMR 可能连带重新求值 store 模块。保留现有 store state，避免
+// 用户信息被 state() 的空初始值覆盖；若 auth.ts 也被重载，再由 /auth/me
+// hydration 兜底恢复。
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useUserStore, import.meta.hot));
+}
 
 export function useUserStoreHook() {
   return useUserStore(store);

@@ -47,6 +47,7 @@ let lastBootstrapResult: BootstrapResult | undefined =
   hotState?.lastBootstrapResult;
 let sessionGeneration = hotState?.sessionGeneration ?? 0;
 let transientRetryPromise: Promise<BootstrapResult> | null = null;
+let sessionHydrationPromise: Promise<BootstrapResult> | null = null;
 let lastTransientRetryAt = 0;
 const TRANSIENT_RETRY_COOLDOWN_MS = 10_000;
 
@@ -64,6 +65,16 @@ export function setBootstrapped(v: boolean): void {
 }
 
 if (import.meta.hot) {
+  import.meta.hot.on("vite:afterUpdate", () => {
+    const hasUser = Boolean(useUserStoreHook().username);
+    const sessionNeedsCheck = !isBootstrapped() || !hasUser;
+    // 主动退出后不因后续 HMR 反复探测已清除的 cookie；若 HMR 同时重置了
+    // 本模块状态，lastBootstrapResult 会是 undefined，仍会进入恢复流程。
+    if (sessionNeedsCheck && lastBootstrapResult !== "unauthenticated") {
+      void refreshSessionFromCookie();
+    }
+  });
+
   import.meta.hot.dispose(data => {
     const state = data as AuthHotState;
     state.bootstrapped = bootstrapped.value;
@@ -84,7 +95,33 @@ export function getBootstrapResult(): BootstrapResult | undefined {
  * 而只依赖接口响应的管理页仍然可用。调用方在应用挂载后用它补一次 /auth/me。
  */
 export function needsSessionHydration(): boolean {
-  return isBootstrapped() && !useUserStoreHook().username;
+  const hasUsername = Boolean(useUserStoreHook().username);
+  // 用户主动退出后不应因为页面 HMR 又请求 /auth/me；除此之外，用户信息
+  // 缺失都需要尝试用 HttpOnly cookie 重建。这样即使 HMR 同时重置了
+  // bootstrapped 和 Pinia，也不会因为 bootstrapped=false 而跳过恢复。
+  return !hasUsername && lastBootstrapResult !== "unauthenticated";
+}
+
+/**
+ * HMR 后页面组件可能重新挂载，但 App.vue 不会重新执行 onMounted。
+ * 共享一次 /auth/me，避免首页和系统配置页同时挂载时重复恢复会话。
+ */
+export function hydrateSessionIfNeeded(): Promise<BootstrapResult | undefined> {
+  if (!needsSessionHydration()) return Promise.resolve(undefined);
+  return refreshSessionFromCookie();
+}
+
+/**
+ * 以 HttpOnly cookie 为唯一凭据重新向服务端确认会话。
+ * 同一轮 HMR / 页面重挂载只允许一个 /auth/me 请求。
+ */
+export function refreshSessionFromCookie(): Promise<BootstrapResult> {
+  if (!sessionHydrationPromise) {
+    sessionHydrationPromise = bootstrapSession().finally(() => {
+      sessionHydrationPromise = null;
+    });
+  }
+  return sessionHydrationPromise;
 }
 
 /** 使正在进行的 bootstrap 请求失效，避免旧响应覆盖新的登录/退出操作。 */

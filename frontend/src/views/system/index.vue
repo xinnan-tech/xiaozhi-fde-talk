@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { extractBackendError } from "@/utils/error";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -8,7 +8,7 @@ import { useDialogStoreHook } from "@/store/modules/dialog";
 import { usePermissionStoreHook } from "@/store/modules/permission";
 import { registrationStatusApi } from "@/api/user";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
-import { isBootstrapped } from "@/utils/auth";
+import { hydrateSessionIfNeeded, isBootstrapped } from "@/utils/auth";
 import {
   systemConfigApi,
   type SystemConfig,
@@ -170,7 +170,8 @@ const visibleAsrFieldKeys = computed(() => {
 });
 
 /** 是否已登录 */
-const isLoggedIn = computed(() => isBootstrapped() && Boolean(userStore.username));
+// 登录态以服务端 /auth/me 的结果为准；username 只是用户资料，不参与鉴权判断。
+const isLoggedIn = computed(() => isBootstrapped());
 
 /** 是否为配置分组 */
 const isConfigSection = (
@@ -559,9 +560,7 @@ const saveConfig = async (group: ConfigGroup) => {
     };
     const hasResponse = axiosErr?.response !== undefined;
     if (!hasResponse) {
-      ElMessage.error(
-        t("system.save_failed_network", { group: group.title })
-      );
+      ElMessage.error(t("system.save_failed_network", { group: group.title }));
     }
     // 不打印整对象：err.config.headers 含 Authorization Bearer JWT，
     // err.config.data 含 PUT payload（含 api_key 与可能的 ASR 凭证）；
@@ -792,7 +791,8 @@ const runSelfCheck = async (target: CheckTarget) => {
     // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；
     // 这里再 ElMessage.error 会形成两条 toast（#62 同源）。
     // 仅当网络错误（无 response）时给兜底——拦截器只处理有 response 的情况。
-    const hasResponse = (error as { response?: unknown })?.response !== undefined;
+    const hasResponse =
+      (error as { response?: unknown })?.response !== undefined;
     if (!hasResponse) {
       ElMessage.error(t("system.diagnostics.request_failed"));
     }
@@ -821,6 +821,11 @@ watch(
   },
   { immediate: true }
 );
+
+// 页面自身 HMR 重挂载时 App.vue 不一定会重新挂载，需要在本页补回用户信息。
+onMounted(() => {
+  void hydrateSessionIfNeeded();
+});
 
 /** locale 切换时重算 title/label，原 configGroups 已缓存翻译后的字符串 */
 watch(locale, () => {

@@ -35,9 +35,17 @@ function migrateStaleStorage(): void {
  *
  * 必须是 ref（不是 plain let）：home 视图 ``isLoggedIn = computed(() =>
  *  isBootstrapped() && ...)`` 靠 .value 访问让 Vue 追踪响应式依赖。*/
-const bootstrapped = ref(false);
-let lastBootstrapResult: BootstrapResult | undefined;
-let sessionGeneration = 0;
+type AuthHotState = {
+  bootstrapped?: boolean;
+  lastBootstrapResult?: BootstrapResult;
+  sessionGeneration?: number;
+};
+
+const hotState = import.meta.hot?.data as AuthHotState | undefined;
+const bootstrapped = ref(hotState?.bootstrapped ?? false);
+let lastBootstrapResult: BootstrapResult | undefined =
+  hotState?.lastBootstrapResult;
+let sessionGeneration = hotState?.sessionGeneration ?? 0;
 let transientRetryPromise: Promise<BootstrapResult> | null = null;
 let lastTransientRetryAt = 0;
 const TRANSIENT_RETRY_COOLDOWN_MS = 10_000;
@@ -53,6 +61,17 @@ export function setBootstrapped(v: boolean): void {
   } else {
     lastBootstrapResult = "unauthenticated";
   }
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(data => {
+    const state = data as AuthHotState;
+    state.bootstrapped = bootstrapped.value;
+    state.lastBootstrapResult = lastBootstrapResult;
+    // 让 HMR 前已经发出的 /auth/me 请求在返回后失效，避免旧模块回写 Pinia。
+    sessionGeneration += 1;
+    state.sessionGeneration = sessionGeneration;
+  });
 }
 
 export function getBootstrapResult(): BootstrapResult | undefined {

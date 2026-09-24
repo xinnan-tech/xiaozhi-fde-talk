@@ -13,8 +13,8 @@ import { storageLocal } from "@pureadmin/utils";
  *   - WS 握手升级时浏览器自动带（同源路径），后端优先读 cookie + 兼容
  *     bearer.<token> subprotocol 兜底（脚本 / chaos 客户端）。
  *   - 401 静默续 access：调 POST /auth/refresh，refresh cookie 自动附，无 body。
- *   - F5 / 关页面后 cookie 仍在；main.ts 启动 + 路由守卫首跳前各调一次
- *     bootstrapSession() 重建 Pinia 用户字段（username / role / userId）。
+ *   - F5 / 关页面后 cookie 仍在；应用启动时调用 bootstrapSession() 重建
+ *     Pinia 用户字段（username / role / userId），路由守卫只做受控重试。
  *
  * 本文件只剩「会话生命周期」API：bootstrapSession / isBootstrapped /
  * setBootstrapped / clearSession / hasPerms。setToken / getToken / removeToken
@@ -35,7 +35,21 @@ function migrateStaleStorage(): void {
  *
  * 必须是 ref（不是 plain let）：home 视图 ``isLoggedIn = computed(() =>
  *  isBootstrapped() && ...)`` 靠 .value 访问让 Vue 追踪响应式依赖。*/
-const bootstrapped = ref(false);
+type AuthHotState = {
+  bootstrapped?: boolean;
+  lastBootstrapResult?: BootstrapResult;
+  sessionGeneration?: number;
+};
+
+const hotState = import.meta.hot?.data as AuthHotState | undefined;
+const bootstrapped = ref(hotState?.bootstrapped ?? false);
+let lastBootstrapResult: BootstrapResult | undefined =
+  hotState?.lastBootstrapResult;
+let sessionGeneration = hotState?.sessionGeneration ?? 0;
+let transientRetryPromise: Promise<BootstrapResult> | null = null;
+let sessionHydrationPromise: Promise<BootstrapResult> | null = null;
+let lastTransientRetryAt = 0;
+const TRANSIENT_RETRY_COOLDOWN_MS = 10_000;
 
 export function isBootstrapped(): boolean {
   return bootstrapped.value;
@@ -43,6 +57,76 @@ export function isBootstrapped(): boolean {
 
 export function setBootstrapped(v: boolean): void {
   bootstrapped.value = v;
+  if (v) {
+    lastBootstrapResult = "authenticated";
+  } else {
+    lastBootstrapResult = "unauthenticated";
+  }
+}
+
+if (import.meta.hot) {
+  import.meta.hot.on("vite:afterUpdate", () => {
+    const hasUser = Boolean(useUserStoreHook().username);
+    const sessionNeedsCheck = !isBootstrapped() || !hasUser;
+    // 主动退出后不因后续 HMR 反复探测已清除的 cookie；若 HMR 同时重置了
+    // 本模块状态，lastBootstrapResult 会是 undefined，仍会进入恢复流程。
+    if (sessionNeedsCheck && lastBootstrapResult !== "unauthenticated") {
+      void refreshSessionFromCookie();
+    }
+  });
+
+  import.meta.hot.dispose(data => {
+    const state = data as AuthHotState;
+    state.bootstrapped = bootstrapped.value;
+    state.lastBootstrapResult = lastBootstrapResult;
+    // 让 HMR 前已经发出的 /auth/me 请求在返回后失效，避免旧模块回写 Pinia。
+    sessionGeneration += 1;
+    state.sessionGeneration = sessionGeneration;
+  });
+}
+
+export function getBootstrapResult(): BootstrapResult | undefined {
+  return lastBootstrapResult;
+}
+
+/**
+ * HMR / 应用热替换可能保留模块级认证标记，却重建 Pinia 用户状态。
+ * 这种状态不能直接当作已登录，否则首页等依赖 username 的页面会显示匿名，
+ * 而只依赖接口响应的管理页仍然可用。调用方在应用挂载后用它补一次 /auth/me。
+ */
+export function needsSessionHydration(): boolean {
+  const hasUsername = Boolean(useUserStoreHook().username);
+  // 用户主动退出后不应因为页面 HMR 又请求 /auth/me；除此之外，用户信息
+  // 缺失都需要尝试用 HttpOnly cookie 重建。这样即使 HMR 同时重置了
+  // bootstrapped 和 Pinia，也不会因为 bootstrapped=false 而跳过恢复。
+  return !hasUsername && lastBootstrapResult !== "unauthenticated";
+}
+
+/**
+ * HMR 后页面组件可能重新挂载，但 App.vue 不会重新执行 onMounted。
+ * 共享一次 /auth/me，避免首页和系统配置页同时挂载时重复恢复会话。
+ */
+export function hydrateSessionIfNeeded(): Promise<BootstrapResult | undefined> {
+  if (!needsSessionHydration()) return Promise.resolve(undefined);
+  return refreshSessionFromCookie();
+}
+
+/**
+ * 以 HttpOnly cookie 为唯一凭据重新向服务端确认会话。
+ * 同一轮 HMR / 页面重挂载只允许一个 /auth/me 请求。
+ */
+export function refreshSessionFromCookie(): Promise<BootstrapResult> {
+  if (!sessionHydrationPromise) {
+    sessionHydrationPromise = bootstrapSession().finally(() => {
+      sessionHydrationPromise = null;
+    });
+  }
+  return sessionHydrationPromise;
+}
+
+/** 使正在进行的 bootstrap 请求失效，避免旧响应覆盖新的登录/退出操作。 */
+export function invalidateSessionRequests(): void {
+  sessionGeneration += 1;
 }
 
 /** bootstrap 结果分类——告诉调用方为什么失败，路由守卫据此决定是否清 session。
@@ -60,17 +144,22 @@ export type BootstrapResult =
  *  - 401 / cookie 缺失：bootstrapResult = "unauthenticated"，应清 session。
  *  - 5xx / 网络错：bootstrapResult = "transient_error"，保留 Pinia 当前态。
  *
- * 必须在 main.ts 启动 + Router 守卫里各调一次：main.ts 启动时建立首屏态，
- *  守卫负责 F5 后首跳。 */
+ * 应用启动时调用一次；路由守卫只在启动阶段遇到 transient_error 且访问
+ * 受保护路由时调用 retryBootstrapSession() 做受控重试。 */
 export async function bootstrapSession(): Promise<BootstrapResult> {
+  const generation = sessionGeneration;
   migrateStaleStorage();
   try {
     const me = await meApi();
+    if (generation !== sessionGeneration) {
+      return lastBootstrapResult ?? "unauthenticated";
+    }
     const store = useUserStoreHook();
     store.SET_USERNAME(me.username);
     store.SET_USER_ID(me.id);
     store.SET_ROLE(me.role);
     setBootstrapped(true);
+    lastBootstrapResult = "authenticated";
     return "authenticated";
   } catch (err) {
     // 只信任 response.status === 401 —— 这是后端显式告知「cookie 真过期 /
@@ -86,22 +175,55 @@ export async function bootstrapSession(): Promise<BootstrapResult> {
     // 与 nginx 错误页 body 都可能塞 "401" 字样，导致已登录用户被误清 Pinia。
     const status = (err as { response?: { status?: number } })?.response
       ?.status;
+    if (generation !== sessionGeneration) {
+      return lastBootstrapResult ?? "unauthenticated";
+    }
     if (status === 401) {
       setBootstrapped(false);
+      lastBootstrapResult = "unauthenticated";
       return "unauthenticated";
     }
     console.warn(
       "[bootstrapSession] transient error, keeping session:",
       status ?? (err as Error)?.message
     );
+    lastBootstrapResult = "transient_error";
     return "transient_error";
   }
+}
+
+/**
+ * transient_error 的受控重试：共享并发请求，并设置冷却时间，避免每次路由
+ * 切换都重新请求 /auth/me。401 会转为 unauthenticated，成功会恢复会话。
+ */
+export async function retryBootstrapSession(): Promise<BootstrapResult> {
+  if (lastBootstrapResult !== "transient_error") {
+    return lastBootstrapResult ?? "unauthenticated";
+  }
+
+  if (transientRetryPromise) return transientRetryPromise;
+
+  const now = Date.now();
+  if (now - lastTransientRetryAt < TRANSIENT_RETRY_COOLDOWN_MS) {
+    return "transient_error";
+  }
+
+  if (!transientRetryPromise) {
+    lastTransientRetryAt = now;
+    transientRetryPromise = bootstrapSession().finally(() => {
+      transientRetryPromise = null;
+    });
+  }
+
+  return transientRetryPromise;
 }
 
 /** 清 Pinia + 重置 bootstrap 标志。logout / 401 过期路径复用。
  *  HttpOnly cookie 由后端通过 Set-Cookie Max-Age=0 清除，前端不动 cookie。 */
 export function clearSession(): void {
+  invalidateSessionRequests();
   setBootstrapped(false);
+  lastBootstrapResult = "unauthenticated";
   const store = useUserStoreHook();
   store.SET_USERNAME("");
   store.SET_USER_ID("");

@@ -1,4 +1,4 @@
-import { defineStore } from "pinia";
+import { acceptHMRUpdate, defineStore } from "pinia";
 import { type userType, store, router } from "../utils";
 import {
   type LoginRequest,
@@ -10,6 +10,7 @@ import {
 } from "@/api/user";
 import {
   bootstrapSession,
+  invalidateSessionRequests,
   isBootstrapped,
   setBootstrapped
 } from "@/utils/auth";
@@ -35,6 +36,7 @@ export const useUserStore = defineStore("pure-user", {
     },
 
     async loginByUsername(data: LoginRequest): Promise<LoginResult> {
+      invalidateSessionRequests();
       const result = await loginApi(data);
       if (result?.user) {
         this.SET_USERNAME(data.username);
@@ -46,6 +48,7 @@ export const useUserStore = defineStore("pure-user", {
     },
 
     async registerByUsername(data: RegisterRequest): Promise<LoginResult> {
+      invalidateSessionRequests();
       const result = await registerApi(data);
       if (result?.user) {
         this.SET_USERNAME(result.user.username);
@@ -73,14 +76,13 @@ export const useUserStore = defineStore("pure-user", {
      * 只动单例 pinia，会漏改活跃实例。
      */
     logOut() {
-      logoutApi()
-        .catch(e => {
-          // eslint-disable-next-line no-console
-          console.warn(
-            "[user.logOut] revoke failed:",
-            e?.response?.status ?? e?.message ?? "unknown"
-          );
-        });
+      invalidateSessionRequests();
+      logoutApi().catch(e => {
+        console.warn(
+          "[user.logOut] revoke failed:",
+          e?.response?.status ?? e?.message ?? "unknown"
+        );
+      });
       this.username = "";
       this.userId = "";
       this.role = "user";
@@ -90,9 +92,16 @@ export const useUserStore = defineStore("pure-user", {
   }
 });
 
+// 页面脚本 HMR 可能连带重新求值 store 模块。保留现有 store state，避免
+// 用户信息被 state() 的空初始值覆盖；若 auth.ts 也被重载，再由 /auth/me
+// hydration 兜底恢复。
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useUserStore, import.meta.hot));
+}
+
 export function useUserStoreHook() {
   return useUserStore(store);
 }
 
-/** 暴露给 main.ts / Router 守卫复用：F5 后从 /auth/me 重建会话。 */
+/** 暴露给 main.ts 复用：应用启动时从 /auth/me 重建会话。 */
 export { bootstrapSession, isBootstrapped };

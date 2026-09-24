@@ -126,13 +126,15 @@ class PureHttp {
           responseBody.code.length > 0;
 
         const originalConfig = $error.config as
-          | PureHttpRequestConfig
-          | undefined;
+          PureHttpRequestConfig | undefined;
         const isExpiredSession = response?.status === 401 && !hasBusinessCode;
         // refresh 调用自身的 401：不二次触发 refresh-on-401，杜绝递归。
         const isRefreshCall = originalConfig?._refreshRequest === true;
         // 重放过的请求再 401：不再触发第二轮 refresh。
         const isRetry = originalConfig?._refreshRetried === true;
+        // /auth/me 是匿名启动和 HMR 恢复时的会话探针，401 只表示当前没有
+        // 有效 cookie，不应弹出业务错误提示。
+        const isAuthProbe = originalConfig?.url?.endsWith("/auth/me") === true;
 
         if (isExpiredSession && !isRefreshCall && !isRetry) {
           // HttpOnly cookie 由浏览器自动带 refresh——无须判断
@@ -211,7 +213,11 @@ class PureHttp {
           return Promise.reject($error);
         }
 
-        if (response?.status && !isExpiredSession) {
+        if (
+          response?.status &&
+          !isExpiredSession &&
+          !(isAuthProbe && response.status === 401)
+        ) {
           const errorMessage = extractDetailText(responseBody?.detail);
           if (errorMessage) {
             message(errorMessage, {
@@ -236,8 +242,8 @@ class PureHttp {
 
    * HttpOnly cookie 由后端清，浏览器收到 Set-Cookie Max-Age=0 后自动移除。
    * 前端不接管 cookie；只清 Pinia 的 user 元数据 + bootstrap 标志。
-   * isBootstrapped() 在 main.ts / Router 守卫里作为「是否调用 /auth/me
-   * 重建会话」的判据。*/
+   * isBootstrapped() 由 main.ts 启动 bootstrap 及其受控重试维护，路由守卫
+   * 只读取会话状态，不在普通路由切换时重复调用 /auth/me。*/
   private static clearSession() {
     clearSession();
   }

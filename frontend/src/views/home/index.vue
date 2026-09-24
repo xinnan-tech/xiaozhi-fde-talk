@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useDebounceFn } from "@vueuse/core";
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
@@ -21,7 +21,7 @@ import {
   getInterviewsApi
 } from "@/api/interview";
 import { interviewRouteTarget } from "@/utils/interview";
-import { isBootstrapped } from "@/utils/auth";
+import { hydrateSessionIfNeeded, isBootstrapped } from "@/utils/auth";
 
 defineOptions({
   name: "Home"
@@ -121,7 +121,8 @@ const statusList = ref([
 const interviewList = ref<InterviewItem[]>([]);
 
 /** 是否已登录 */
-const isLoggedIn = computed(() => isBootstrapped() && Boolean(userStore.username));
+// 登录态以服务端 /auth/me 的结果为准；username 只是用户资料，不参与鉴权判断。
+const isLoggedIn = computed(() => isBootstrapped());
 
 const filteredInterviewList = computed(() => {
   const keyword = debouncedSearchKeyword.value.trim().toLowerCase();
@@ -237,13 +238,21 @@ const handleAvatarSelectChange = (option: SelectOption) => {
   }
 };
 
-const logOut = () => {
-  userStore.logOut();
+const clearLocalViewState = () => {
   statusList.value.forEach(item => {
     item.count = 0;
   });
   interviewList.value = [];
 };
+
+const logOut = () => {
+  userStore.logOut();
+};
+
+// 页面自身 HMR 重挂载时 App.vue 不一定会重新挂载，需要在本页补回用户信息。
+onMounted(() => {
+  void hydrateSessionIfNeeded();
+});
 
 /** 获取访谈统计 */
 const getStatistics = async () => {
@@ -309,7 +318,8 @@ watch(
   isLoggedIn,
   async (loggedIn: boolean) => {
     if (!loggedIn) {
-      logOut();
+      // 初始未登录是正常状态，只清理页面数据，不调用后端 logout。
+      clearLocalViewState();
       return;
     }
     await refreshAfterCreateDebounced();

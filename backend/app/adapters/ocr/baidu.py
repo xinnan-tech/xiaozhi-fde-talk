@@ -1,13 +1,15 @@
 """百度 OCR（Access Token 模式）。
 
-access_token 获取方式：
-1. 手动：https://console.bce.baidu.com/ → 产品服务 → 文字识别 → 创建一个应用，
-   应用详情页有 API Key 和 Secret Key，用 https://aikang.baidu.com/tools 里的
-   「获取 Access Token」工具生成一个长期有效 token。
-2. 代码自动刷新：提供 ocr.api_key（API Key）+ ocr.secret_key（Secret Key），
-   provider 启动时自动换取 access_token，以后每 29 天自动刷新。
+access_token 由百度 OAuth 接口下发，项目代码自动换取并刷新：
+1. 凭据来源：https://console.bce.baidu.com/ai-engine/ocr/app/list 创建一个应用，
+   拿到 API Key + Secret Key，配到 ocr.api_key / ocr.secret_key。
+   provider 启动时自动调 OAuth 接口换 token：
+     POST https://aip.baidubce.com/oauth/2.0/token
+     body: grant_type=client_credentials&client_id=<API_KEY>&client_secret=<SECRET_KEY>
+2. 有效期：百度下发的 access_token 默认 30 天过期，provider 每 29 天自动刷新一次。
 
-OCR 接口文档：https://cloud.baidu.com/doc/OCRAPI.html
+
+OCR 接口文档：https://cloud.baidu.com/doc/OCR/s/zk3h7xz52
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ class BaiduOCRProvider(OCRProvider):
         api_key: str,
         model: str,
         secret_key: str = "",
+        language: str = "CHN_ENG",
         timeout_s: float = 30.0,
     ) -> None:
         # base_url: "https://aip.baidubce.com"
@@ -45,7 +48,11 @@ class BaiduOCRProvider(OCRProvider):
         self._base_url = (base_url or "https://aip.baidubce.com").rstrip("/")
         self._api_key = api_key          # 百度 API Key
         self._secret_key = secret_key    # 百度 Secret Key（可空）
-        self._model = model              # 如 "general_basic"
+        self._model = model              # 如 "general_basic" / "handwriting"
+        # language_type 传给百度 OCR（CHN_ENG / ENG / auto_detect 等）。
+        # 手写 OCR 默认 "auto_detect"，通用 OCR 默认 "CHN_ENG"；factory 用 provider
+        # group 配置覆盖。
+        self._language = language
         self._timeout = httpx.Timeout(pool=5.0, connect=10.0, write=10.0, read=timeout_s)
         self._client = httpx.AsyncClient(timeout=self._timeout)
 
@@ -110,11 +117,15 @@ class BaiduOCRProvider(OCRProvider):
         return token
 
     async def recognize(self, image_bytes: bytes, prompt: str = "") -> str:  # noqa: ARG002
-        """调用百度 OCR API 识别名片图片，返回提取的文本。prompt 参数被忽略（百度不支持自定义 prompt）。"""
+        """调用百度 OCR API 识别图片，返回提取的文本。prompt 参数被忽略（百度不支持自定义 prompt）。"""
         token = await self._ensure_token()
         url = f"{self._base_url}/rest/2.0/ocr/v1/{self._model}"
         img_b64 = base64.b64encode(image_bytes).decode("ascii")
         body = {"image": img_b64}
+        # language_type：通用 OCR 不传走 CHN_ENG，手写 OCR 不传走 auto_detect；
+        # 显式传避免依赖百度默认值变化
+        if self._language:
+            body["language_type"] = self._language
         # 通用票据识别可加 "recognize_granularity": "big" 等参数，这里保持简洁
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         resp = await self._client.post(url, headers=headers, data=body,

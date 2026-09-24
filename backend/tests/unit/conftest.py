@@ -34,6 +34,41 @@ def _warm_templates():
         )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _ensure_db_schema():
+    """dev 自愈：跑所有单测前对真实测试 DB 加缺失列。
+
+    Base.metadata.create_all 只 CREATE TABLE IF NOT EXISTS,不会给已存在的
+    interviews 表 ALTER ADD COLUMN。新 ORM 模型加了 keyboard_text /
+    handwriting_notes 列后,旧的测试 DB 文件缺这两列,直接 SELECT 会撞
+    `no such column: interviews.keyboard_text`。这里调 _ensure_columns
+    (idempotent,缺列才 ADD COLUMN)兜住。
+    prod 走 alembic upgrade head 自动加,不走本路径。
+    """
+    try:
+        from app.core.settings import get_settings
+        from app.persistence.db import engine
+        from app.persistence.bootstrap import _ensure_columns
+        from app.persistence.models import Base
+
+        url = get_settings().db_url
+        if url.startswith("sqlite"):
+            db_path = url.split("///", 1)[-1]
+            if db_path != ":memory:" and db_path:
+                # 文件 SQLite:create_all + _ensure_columns
+                async def _run():
+                    async with engine.begin() as conn:
+                        await conn.run_sync(Base.metadata.create_all)
+                        await _ensure_columns(conn)
+                asyncio.run(_run())
+        # 文件非 SQLite(MySQL/PGB):靠 alembic 迁移;不走自愈
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "conftest._ensure_db_schema 跳过:%s: %s",
+            type(e).__name__, e,
+        )
+
+
 @pytest.fixture
 def make_state():
     """构造一个 pm-research 模板的初始 SessionState。"""

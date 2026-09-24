@@ -32,6 +32,18 @@ _SELF_HEAL_COLUMNS: list[tuple[str, str, str]] = [
     ("interviews", "first_batch_generated", "BOOLEAN DEFAULT 0"),
     ("users", "password_changed_at", "DATETIME"),
     ("interviews", "template_snapshot", "JSON"),
+    # 笔记功能新增(interviews 加 2 列做冷启动镜像,与 session_keyboard_text /
+    # handwriting_images 真相源表互为镜像)。TEXT / JSON 在三方言下都有效。
+    # JSON 在 SQLite 是 TEXT 兼容;DATETIME 在 SQLite 同 datetime 字符串。
+    # NOT NULL 与 alembic 0003 口径对齐——避免 dev / prod nullable 不一致:
+    # handwriting_notes 永远有默认值 '[]',不允许 NULL 与 ORM Mapped 字段对齐。
+    ("interviews", "keyboard_text", "TEXT"),
+    ("interviews", "handwriting_notes", "JSON NOT NULL DEFAULT '[]'"),
+    # 画板 state 新增(handwriting_images 加 3 列)。可空,与 alembic 0004 一致:
+    # 旧行没有 canvas 概念,新增列允许 NULL;UNIQUE 索引允许多个 NULL 行共存。
+    ("handwriting_images", "canvas_index", "INTEGER"),
+    ("handwriting_images", "canvas_payload", "JSON"),
+    ("handwriting_images", "canvas_payload_hash", "VARCHAR(64)"),
 ]
 
 

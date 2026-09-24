@@ -283,11 +283,26 @@ def _build_user(state: SessionState, template) -> str:
             )
     coverage_block = "\n".join(coverage_lines)
 
+    # 键盘笔记:覆盖式。报告页显示最新文本(报告段硬编码列表 = [] + 空时不输出)
+    kb_block = ""
+    if state.keyboard_text:
+        kb_block = f"【键盘补充】\n{state.keyboard_text}\n\n"
+    # 手写笔记:append 列表,每张图独立行;报告页按 source 分组渲染(修改八)
+    hw_block = ""
+    if state.handwriting_notes:
+        hw_lines = "\n".join(
+            f"- [img#{n.image_id}] {n.text}"
+            for n in state.handwriting_notes
+        )
+        hw_block = f"【手写笔记(OCR 文本)】\n{hw_lines}\n\n"
+
     return (
         f"【报告骨架】\n{doc}\n\n"
         f"【会话基础信息】\n项目：{bi.get('project', '')}　受访者：{bi.get('interviewee', '')}"
         f"　目标：{state.session.goal or ''}\n\n"
         f"{coverage_block}\n\n"
+        f"{kb_block}"
+        f"{hw_block}"
         f"【对话原文】\n{transcript}\n\n"
         "Fill the skeleton now."
     )

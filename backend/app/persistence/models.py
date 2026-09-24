@@ -6,7 +6,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -92,6 +102,11 @@ class InterviewRecord(Base):
     skipped_ids: Mapped[list] = mapped_column(JSON, default=list)
     ignored_ids: Mapped[list] = mapped_column(JSON, default=list)
     coverage_index: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 键盘笔记(覆盖式;与 session_keyboard_text 表互为镜像,JSON 列做冷启动镜像
+    # 避免每次 restart 都重新查 DB 触发重建 state.keyboard_text)
+    keyboard_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 手写笔记段(append;与 handwriting_images 表互为镜像,只存成功注入的段)
+    handwriting_notes: Mapped[list] = mapped_column(JSON, default=list)
     # 创建访谈时的整份模板快照（编辑模板不影响已创建访谈）；旧行 NULL=回退实时读
     template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     consumed_seq: Mapped[int] = mapped_column(Integer, default=0)
@@ -125,3 +140,86 @@ class ReportRecord(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SessionKeyboardText(Base):
+    """键盘笔记（每 session+user 唯一 1 行，UPSERT 覆盖语义）。
+
+    复合 PK 物理保证唯一性,POST handler 直接走 INSERT ... ON CONFLICT DO UPDATE
+    无需应用层锁。`client_created_at` 保留用户「最初提交时刻」，`updated_at`
+    表达「最后一次修改」。
+    """
+    __tablename__ = "session_keyboard_text"
+
+    session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("interviews.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    text: Mapped[str] = mapped_column(Text, default="")
+    client_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class HandwritingImage(Base):
+    """手写笔记（每张图 1 行,append 语义）。
+
+    `image_hash` 按 (user_id, image_hash) 联合唯一索引判重——同一用户
+    连点提交/网络重试不会产生重复行,跨用户不去重防数据归属混乱。
+
+    `ocr_status` 状态机:n/a（保留）/ pending / done / failed。
+    `injected_at` 记录是否已注入 state.handwriting_notes,重启 session 后
+    通过该字段判断是否需要重注入(本轮不实现,字段保留)。
+    """
+    __tablename__ = "handwriting_images"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("interviews.id", ondelete="CASCADE"),
+        index=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
+    image_base64: Mapped[str] = mapped_column(Text)
+    image_format: Mapped[str] = mapped_column(String(8))
+    image_bytes_size: Mapped[int] = mapped_column(Integer)
+    ocr_status: Mapped[str] = mapped_column(String(16), default="pending")
+    text: Mapped[str] = mapped_column(Text, default="")
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    image_hash: Mapped[str] = mapped_column(String(64))
+    injected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    # 画板 state(笔触 / 状态 JSON)——前端自增 canvas_index(1/2/3...)
+    # 与同一行 image 共享生命周期:改画板 + 改图可一次 POST 完成,各自独立
+    # UPSERT(各自按 hash 跳过)。payload 不进 LLM 上下文——LLM 只看 OCR 文本。
+    canvas_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    canvas_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    canvas_payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    client_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "image_hash", name="uq_handwriting_user_hash"),
+        # 同一 session+user 下 canvas_index 唯一(可空 → 多行 NULL 允许)
+        UniqueConstraint(
+            "session_id", "user_id", "canvas_index",
+            name="uq_handwriting_canvas_index",
+        ),
+        Index("ix_handwriting_session_created", "session_id", "created_at"),
+    )

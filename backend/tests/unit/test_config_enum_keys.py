@@ -18,6 +18,9 @@ def test_enum_keys_exact_set():
     asr.type 加入的原因：set_many 过滤非激活 ASR 字段时拼 f"asr.{type}."
     前缀，type 字符串必须在白名单内——靠 ENUM 校验兜住（含空白 / 未知
     provider）以免 filter 静默丢配置后 admin 收到 200「保存成功」（#178 评审）。
+
+    新增手写笔记功能后,ocr.language / handwriting.type / handwriting.language
+    都加入 ENUM 校验——通用 OCR 语言 10 种,手写 OCR 语言 26 种(含 auto_detect)。
     """
     assert set(ENUM_KEYS.keys()) == {
         "asr.funasr_server.language",
@@ -26,6 +29,9 @@ def test_enum_keys_exact_set():
         "llm.output_language",
         "llm.type",
         "ocr.type",
+        "ocr.language",
+        "handwriting.type",
+        "handwriting.language",
     }
 
 
@@ -66,6 +72,22 @@ def test_enum_keys_values_are_correct_sets():
     assert ENUM_KEYS["llm.type"] == {"openai", "stub"}
     # ocr.type 跟 factory.py supported_providers 同步——{openai, baidu}
     assert ENUM_KEYS["ocr.type"] == {"openai", "baidu"}
+    # 手写 OCR type 与通用 OCR 同样两选——配置上独立校验
+    assert ENUM_KEYS["handwriting.type"] == {"openai", "baidu"}
+    # ocr.language 通用 OCR 语言:10 种百度 language_type(无 auto_detect)
+    assert ENUM_KEYS["ocr.language"] == {
+        "CHN_ENG", "ENG", "JAP", "KOR", "FRE", "SPA",
+        "POR", "GER", "ITA", "RUS",
+    }
+    # handwriting.language 手写 OCR 语言:auto_detect + 上面 10 种 + 额外 15 种
+    assert "auto_detect" in ENUM_KEYS["handwriting.language"]
+    assert ENUM_KEYS["handwriting.language"] == {
+        "auto_detect",
+        "CHN_ENG", "ENG", "JAP", "KOR", "FRE", "SPA",
+        "POR", "GER", "ITA", "RUS",
+        "DUT", "MAL", "SWE", "IND", "POL", "ROM", "TUR",
+        "GRE", "HUN", "THA", "VIE", "ARA", "HIN",
+    }
     # asr.type 跟 asr.* 子 key 命名一致（funasr_server / doubao_stream）——
     # 加新 provider 需同时扩这里 + ALL_B_KEYS + DEFAULTS。
     assert ENUM_KEYS["asr.type"] == {"funasr_server", "doubao_stream"}
@@ -150,6 +172,10 @@ def test_defaults_include_language_keys():
     assert DEFAULTS["asr.funasr_server.language"] == "zh"
     assert DEFAULTS["asr.doubao_stream.language"] == "zh-CN"
     assert DEFAULTS["llm.output_language"] == "zh_cn"
+    # 通用 OCR 默认中文混合;手写 OCR 默认 auto_detect(用户写啥语言都有机会识别)
+    assert DEFAULTS["ocr.language"] == "CHN_ENG"
+    assert DEFAULTS["handwriting.language"] == "auto_detect"
+    assert DEFAULTS["handwriting.model"] == "handwriting"
 
 
 def test_default_idle_timeout_is_30_minutes():

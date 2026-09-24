@@ -1,9 +1,10 @@
 """HTTP 请求/响应 DTO。"""
 from __future__ import annotations
 
-import json
+from datetime import datetime
 from typing import Optional
 
+import json
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -276,3 +277,134 @@ class OCRRequest(BaseModel):
 
 class OCRResponse(BaseModel):
     text: str
+
+
+# ---- 笔记（键盘 / 手写） ----
+
+# 键盘文本字节上限 4KB（与 BASE_INFO_VALUE_MAX_BYTES 对齐）。
+# max_length 按字符算挡不住 4-byte emoji 撑大体积——必须按 UTF-8 字节算。
+_KEYBOARD_TEXT_MAX_BYTES = BASE_INFO_VALUE_MAX_BYTES
+
+
+class CreateKeyboardNoteRequest(BaseModel):
+    # extra="forbid" 防止 user_id 等被注入改归属（user_id 来自 token）
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1)
+    client_created_at: datetime
+
+    @model_validator(mode="after")
+    def _check_text_bytes(self) -> "CreateKeyboardNoteRequest":
+        # 4-byte emoji 等把字符数压低但字节数撑爆的场景,
+        # max_length 字符上限挡不住,需按 UTF-8 字节再校验一次
+        from app.core.i18n import Keys
+        from app.core.i18n.errors import I18nError
+
+        byte_len = len(self.text.encode("utf-8"))
+        if byte_len > _KEYBOARD_TEXT_MAX_BYTES:
+            raise I18nError(
+                Keys.SESSION_BASE_INFO_VALUE_TOO_LONG,
+                http_status=422,
+                field="text",
+                byte_len=byte_len,
+                max_bytes=_KEYBOARD_TEXT_MAX_BYTES,
+            )
+        return self
+
+
+class KeyboardNoteResponse(BaseModel):
+    session_id: str
+    user_id: str
+    text: str
+    client_created_at: datetime
+    updated_at: datetime
+
+
+class KeyboardListResponse(BaseModel):
+    item: Optional[KeyboardNoteResponse] = None  # 最多 1 行,null=该 session 还没键盘提交
+
+
+# ---- 画板 state(图 + JSON 一并 POST)----
+
+class SaveCanvasRequest(BaseModel):
+    """POST /canvases/{canvas_index} 请求体。
+
+    前端一次 POST 同时携带画板 state (payload) + 画板截图 (filedata)——
+    两个字段都必填(前端用 canvas_index 标识画板号,改画板时图也得改)。
+    filedata OCR 结果进 LLM(state.handwriting_notes);payload 仅持久化不进 LLM。
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    payload: dict  # 画板笔触 / 状态 JSON,服务器不解析
+    filedata: str = Field(min_length=1)  # base64 图片
+    client_updated_at: datetime
+
+    @model_validator(mode="after")
+    def _check_payload_size(self) -> "SaveCanvasRequest":
+        # payload 序列化字节数 sanity check(DoS 兜底,不是业务上限)。
+        # 画板正常几 KB-几十 KB,1MB 已远超异常,超即拒避免恶意客户端撑爆内存。
+        from app.core.i18n import Keys
+        from app.core.i18n.errors import I18nError
+
+        byte_len = len(json.dumps(self.payload, ensure_ascii=False).encode("utf-8"))
+        if byte_len > _CANVAS_PAYLOAD_MAX_BYTES:
+            raise I18nError(
+                Keys.SESSION_BASE_INFO_VALUE_TOO_LONG,
+                http_status=422,
+                field="payload",
+                byte_len=byte_len,
+                max_bytes=_CANVAS_PAYLOAD_MAX_BYTES,
+            )
+        return self
+
+
+# 画板 payload DoS 兜底上限(不是业务上限,正常画板 < 64KB)
+_CANVAS_PAYLOAD_MAX_BYTES = 1 * 1024 * 1024
+
+
+class CanvasItem(BaseModel):
+    """GET /canvases 单条画板。"""
+    canvas_index: Optional[int] = None  # NULL 行(纯 OCR 图,canvas_index 未设)
+    image_id: int
+    image_base64: Optional[str] = None
+    image_format: Optional[str] = None
+    ocr_status: str
+    text: str
+    canvas_payload: Optional[dict] = None
+    client_updated_at: datetime
+    created_at: datetime
+
+
+class CanvasListResponse(BaseModel):
+    items: list[CanvasItem]
+
+
+class SaveCanvasResponse(BaseModel):
+    """POST /canvases 响应。
+
+    payload_skipped / payload_updated 反映画板 state 跳过与否(画板 JSON)。
+    ocr_task_fired 反映画板截图 OCR 重跑与否(图片 hash 变了)。
+    """
+    canvas_index: int
+    payload_skipped: bool
+    payload_updated: bool
+    image_id: Optional[int] = None
+    ocr_task_fired: bool = False
+
+
+class DeleteCanvasRequest(BaseModel):
+    """POST /canvases/batch-delete 批量删除请求。
+
+    单张删除走 DELETE /canvases/{canvas_index},body 不需要。
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    canvas_indexes: list[int] = Field(min_length=1, max_length=200)
+
+
+class DeleteCanvasResponse(BaseModel):
+    """DELETE /canvases/{canvas_index} 响应 / batch-delete 复用。
+
+    deleted_ids 是实际删除的 image_id 列表(幂等:不存在返 [])。
+    """
+    deleted_ids: list[int]

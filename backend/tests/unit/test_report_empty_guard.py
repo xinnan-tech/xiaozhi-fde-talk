@@ -30,6 +30,9 @@ class _FakeState:
     transcript: list = field(default_factory=list)
     session: _FakeSession = field(default_factory=lambda: _FakeSession())
     items: list = field(default_factory=list)
+    # 笔记字段(_build_user 会读)
+    keyboard_text: str | None = None
+    handwriting_notes: list = field(default_factory=list)
 
 
 @pytest.mark.asyncio

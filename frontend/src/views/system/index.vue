@@ -18,6 +18,7 @@ import {
   systemAsrDiagnosticsApi,
   systemLlmDiagnosticsApi,
   systemOcrDiagnosticsApi,
+  systemHandwritingDiagnosticsApi,
   systemConfigSaveApi
 } from "@/api/system";
 import { useRouter } from "vue-router";
@@ -61,7 +62,7 @@ type ConfigGroup = {
   icon: ReturnType<typeof useRenderIcon>;
   fields: ConfigField[];
 };
-type CheckTarget = "all" | "asr" | "llm" | "ocr";
+type CheckTarget = "all" | "asr" | "llm" | "ocr" | "handwriting";
 type CheckStatus = "normal" | "running" | "error";
 
 /** 自检结果 */
@@ -157,6 +158,36 @@ const SELECT_FIELD_OPTIONS: Record<string, SelectOption[]> = {
     { value: "zh_cn", labelKey: "config.opt.zh_cn" },
     { value: "zh_tw", labelKey: "config.opt.zh_tw" },
     { value: "en", labelKey: "config.opt.en" }
+  ],
+  // 通用 OCR 文字识别语言:百度 language_type 10 种全暴露,后端 ENUM_KEYS 完全一致。
+  // 对齐 doubao_stream 的「暴露常用 subset」原则——value 用百度字面量而非
+  // BCP-47 locale,两套命名空间分别对应不同 provider 不可混用。
+  "ocr.language": [
+    { value: "CHN_ENG", labelKey: "config.opt.lang_chn_eng" },
+    { value: "ENG", labelKey: "config.opt.en" },
+    { value: "JAP", labelKey: "config.opt.lang_jap" },
+    { value: "KOR", labelKey: "config.opt.ko_kr" },
+    { value: "FRE", labelKey: "config.opt.fr_fr" },
+    { value: "SPA", labelKey: "config.opt.lang_spa" },
+    { value: "GER", labelKey: "config.opt.de_de" },
+    { value: "ITA", labelKey: "config.opt.lang_ita" },
+    { value: "RUS", labelKey: "config.opt.ru_ru" },
+    { value: "POR", labelKey: "config.opt.pt_br" }
+  ],
+  // 手写 OCR 语言:百度 26 种,前端暴露 auto_detect + 通用 OCR 的 10 种
+  // ——其余 15 种 locale 回退手填。auto_detect 对所有手写场景兜底。
+  "handwriting.language": [
+    { value: "auto_detect", labelKey: "config.opt.lang_auto_detect" },
+    { value: "CHN_ENG", labelKey: "config.opt.lang_chn_eng" },
+    { value: "ENG", labelKey: "config.opt.en" },
+    { value: "JAP", labelKey: "config.opt.lang_jap" },
+    { value: "KOR", labelKey: "config.opt.ko_kr" },
+    { value: "FRE", labelKey: "config.opt.fr_fr" },
+    { value: "SPA", labelKey: "config.opt.lang_spa" },
+    { value: "GER", labelKey: "config.opt.de_de" },
+    { value: "ITA", labelKey: "config.opt.lang_ita" },
+    { value: "RUS", labelKey: "config.opt.ru_ru" },
+    { value: "POR", labelKey: "config.opt.pt_br" }
   ]
 };
 /** ASR 类型选项（运行时从嵌套结构填充） */
@@ -672,7 +703,9 @@ const getOrCreateResult = (key: SelfCheckResult["key"]) => {
         ? "system.diagnostics.asr"
         : key === "llm"
           ? "system.diagnostics.llm"
-          : "system.diagnostics.ocr",
+          : key === "ocr"
+            ? "system.diagnostics.ocr"
+            : "system.diagnostics.handwriting",
     description: t("system.diagnostics.running"),
     detail: "",
     duration: "-",
@@ -730,10 +763,25 @@ const updateOcrResult = (
   target.model = result.detail?.model || "-";
 };
 
+/** 更新手写 OCR 接口结果 */
+const updateHandwritingResult = (
+  result: Awaited<ReturnType<typeof systemHandwritingDiagnosticsApi>>
+) => {
+  const target = getOrCreateResult("handwriting");
+
+  target.status = result.ok ? "normal" : "error";
+  target.description = result.message || t("system.diagnostics.handwriting_success");
+  target.detail = t("system.diagnostics.ocr_reply", {
+    text: result.detail?.reply || t("system.no_result")
+  });
+  target.duration = `${result.latency_ms} ms`;
+  target.model = result.detail?.model || "-";
+};
+
 /** 单项检测保留另一张卡片的位置；只有“运行全部”才会先清空整个结果列表 */
 const setRunningState = (target: CheckTarget, status: CheckStatus) => {
   const keys: SelfCheckResult["key"][] =
-    target === "all" ? ["asr", "llm", "ocr"] : [target];
+    target === "all" ? ["asr", "llm", "ocr", "handwriting"] : [target];
   keys.forEach(key => {
     const result = getOrCreateResult(key);
     result.status = status;
@@ -763,12 +811,15 @@ const runSelfCheck = async (target: CheckTarget) => {
       updateAsrResult(result.asr);
       updateLlmResult(result.llm);
       updateOcrResult(result.ocr);
+      updateHandwritingResult(result.handwriting);
     } else if (target === "asr") {
       updateAsrResult(await systemAsrDiagnosticsApi());
     } else if (target === "llm") {
       updateLlmResult(await systemLlmDiagnosticsApi());
-    } else {
+    } else if (target === "ocr") {
       updateOcrResult(await systemOcrDiagnosticsApi());
+    } else {
+      updateHandwritingResult(await systemHandwritingDiagnosticsApi());
     }
 
     const hasError = selfCheckResults.some(
@@ -1129,6 +1180,14 @@ watch(locale, () => {
             @click="runSelfCheck('ocr')"
           >
             {{ t("system.ocr_only") }}
+          </el-button>
+          <el-button
+            plain
+            type="primary"
+            :loading="selfCheckRunning && selfCheckTarget === 'handwriting'"
+            @click="runSelfCheck('handwriting')"
+          >
+            {{ t("system.handwriting_only") }}
           </el-button>
         </div>
 

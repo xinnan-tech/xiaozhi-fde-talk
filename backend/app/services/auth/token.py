@@ -67,6 +67,8 @@ async def create_access_token(
     """异步签名 access token。
 
     pwd_ver 是 password_changed_at 的 Unix 秒戳——改密即吊销的对照值。
+    extra 里的 role/username 仅为装饰（调试 / 日志参考），鉴权不信任——
+    校验侧一律从 DB 取（transport/base.py::extract_auth）。
     """
     settings = get_settings()
     cfg = await get_auth_runtime_config()
@@ -95,6 +97,8 @@ async def create_refresh_token(
 
     jti 单独返回供路由层在 logout 时撤销。refresh token 不能直接调业务接口——
     /auth/refresh 端点会校验 type=refresh + jti 未撤销后才换 access。
+    extra 里的 role/username 仅为装饰（调试 / 日志参考），鉴权不信任——
+    refresh 换新 access 时从 DB 取（routes/auth.py::refresh）。
     """
     settings = get_settings()
     cfg = await get_auth_runtime_config()

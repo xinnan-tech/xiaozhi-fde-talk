@@ -5,9 +5,12 @@ import { useI18n } from "vue-i18n";
 import dayjs from "dayjs";
 import ChatDotRound from "~icons/ep/chat-dot-round";
 import EditPen from "~icons/ep/edit-pen";
+import Close from "~icons/ep/close";
+import Plus from "~icons/ep/plus";
+import Loading from "~icons/ep/loading";
 import RefreshLeft from "~icons/ep/refresh-left";
+import RefreshRight from "~icons/ep/refresh-right";
 import Delete from "~icons/ep/delete";
-import Download from "~icons/ep/download";
 import Aim from "~icons/ep/aim";
 import Calendar from "~icons/ep/calendar";
 import Clock from "~icons/ep/clock";
@@ -32,9 +35,21 @@ import {
   type InterviewDetailType,
   resumeInterviewApi,
   suspendInterviewApi,
-  unignoreInterviewItemApi
+  unignoreInterviewItemApi,
+  getInterviewBoardsApi,
+  deleteCanvasInterviewBoardApi,
+  addCanvasInterviewBoardApi,
+  getKeyboardInterviewNoteApi,
+  addKeyboardInterviewNoteApi,
+  type CanvasBoardType,
+  type KeyboardNoteType,
+  type InterviewCanvasListResponse
 } from "@/api/interview";
 import { usePcmRecorder } from "@/composables/usePcmRecorder";
+import {
+  useSignatureHistory,
+  type SignatureHistoryState
+} from "@/composables/useSignatureHistory";
 import {
   useWebSocket,
   type InterviewServerMessage
@@ -183,6 +198,41 @@ type SuggestionMetric = SuggestionStatus | "all" | "pending";
 const activeMetric = ref<SuggestionMetric>("pending");
 const noteContent = ref("");
 const signatureRef = ref();
+type DrawingBoard = {
+  id: number;
+  name: string;
+  dataUrl: string;
+  strokes: SignatureHistoryState["strokes"];
+  redoStrokes: SignatureHistoryState["redoStrokes"];
+};
+
+const drawingBoards = ref<DrawingBoard[]>([
+  {
+    id: 1,
+    name: t("interview.handwriting.board", { number: 1 }),
+    dataUrl: "",
+    strokes: [],
+    redoStrokes: []
+  }
+]);
+const activeDrawingBoardId = ref(1);
+const isDrawingBoardDrawerOpen = ref(false);
+let signatureExportTimerId: number | null = null;
+let keyboardNoteSaveTimerId: number | null = null;
+const autoSaveInterval = 5000; // 5秒自动保存一次
+let nextDrawingBoardId = 2;
+const signatureSaveStatus = ref<"idle" | "saving" | "success">("idle");
+const keyboardNoteSaveStatus = ref<"idle" | "saving" | "success">("idle");
+const signatureHistory = useSignatureHistory(signatureRef);
+const activeDrawingBoard = computed(() =>
+  drawingBoards.value.find(board => board.id === activeDrawingBoardId.value)
+);
+const canUndoDrawing = computed(
+  () => (activeDrawingBoard.value?.strokes.length ?? 0) > 0
+);
+const canRedoDrawing = computed(
+  () => (activeDrawingBoard.value?.redoStrokes.length ?? 0) > 0
+);
 const brushColorPresets = [
   "#1f2937",
   "#3b82f6",
@@ -192,13 +242,13 @@ const brushColorPresets = [
 ];
 const selectedBrushColor = ref(brushColorPresets[0]);
 const isEraserMode = ref(false);
-const penStrokeWidth = 2.6;
+const penStrokeWidth = ref(2);
 const eraserStrokeWidth = 8;
 const signatureOptions = computed(() => ({
   penColor: selectedBrushColor.value,
   backgroundColor: "rgb(255, 255, 255)",
-  minWidth: isEraserMode.value ? eraserStrokeWidth : penStrokeWidth,
-  maxWidth: isEraserMode.value ? eraserStrokeWidth : penStrokeWidth,
+  minWidth: isEraserMode.value ? eraserStrokeWidth : penStrokeWidth.value,
+  maxWidth: isEraserMode.value ? eraserStrokeWidth : penStrokeWidth.value,
   throttle: 12,
   minDistance: 5,
   compositeOperation: isEraserMode.value ? "destination-out" : "source-over"
@@ -516,6 +566,10 @@ const handlePauseInterview = async () => {
   stopInterviewTimer();
   if (interviewDetail.value) {
     interviewDetail.value.status = "suspended";
+  }
+  if (activeMode.value !== "transcript") {
+    activeModeIndex.value = 2;
+    await setMode("transcript");
   }
   // API 真把 status 落库成功后再通知首页刷新；失败时 toast 已提示，无需静默重试
   if (suspended) {
@@ -1103,6 +1157,8 @@ const setMetric = async (metric: SuggestionMetric) => {
 };
 
 onBeforeUnmount(() => {
+  clearSignatureExportTimer();
+  clearKeyboardNoteSaveTimer();
   suggestionCards.value.forEach(card => clearIgnoreTimer(card));
   clearIdleWarning();
   stopInterviewTimer();
@@ -1122,14 +1178,35 @@ const handleBack = async () => {
   router.push("/home");
 };
 
-const setMode = (mode: string) => {
-  if (mode !== "transcript") return;
+const setMode = async (mode: string) => {
+  // 手写组件在切换到其他模式时会被卸载，先把当前画板保存下来。
+  if (isHandwritingMode.value && mode !== "handwriting") {
+    isDrawingBoardDrawerOpen.value = false;
+    saveActiveDrawingBoard();
+  }
   activeMode.value = mode;
-  void scrollTranscriptToTop();
+  await scrollTranscriptToTop();
+
+  // 返回手写模式后组件会重新挂载，需要把当前画板的笔画恢复到新实例。
+  if (mode === "handwriting") {
+    await nextTick();
+    const board = drawingBoards.value.find(
+      item => item.id === activeDrawingBoardId.value
+    );
+    if (board) await restoreDrawingBoard(board);
+  }
 };
 
 const isKeyboardMode = computed(() => activeMode.value === "keyboard");
 const isHandwritingMode = computed(() => activeMode.value === "handwriting");
+const canUseInterviewTools = computed(
+  () => interviewDetail.value?.status === "in_progress"
+);
+const activeSaveStatus = computed(() => {
+  if (isKeyboardMode.value) return keyboardNoteSaveStatus.value;
+  if (isHandwritingMode.value) return signatureSaveStatus.value;
+  return "idle";
+});
 
 const transcriptPanelTitle = computed(() => {
   if (isHandwritingMode.value) return t("interview.panel.handwriting");
@@ -1142,12 +1219,12 @@ const modeOptions = computed(() => [
   {
     value: "handwriting",
     label: t("interview.mode.handwriting"),
-    disabled: true
+    disabled: !canUseInterviewTools.value
   },
   {
     value: "keyboard",
     label: t("interview.mode.keyboard"),
-    disabled: true
+    disabled: !canUseInterviewTools.value
   },
   {
     value: "transcript",
@@ -1156,10 +1233,16 @@ const modeOptions = computed(() => [
 ]);
 
 const handleModeChange = ({ option }: { option: { value?: unknown } }) => {
-  if (typeof option.value === "string") setMode(option.value);
+  if (typeof option.value === "string") void setMode(option.value);
 };
 
 const handwritingActions = computed(() => [
+  {
+    key: "boards",
+    label: t("interview.handwriting.boards"),
+    icon: EditPen,
+    handler: toggleDrawingBoardDrawer
+  },
   {
     key: "undo",
     label: t("interview.handwriting.undo"),
@@ -1167,16 +1250,10 @@ const handwritingActions = computed(() => [
     handler: handleUndo
   },
   {
-    key: "clear",
-    label: t("interview.handwriting.clear"),
-    icon: Delete,
-    handler: handleClear
-  },
-  {
-    key: "export",
-    label: t("interview.handwriting.export"),
-    icon: Download,
-    handler: handleExportSignature
+    key: "redo",
+    label: t("interview.handwriting.redo"),
+    icon: RefreshRight,
+    handler: handleRedo
   }
 ]);
 
@@ -1193,32 +1270,252 @@ const toggleEraserMode = () => {
   isEraserMode.value = !isEraserMode.value;
 };
 
-function handleUndo() {
-  signatureRef.value?.undo?.();
+async function handleUndo() {
+  const activeBoard = drawingBoards.value.find(
+    board => board.id === activeDrawingBoardId.value
+  );
+  if (!activeBoard) return;
+  activeBoard.dataUrl = await signatureHistory.undo(activeBoard);
 }
 
-function handleClear() {
-  signatureRef.value?.clear?.();
+async function handleRedo() {
+  const activeBoard = drawingBoards.value.find(
+    board => board.id === activeDrawingBoardId.value
+  );
+  if (!activeBoard) return;
+  activeBoard.dataUrl = await signatureHistory.redo(activeBoard);
 }
 
-function handleExportSignature() {
-  const signature = signatureRef.value;
-  if (!signature) return;
+function selectBrushMode() {
+  isEraserMode.value = false;
+}
 
-  const trimmed = signature.trim?.({
-    format: "image/png",
-    backgroundColor: "rgb(255, 255, 255)"
+const updateActiveDrawingBoardThumbnail = () => {
+  const activeBoard = drawingBoards.value.find(
+    board => board.id === activeDrawingBoardId.value
+  );
+  if (!activeBoard) return;
+  activeBoard.dataUrl = signatureHistory.sync(activeBoard);
+};
+
+function clearSignatureExportTimer() {
+  if (signatureExportTimerId !== null) {
+    window.clearTimeout(signatureExportTimerId);
+    signatureExportTimerId = null;
+  }
+}
+
+function clearKeyboardNoteSaveTimer() {
+  if (keyboardNoteSaveTimerId !== null) {
+    window.clearTimeout(keyboardNoteSaveTimerId);
+    keyboardNoteSaveTimerId = null;
+  }
+}
+
+async function saveKeyboardNote() {
+  clearKeyboardNoteSaveTimer();
+  const data: KeyboardNoteType = {
+    text: noteContent.value,
+    client_created_at: new Date().toISOString()
+  };
+
+  keyboardNoteSaveStatus.value = "saving";
+  try {
+    await addKeyboardInterviewNoteApi(route.params.id as string, data);
+    keyboardNoteSaveStatus.value = "success";
+  } catch (error) {
+    keyboardNoteSaveStatus.value = "idle";
+    console.error("[InterviewPage] 保存键盘笔记失败", error);
+  }
+}
+
+function scheduleKeyboardNoteSave() {
+  clearKeyboardNoteSaveTimer();
+  keyboardNoteSaveStatus.value = "idle";
+  keyboardNoteSaveTimerId = window.setTimeout(() => {
+    keyboardNoteSaveTimerId = null;
+    void saveKeyboardNote();
+  }, autoSaveInterval);
+}
+
+/**
+ * 导出当前画板的笔画轨迹、canvas图，保存到后端
+ */
+async function exportSignature(dataUrl?: string) {
+  clearSignatureExportTimer();
+  const strokes = signatureHistory.readStrokes();
+  if (strokes.length === 0) return;
+
+  const imageDataUrl = dataUrl ?? signatureRef.value?.save?.();
+  if (!imageDataUrl) return;
+
+  const filedata = imageDataUrl.replace(
+    /^data:image\/(?:png|jpeg|jpg|bmp);base64,/i,
+    ""
+  );
+  const canvasBoard: CanvasBoardType = {
+    id: activeDrawingBoardId.value,
+    payload: { strokes },
+    filedata,
+    client_updated_at: new Date().toISOString()
+  };
+
+  signatureSaveStatus.value = "saving";
+  try {
+    await addCanvasInterviewBoardApi(route.params.id as string, canvasBoard);
+    signatureSaveStatus.value = "success";
+  } catch (error) {
+    signatureSaveStatus.value = "idle";
+    console.error("[InterviewPage] 保存画板失败", error);
+  }
+}
+
+function scheduleSignatureAutoExport() {
+  updateActiveDrawingBoardThumbnail();
+  clearSignatureExportTimer();
+  const activeBoard = drawingBoards.value.find(
+    board => board.id === activeDrawingBoardId.value
+  );
+  if (!activeBoard || activeBoard.strokes.length === 0) return;
+
+  // 切换到键盘后签名组件会卸载，因此提前保存这次待导出的数据快照。
+  const strokes = [...activeBoard.strokes];
+  const dataUrl = activeBoard.dataUrl;
+
+  signatureExportTimerId = window.setTimeout(() => {
+    signatureExportTimerId = null;
+    console.log("[signature.toData()]", strokes);
+    exportSignature(dataUrl);
+  }, autoSaveInterval);
+}
+
+function toggleDrawingBoardDrawer() {
+  updateActiveDrawingBoardThumbnail();
+  isDrawingBoardDrawerOpen.value = !isDrawingBoardDrawerOpen.value;
+}
+
+const saveActiveDrawingBoard = () => {
+  updateActiveDrawingBoardThumbnail();
+};
+
+const renumberDrawingBoards = () => {
+  drawingBoards.value.forEach((board, index) => {
+    board.name = t("interview.handwriting.board", { number: index + 1 });
   });
+};
 
-  const dataUrl = trimmed?.dataUrl ?? signature.save?.("image/png");
+const createDrawingBoardImageUrl = (
+  imageBase64?: string | null,
+  imageFormat?: string | null
+) => {
+  if (!imageBase64) return "";
+  return `data:image/${imageFormat || "png"};base64,${imageBase64}`;
+};
 
-  if (!dataUrl) return;
+const loadInterviewBoards = async () => {
+  const sessionId = route.params.id as string;
+  if (!sessionId) return;
 
-  const link = document.createElement("a");
-  link.href = dataUrl;
-  link.download = `handwriting-${Date.now()}.png`;
-  link.click();
-}
+  const response: InterviewCanvasListResponse =
+    await getInterviewBoardsApi(sessionId);
+  const items = Array.isArray(response?.items) ? response.items : [];
+
+  if (items.length === 0) {
+    drawingBoards.value = [
+      {
+        id: 1,
+        name: t("interview.handwriting.board", { number: 1 }),
+        dataUrl: "",
+        strokes: [],
+        redoStrokes: []
+      }
+    ];
+    activeDrawingBoardId.value = 1;
+    nextDrawingBoardId = 2;
+    return;
+  }
+
+  drawingBoards.value = items.map((item, index) => ({
+    id: item.canvas_index,
+    name: t("interview.handwriting.board", { number: index + 1 }),
+    dataUrl: createDrawingBoardImageUrl(item.image_base64, item.image_format),
+    strokes: item.canvas_payload?.strokes ?? [],
+    redoStrokes: []
+  }));
+  activeDrawingBoardId.value = drawingBoards.value[0].id;
+  nextDrawingBoardId =
+    Math.max(...drawingBoards.value.map(board => board.id)) + 1;
+};
+
+const loadKeyboardNote = async () => {
+  const sessionId = route.params.id as string;
+  if (!sessionId) return;
+
+  const response = await getKeyboardInterviewNoteApi(sessionId);
+  noteContent.value = response.item?.text ?? "";
+};
+
+const restoreDrawingBoard = async (board: DrawingBoard) => {
+  await signatureHistory.restore(board);
+};
+
+const selectDrawingBoard = async (board: DrawingBoard) => {
+  isDrawingBoardDrawerOpen.value = false;
+  if (board.id === activeDrawingBoardId.value) return;
+  saveActiveDrawingBoard();
+  activeDrawingBoardId.value = board.id;
+  await restoreDrawingBoard(board);
+};
+
+const addDrawingBoard = async () => {
+  isDrawingBoardDrawerOpen.value = false;
+  saveActiveDrawingBoard();
+  const boardId = nextDrawingBoardId++;
+  const board = {
+    id: boardId,
+    name: "",
+    dataUrl: "",
+    strokes: [],
+    redoStrokes: []
+  };
+  drawingBoards.value.push(board);
+  renumberDrawingBoards();
+  activeDrawingBoardId.value = board.id;
+  await restoreDrawingBoard(board);
+};
+
+const deleteDrawingBoard = async (board: DrawingBoard) => {
+  if (drawingBoards.value.length === 1) {
+    ElMessage({
+      message: t("interview.handwriting.keep_one_board"),
+      grouping: true,
+      type: "warning"
+    });
+    return;
+  }
+
+  try {
+    await deleteCanvasInterviewBoardApi(route.params.id as string, board.id);
+  } catch (error) {
+    console.error("[InterviewPage] 删除画板失败", error);
+    return;
+  }
+
+  const boardIndex = drawingBoards.value.findIndex(
+    item => item.id === board.id
+  );
+  drawingBoards.value = drawingBoards.value.filter(
+    item => item.id !== board.id
+  );
+  renumberDrawingBoards();
+
+  if (board.id !== activeDrawingBoardId.value) return;
+
+  const nextBoard =
+    drawingBoards.value[boardIndex - 1] ?? drawingBoards.value[boardIndex];
+  activeDrawingBoardId.value = nextBoard.id;
+  await restoreDrawingBoard(nextBoard);
+};
 
 const handleEndInterview = async () => {
   // 终态（ended/extracting/done）下不可再次结束：按钮已禁用，此处兜底。
@@ -1320,6 +1617,8 @@ const getInterviewDetail = async () => {
 
 onMounted(() => {
   getInterviewDetail();
+  void loadInterviewBoards();
+  void loadKeyboardNote();
 });
 </script>
 
@@ -1596,6 +1895,22 @@ onMounted(() => {
                 />
                 <ChatDotRound v-else class="panel-icon" />
                 <span>{{ transcriptPanelTitle }}</span>
+                <div v-if="activeSaveStatus !== 'idle'" class="saving-status">
+                  <el-icon
+                    v-if="activeSaveStatus === 'saving'"
+                    class="is-loading"
+                  >
+                    <Loading />
+                  </el-icon>
+                  <el-icon v-else><CircleCheck /></el-icon>
+                  <span class="is-loading-text">
+                    {{
+                      activeSaveStatus === "saving"
+                        ? $t("interview.save.saving")
+                        : $t("interview.save.success")
+                    }}
+                  </span>
+                </div>
               </div>
 
               <ReSegmented
@@ -1639,6 +1954,7 @@ onMounted(() => {
                   type="textarea"
                   :placeholder="$t('interview.notes.placeholder')"
                   resize="none"
+                  @input="scheduleKeyboardNoteSave"
                 />
               </div>
             </el-scrollbar>
@@ -1646,19 +1962,130 @@ onMounted(() => {
             <div v-else class="handwriting-shell">
               <div class="handwriting-toolbar">
                 <div class="handwriting-toolbar-group">
-                  <span class="handwriting-group-label">{{
-                    $t("interview.handwriting.common")
-                  }}</span>
                   <div class="handwriting-tools">
-                    <button
+                    <template
                       v-for="action in handwritingActions"
                       :key="action.key"
+                    >
+                      <span
+                        v-if="action.key === 'boards'"
+                        class="drawing-board-tool-anchor"
+                      >
+                        <button
+                          type="button"
+                          class="handwriting-tool"
+                          :class="{ active: isDrawingBoardDrawerOpen }"
+                          @click="action.handler"
+                        >
+                          <component :is="action.icon" class="tool-icon" />
+                          <span>{{ action.label }}</span>
+                        </button>
+                        <Transition name="drawing-board-drawer">
+                          <aside
+                            v-if="isDrawingBoardDrawerOpen"
+                            class="drawing-board-drawer"
+                          >
+                            <div class="drawing-board-drawer-head">
+                              <strong>{{
+                                $t("interview.handwriting.boards")
+                              }}</strong>
+                              <span class="drawing-board-drawer-actions">
+                                <button
+                                  type="button"
+                                  class="drawing-board-add"
+                                  :title="$t('interview.handwriting.add_board')"
+                                  @click="addDrawingBoard"
+                                >
+                                  <Plus />
+                                </button>
+                                <button
+                                  type="button"
+                                  class="drawing-board-close"
+                                  :title="
+                                    $t('interview.handwriting.close_boards')
+                                  "
+                                  @click="isDrawingBoardDrawerOpen = false"
+                                >
+                                  <Close />
+                                </button>
+                              </span>
+                            </div>
+
+                            <div class="drawing-board-list">
+                              <button
+                                v-for="board in drawingBoards"
+                                :key="board.id"
+                                type="button"
+                                class="drawing-board-item"
+                                :class="{
+                                  active: board.id === activeDrawingBoardId
+                                }"
+                                @click="selectDrawingBoard(board)"
+                              >
+                                <span class="drawing-board-thumbnail">
+                                  <img
+                                    v-if="board.dataUrl"
+                                    :src="board.dataUrl"
+                                    :alt="board.name"
+                                  />
+                                </span>
+                                <span class="drawing-board-name">{{
+                                  board.name
+                                }}</span>
+                                <el-popconfirm
+                                  :title="
+                                    $t('interview.handwriting.delete_confirm')
+                                  "
+                                  :confirm-button-text="
+                                    $t('interview.handwriting.delete')
+                                  "
+                                  :cancel-button-text="$t('home.cancel')"
+                                  @confirm="deleteDrawingBoard(board)"
+                                >
+                                  <template #reference>
+                                    <span
+                                      class="drawing-board-delete"
+                                      :title="
+                                        $t('interview.handwriting.delete_board')
+                                      "
+                                      role="button"
+                                      tabindex="0"
+                                      @click.stop
+                                    >
+                                      <Delete />
+                                    </span>
+                                  </template>
+                                </el-popconfirm>
+                              </button>
+                            </div>
+                          </aside>
+                        </Transition>
+                      </span>
+                      <button
+                        v-else
+                        type="button"
+                        class="handwriting-tool"
+                        :disabled="
+                          action.key === 'undo'
+                            ? !canUndoDrawing
+                            : action.key === 'redo'
+                              ? !canRedoDrawing
+                              : false
+                        "
+                        @click="action.handler"
+                      >
+                        <component :is="action.icon" class="tool-icon" />
+                        <span>{{ action.label }}</span>
+                      </button>
+                    </template>
+                    <button
                       type="button"
                       class="handwriting-tool"
-                      @click="action.handler"
+                      :class="{ active: !isEraserMode }"
+                      @click="selectBrushMode"
                     >
-                      <component :is="action.icon" class="tool-icon" />
-                      <span>{{ action.label }}</span>
+                      <component :is="handwritingIcon" class="tool-icon" />
+                      <span>{{ $t("interview.handwriting.pen") }}</span>
                     </button>
                     <button
                       type="button"
@@ -1667,21 +2094,12 @@ onMounted(() => {
                       @click="toggleEraserMode"
                     >
                       <component :is="eraserIcon" class="tool-icon" />
-                      <span>
-                        {{
-                          isEraserMode
-                            ? $t("interview.handwriting.erasing")
-                            : $t("interview.handwriting.eraser")
-                        }}
-                      </span>
+                      <span>{{ $t("interview.handwriting.eraser") }}</span>
                     </button>
                   </div>
                 </div>
 
                 <div class="handwriting-toolbar-group">
-                  <span class="handwriting-group-label">{{
-                    $t("interview.handwriting.color")
-                  }}</span>
                   <div class="handwriting-colors">
                     <button
                       v-for="color in brushColorPresets"
@@ -1699,6 +2117,17 @@ onMounted(() => {
                       :predefine="brushColorPresets"
                       @change="setBrushColor"
                     />
+                    <div class="stroke-width-control">
+                      <el-slider
+                        v-model="penStrokeWidth"
+                        :min="1"
+                        :max="10"
+                        :step="0.5"
+                        :show-tooltip="false"
+                        size="small"
+                      />
+                      <span>{{ penStrokeWidth }}px</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1711,6 +2140,7 @@ onMounted(() => {
                   :w="'100%'"
                   :h="'100%'"
                   :clearOnResize="false"
+                  @endStroke="scheduleSignatureAutoExport"
                 />
               </div>
             </div>
@@ -1844,6 +2274,21 @@ onMounted(() => {
     font-size: 16px;
     font-weight: 700;
     color: #24324a;
+  }
+
+  .saving-status {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    color: #909399;
+
+    .el-icon {
+      font-size: 13px;
+    }
+
+    .is-loading-text {
+      margin-left: 2px;
+    }
   }
 
   .panel-status {
@@ -2653,7 +3098,6 @@ onMounted(() => {
     flex-direction: column;
     min-height: 0;
     height: 100%;
-    padding: 16px 0 16px 16px;
   }
 
   .handwriting-shell {
@@ -2663,24 +3107,178 @@ onMounted(() => {
     min-height: 0;
     gap: 12px;
     padding: 16px;
+    background: #fff;
+
+    .drawing-board-tool-anchor {
+      position: relative;
+      display: inline-flex;
+    }
+
+    .drawing-board-drawer {
+      position: absolute;
+      z-index: 5;
+      top: calc(100% + 8px);
+      left: 0;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+      width: 280px;
+      max-width: calc(100vw - 32px);
+      max-height: min(420px, 50vh);
+      padding: 14px;
+      overflow: hidden;
+      background: rgb(255 255 255 / 96%);
+      border: 1px solid rgb(219 227 240 / 96%);
+      border-radius: 14px;
+      box-shadow:
+        0 8px 18px rgb(31 47 86 / 12%),
+        0 20px 42px rgb(31 47 86 / 22%);
+      backdrop-filter: blur(12px);
+    }
+
+    .drawing-board-drawer-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 10px;
+      color: #334155;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .drawing-board-drawer-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .drawing-board-add,
+    .drawing-board-close,
+    .drawing-board-delete {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      color: #64748b;
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+      transition:
+        color 0.2s ease,
+        background-color 0.2s ease;
+    }
+
+    .drawing-board-add:hover,
+    .drawing-board-close:hover,
+    .drawing-board-delete:hover {
+      color: #2563eb;
+      background: #eff6ff;
+    }
+
+    .drawing-board-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+      padding-top: 10px;
+      overflow-y: auto;
+    }
+
+    .drawing-board-item {
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr) 28px;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      padding: 7px;
+      color: #475569;
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      cursor: pointer;
+      transition:
+        border-color 0.2s ease,
+        background-color 0.2s ease;
+
+      &:hover {
+        background: #f8fafc;
+        border-color: #e2e8f0;
+      }
+
+      &.active {
+        color: #409eff;
+        background: #ecf5ff;
+        border-color: #a0cfff;
+      }
+    }
+
+    .drawing-board-thumbnail {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 48px;
+      height: 36px;
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 5px;
+    }
+
+    .drawing-board-thumbnail img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .drawing-board-name {
+      min-width: 0;
+      overflow: hidden;
+      font-size: 13px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .drawing-board-delete {
+      width: 28px;
+      height: 28px;
+    }
+
+    .drawing-board-drawer-enter-active,
+    .drawing-board-drawer-leave-active {
+      transition:
+        opacity 0.2s ease,
+        transform 0.2s ease;
+      transform-origin: top left;
+    }
+
+    .drawing-board-drawer-enter-from,
+    .drawing-board-drawer-leave-to {
+      opacity: 0;
+      transform: translateY(-8px) scale(0.98);
+    }
   }
 
   .handwriting-toolbar {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: stretch;
-    gap: 14px;
-    padding: 10px 16px;
-    background: rgb(241 245 249 / 92%);
-    border: 1px solid rgb(226 232 240 / 90%);
-    border-radius: 16px;
-    box-shadow: 0 8px 18px rgb(31 47 86 / 5%);
+    gap: 8px;
+    padding: 0 4px;
+    overflow: visible;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .handwriting-toolbar-group {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    align-items: center;
     min-width: 0;
   }
 
@@ -2695,7 +3293,7 @@ onMounted(() => {
   .handwriting-colors,
   .handwriting-sizes {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 10px;
     align-items: center;
   }
@@ -2703,16 +3301,20 @@ onMounted(() => {
   .handwriting-tool {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    height: 32px;
-    padding: 0 14px;
-    font-size: 13px;
+    justify-content: center;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 3px;
+    border-radius: 8px;
+    width: 58px;
+    height: 54px;
+    padding: 4px 6px;
+    font-size: 11px;
     font-weight: 600;
     color: #334155;
     cursor: pointer;
-    background: rgb(255 255 255 / 92%);
-    border: 1px solid rgb(226 232 240 / 96%);
-    border-radius: 8px;
+    background: transparent;
+    border: 0;
     transition:
       transform 0.2s ease,
       border-color 0.2s ease,
@@ -2720,17 +3322,29 @@ onMounted(() => {
       color 0.2s ease;
   }
 
-  .handwriting-tool:hover {
+  .handwriting-tool:active {
     color: #24324a;
-    border-color: rgb(74 144 226 / 35%);
-    box-shadow: 0 10px 20px rgb(74 144 226 / 10%);
-    transform: translateY(-1px);
+    background: rgb(239 246 255 / 70%);
+    box-shadow: none;
+    transform: none;
+  }
+
+  .handwriting-tool:disabled {
+    color: #b8c1cc;
+    background: transparent;
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
+
+  .handwriting-tool:disabled:active,
+  .handwriting-tool:disabled:hover {
+    color: #b8c1cc;
+    background: transparent;
   }
 
   .handwriting-tool.active {
-    color: #1f4ed8;
-    background: rgb(219 234 254 / 95%);
-    border-color: rgb(96 165 250 / 45%);
+    color: #409eff;
+    background: rgb(236, 245, 255);
   }
 
   .tool-icon {
@@ -2738,9 +3352,14 @@ onMounted(() => {
     height: 16px;
   }
 
+  .handwriting-toolbar-group + .handwriting-toolbar-group {
+    padding-left: 10px;
+    border-left: 1px solid rgb(203 213 225 / 80%);
+  }
+
   .color-swatch {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     padding: 0;
     background: var(--swatch-color);
     border: 2px solid rgb(255 255 255 / 96%);
@@ -2774,6 +3393,30 @@ onMounted(() => {
     border: 2px solid rgb(255 255 255 / 96%);
     border-radius: 999px;
     box-shadow: 0 4px 10px rgb(31 47 86 / 10%);
+  }
+
+  .stroke-width-control {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 10px;
+    margin-left: 4px;
+    color: #64748b;
+    font-size: 12px;
+    white-space: nowrap;
+
+    & :deep(.el-slider__button) {
+      width: 14px;
+      height: 14px;
+    }
+
+    & :deep(.el-slider) {
+      width: 86px;
+    }
+
+    & :deep(.el-slider__runway) {
+      margin: 10px 0;
+    }
   }
 
   .handwriting-pad {
@@ -2815,11 +3458,11 @@ onMounted(() => {
     width: 100%;
     height: 100%;
     min-height: 0;
-    padding: 0 4px 0 0;
+    padding: 16px;
     font-size: 15px;
     line-height: 1.8;
     color: #334155;
-    background: transparent;
+    background: #fff;
     border: none;
     box-shadow: none;
     resize: none;
@@ -2910,6 +3553,10 @@ onMounted(() => {
     box-sizing: border-box;
     height: 100%;
     padding-right: 12px;
+  }
+
+  .note-scroll :deep(.el-scrollbar__view) {
+    padding-right: 0;
   }
 
   .suggestion-scroll :deep(.el-scrollbar__bar.is-vertical),

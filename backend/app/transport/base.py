@@ -66,6 +66,8 @@ async def extract_auth(raw_token: Optional[str]) -> CurrentUser:
 
     失败抛 AuthError。HTTP dependency + WS hello.token 共用。
     改密后旧 token 的 pwd_ver 与 DB 不一致 → 立即吊销。
+    身份字段（role/username）真相源是 DB（get_auth_state），不信任 JWT claim
+    ——DB 降级后旧 admin token 最长 60s（缓存 TTL）即失权。
     """
     if not raw_token:
         raise AuthError("missing token")
@@ -82,21 +84,28 @@ async def extract_auth(raw_token: Optional[str]) -> CurrentUser:
     pwd_ver_claim = payload.get("pwd_ver")
     if pwd_ver_claim is None:
         raise AuthError("token missing pwd_ver")
-    pwd_changed_at = await user_repo.get_pwd_changed_at(user_id)
-    if pwd_changed_at is None:
+    state = await user_repo.get_auth_state(user_id)
+    # 列级判 None（勿改 if state is None——get_auth_state 永不返回 None）：
+    # password_changed_at 是 users 表唯一可空列，行缺失 / 迁移回填前 NULL 都
+    # 落这里，与旧 get_pwd_changed_at 的 user-not-found 契约逐字节等价。
+    if state.password_changed_at is None:
         raise AuthError("user not found")
     # SQLite + SQLAlchemy ORM 往返丢 tz：写入是 aware UTC，存为 naive 字符串，
     # 读出来 tzinfo=None。统一当 UTC 解释，避免不同系统时区下 pwd_ver 计算漂移
     # 导致「改密后 token 应被吊销却放行」(CI UTC 下) 或「未改密却误吊销」
     # (mac 等本地非 UTC 系统)。
+    pwd_changed_at = state.password_changed_at
     if pwd_changed_at.tzinfo is None:
         pwd_changed_at = pwd_changed_at.replace(tzinfo=timezone.utc)
     if int(pwd_changed_at.timestamp()) != int(pwd_ver_claim):
         raise AuthError("token revoked (pwd_ver mismatch)")
+    # role/username 真相源是 DB，不信任 JWT claim（claim 里的 role 仅装饰，
+    # 见 services/auth/token.py）——DB 降级后旧 admin token 最长 60s（缓存
+    # TTL）即失权。or 兜底为纯防御：行存在时 schema 保证两列非空。
     return CurrentUser(
         user_id=user_id,
-        username=payload.get("username", ""),
-        role=payload.get("role", "user"),
+        username=state.username or "",
+        role=state.role or "user",
     )
 
 

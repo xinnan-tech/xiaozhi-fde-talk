@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,9 +13,23 @@ from app.persistence.db import SessionLocal
 from app.persistence.models import User
 from app.services.auth._pwd_ver_clock import next_pwd_ver_ts
 
-# 内存缓存（user_id → (monotonic_ts, password_changed_at)）；TTL 60s。
+
+class AuthState(NamedTuple):
+    """鉴权快照：一次 SELECT 取出的 (password_changed_at, role, username)。
+
+    role/username 是鉴权真相源——extract_auth / refresh 从这里构造身份，
+    不信任 JWT claim（token 里的 role 仅装饰，见 services/auth/token.py）。
+    """
+
+    password_changed_at: datetime | None
+    role: str | None
+    username: str | None
+
+
+# 内存缓存（user_id → (monotonic_ts, AuthState)）；TTL 60s。
 # 简单 dict 不引外部依赖；大用户量场景后续可换 LRU + 事件失效。
-_pwd_cache: dict[str, tuple[float, datetime | None]] = {}
+# TTL 同样作用于 role：DB 降级后旧 admin token 最长 60s 内仍按旧角色鉴权。
+_pwd_cache: dict[str, tuple[float, AuthState]] = {}
 _PWD_CACHE_TTL = 60.0
 
 
@@ -40,12 +54,18 @@ class UserRepository:
     async def get_by_id(self, db: AsyncSession, user_id: str) -> Optional[User]:
         return await db.get(User, user_id)
 
-    async def get_pwd_changed_at(self, user_id: str) -> datetime | None:
-        """读 password_changed_at；命中缓存直接返。
+    async def get_auth_state(self, user_id: str) -> AuthState:
+        """读鉴权快照 (password_changed_at, role, username)；命中缓存直接返。
+
+        契约：**永不返回 None**——行缺失返回 AuthState(None, None, None)，调用方
+        按列判空（password_changed_at is None 即 user not found，与旧
+        get_pwd_changed_at 判 None 契约逐字节等价）。别写成 ``if state is None``：
+        该分支永不触发，None 列会滑进 CurrentUser 构造导致错误码静默漂移。
 
         缓存 TTL 60s——p99 改密场景下旧 token 最长可活 60s；安全性由前端
         主动跳到登录页兜底。改密路径（update_password / update_password_auto）
-        会显式 _pwd_cache.pop 让吊销即时生效。
+        会显式 _pwd_cache.pop 让吊销即时生效。TTL 对 role 同样生效：DB 改
+        role（降级）后旧 token 最长 60s 残留旧角色。
         """
         cached = _pwd_cache.get(user_id)
         if cached is not None:
@@ -54,7 +74,11 @@ class UserRepository:
                 return value
         async with SessionLocal() as db:
             row = await db.get(User, user_id)
-            value = row.password_changed_at if row else None
+            value = (
+                AuthState(row.password_changed_at, row.role, row.username)
+                if row
+                else AuthState(None, None, None)
+            )
         _pwd_cache[user_id] = (time.monotonic(), value)
         return value
 
@@ -78,7 +102,7 @@ class UserRepository:
         )
         db.add(user)
         await db.flush()  # 让 INSERT 落库 + 触发 unique 约束（IntegrityError 抛给调用方）
-        # 新建用户不在缓存中——无需主动失效；下次 get_pwd_changed_at 自然落库
+        # 新建用户不在缓存中——无需主动失效；下次 get_auth_state 自然落库
         return user
 
     async def update_password(self, db: AsyncSession, user_id: str, password_hash: str) -> None:

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.exceptions import AuthError
-from app.persistence.repositories.user import user_repo
+from app.persistence.repositories.user import AuthState, user_repo
 from app.services.auth.token import create_access_token, decode_token
 from app.transport.base import extract_auth
 
@@ -38,10 +38,14 @@ async def test_extract_auth_rejects_stale_pwd_ver(fake_jwt_secret, monkeypatch):
     token = await create_access_token(subject="u-x", pwd_ver=1000)
 
     class FakeRepo:
-        async def get_pwd_changed_at(self, user_id):
-            return datetime.fromtimestamp(2000, tz=timezone.utc)
+        async def get_auth_state(self, user_id):
+            return AuthState(
+                password_changed_at=datetime.fromtimestamp(2000, tz=timezone.utc),
+                role="user",
+                username="bob",
+            )
 
-    monkeypatch.setattr(user_repo, "get_pwd_changed_at", FakeRepo().get_pwd_changed_at)
+    monkeypatch.setattr(user_repo, "get_auth_state", FakeRepo().get_auth_state)
 
     with pytest.raises(AuthError):
         await extract_auth(token)

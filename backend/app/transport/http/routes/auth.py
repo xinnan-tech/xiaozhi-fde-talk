@@ -30,7 +30,7 @@ from app.core.security import verify_password_async
 from app.domain.auth import CurrentUser
 from app.persistence.db import get_db
 from app.persistence.models import User
-from app.persistence.repositories.user import user_repo
+from app.persistence.repositories.user import AuthState, user_repo
 from app.services.auth.cookies import (
     clear_auth_cookies,
     set_access_cookie,
@@ -151,7 +151,8 @@ async def login(
     user = await authenticate_user(db, req.username, req.password)
     if user is None:
         raise I18nError(Keys.HTTP_AUTH_INVALID_CREDENTIALS, http_status=401)
-    pwd_changed_at = await user_repo.get_pwd_changed_at(user.user_id)
+    state = await user_repo.get_auth_state(user.user_id)
+    pwd_changed_at = state.password_changed_at
     # 历史用户 password_changed_at 可能为 None（迁移前回填的边缘场景）；
     # 退化到当前时间——保证 token 必然签出，pwd_ver 与 DB 始终能比对。
     # naive datetime 统一当 UTC 解释，与 extract_auth 比对端对齐——
@@ -255,7 +256,8 @@ async def register(
             db.autobegin = True
 
     # 签发 token（含 pwd_ver，参考 login 路由 + Task 2 改密吊销约定）
-    pwd_changed_at = await user_repo.get_pwd_changed_at(current.user_id)
+    state = await user_repo.get_auth_state(current.user_id)
+    pwd_changed_at = state.password_changed_at
     # 历史用户 password_changed_at 可能为 None；退化到当前时间——保证 token
     # 必然签出，pwd_ver 与 DB 始终能比对（login 路由同款）。
     # naive datetime 统一当 UTC 解释，与 extract_auth 比对端对齐——
@@ -283,8 +285,11 @@ async def register(
 # refresh token / logout 端点（HttpOnly cookie 模型）
 # ─────────────────────────────────────────────────────────────────────
 
-async def _decode_refresh_or_raise(token_str: str, db: AsyncSession) -> dict:
+async def _decode_refresh_or_raise(token_str: str, db: AsyncSession) -> tuple[dict, AuthState]:
     """解析 refresh token：签名 + type=refresh + 未撤销 + pwd_ver 仍有效。
+
+    返回 (payload, auth_state)——state 供 refresh 端点构造 extra：role/username
+    真相源是 DB，不从旧 payload 拷贝（降级后过期 claim 不得续进新 access）。
 
     失败统一抛 I18nError 让前端拿到结构化 code。四类错误区分：
     - 签名 / 类型错 → AUTH_REFRESH_INVALID
@@ -311,15 +316,18 @@ async def _decode_refresh_or_raise(token_str: str, db: AsyncSession) -> dict:
     pwd_ver_claim = payload.get("pwd_ver")
     if not user_id or pwd_ver_claim is None:
         raise I18nError(Keys.AUTH_REFRESH_INVALID, http_status=401)
-    pwd_changed_at = await user_repo.get_pwd_changed_at(user_id)
-    if pwd_changed_at is None:
+    state = await user_repo.get_auth_state(user_id)
+    # 列级判 None：get_auth_state 永不返回 None；行缺失 / 迁移 NULL 都落这列
+    # （与 extract_auth 的 user-not-found 契约同源）。
+    if state.password_changed_at is None:
         raise I18nError(Keys.AUTH_REFRESH_REVOKED, http_status=401)
+    pwd_changed_at = state.password_changed_at
     # naive datetime 统一当 UTC 解释——见 login/register 注释，CI UTC 下漏吊销
     if pwd_changed_at.tzinfo is None:
         pwd_changed_at = pwd_changed_at.replace(tzinfo=timezone.utc)
     if int(pwd_changed_at.timestamp()) != int(pwd_ver_claim):
         raise I18nError(Keys.AUTH_REFRESH_REVOKED, http_status=401)
-    return payload
+    return payload, state
 
 
 def _read_refresh_cookie(request: Request) -> str | None:
@@ -344,10 +352,12 @@ async def refresh(
     if not refresh_token:
         # 401 + code：与「过期 / 撤销」同语义分支，前端按 401 走清 cookie 流程。
         raise I18nError(Keys.AUTH_REFRESH_INVALID, http_status=401)
-    payload = await _decode_refresh_or_raise(refresh_token, db)
+    payload, state = await _decode_refresh_or_raise(refresh_token, db)
     user_id = payload["sub"]
     cur_pwd_ver = int(payload["pwd_ver"])
-    extra = {k: payload[k] for k in ("username", "role") if k in payload}
+    # extra 从 DB 快照构造，不拷旧 payload 的 role/username——旧 claim 可能已
+    # 与 DB 不符（降级场景），拷贝会把过期权限续进新 access。
+    extra = {"username": state.username or "", "role": state.role or "user"}
     new_access = await create_access_token(
         subject=user_id, pwd_ver=cur_pwd_ver, extra=extra,
     )

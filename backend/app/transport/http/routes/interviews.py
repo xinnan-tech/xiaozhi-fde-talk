@@ -738,8 +738,10 @@ async def get_keyboard_note(
     session_id: str,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """拉该 session 当前键盘文本(最多 1 行)。"""
-    state = await _load_session_for_note(session_id, user.user_id)
+    """拉该 session 当前键盘文本(最多 1 行)。不校验状态机,与 GET /canvases 对齐。"""
+    state = await manager.get(session_id)
+    if state is None or state.session.user_id != user.user_id:
+        raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     from app.services.keyboard.service import get_keyboard_text_auto
 
     note = await get_keyboard_text_auto(

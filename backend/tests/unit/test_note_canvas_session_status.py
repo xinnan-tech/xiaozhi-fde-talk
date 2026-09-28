@@ -187,6 +187,50 @@ def test_canvas_delete_allows_ended(make_status_client, monkeypatch):
 
 # ---- runtime=None 时清 DB 镜像列 ----
 
+def test_keyboard_get_allows_paused(make_status_client, monkeypatch):
+    """GET /notes/keyboard 暂停状态也能读——报告页要看历史。"""
+    from app.services.keyboard.service import get_keyboard_text_auto
+    from datetime import datetime, timezone
+    from app.domain.note import KeyboardNote
+
+    fake_note = KeyboardNote(
+        session_id="s1", user_id="u1", text="已存在的键盘笔记",
+        client_created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    monkeypatch.setattr(
+        "app.services.keyboard.service.get_keyboard_text_auto",
+        AsyncMock(return_value=fake_note),
+    )
+
+    client = make_status_client(SessionStatus.SUSPENDED)
+    resp = client.get("/api/v1/interviews/s1/notes/keyboard")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["item"]["text"] == "已存在的键盘笔记"
+
+
+def test_keyboard_get_allows_ended(make_status_client, monkeypatch):
+    """GET /notes/keyboard ended 状态也能读。"""
+    from app.services.keyboard.service import get_keyboard_text_auto
+    from datetime import datetime, timezone
+    from app.domain.note import KeyboardNote
+
+    fake_note = KeyboardNote(
+        session_id="s1", user_id="u1", text="ended 后的笔记",
+        client_created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    monkeypatch.setattr(
+        "app.services.keyboard.service.get_keyboard_text_auto",
+        AsyncMock(return_value=fake_note),
+    )
+
+    client = make_status_client(SessionStatus.ENDED)
+    resp = client.get("/api/v1/interviews/s1/notes/keyboard")
+    assert resp.status_code == 200
+    assert resp.json()["item"]["text"] == "ended 后的笔记"
+
+
 def test_canvas_delete_clears_mirror_when_runtime_none(make_status_client, monkeypatch):
     """suspended/ended session 从新标签接入 → DELETE canvas 后 runtime is None 时
     清 DB 镜像列 interviews.handwriting_notes,避免 cold start 加载到已删 image_id 的 OCR。

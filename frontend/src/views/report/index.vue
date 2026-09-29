@@ -274,11 +274,16 @@ const loadInterviewBoards = async () => {
   const sessionId = route.params.id as string;
   if (!sessionId) return;
 
-  const response: InterviewCanvasListResponse =
-    await getInterviewBoardsApi(sessionId);
-  handwritingBoards.value = Array.isArray(response?.items)
-    ? response.items
-    : [];
+  try {
+    const response: InterviewCanvasListResponse =
+      await getInterviewBoardsApi(sessionId);
+    handwritingBoards.value = Array.isArray(response?.items)
+      ? response.items
+      : [];
+  } catch {
+    // 画板是独立内容，加载失败时不影响报告、转录和键盘笔记。
+    handwritingBoards.value = [];
+  }
 };
 
 /** 获取键盘笔记 */
@@ -286,8 +291,13 @@ const loadKeyboardNote = async () => {
   const sessionId = route.params.id as string;
   if (!sessionId) return;
 
-  const response = await getKeyboardInterviewNoteApi(sessionId);
-  keyboardNoteContent.value = response.item?.text ?? "";
+  try {
+    const response = await getKeyboardInterviewNoteApi(sessionId);
+    keyboardNoteContent.value = response.item?.text ?? "";
+  } catch {
+    // 键盘笔记是独立内容，加载失败时保留空状态。
+    keyboardNoteContent.value = "";
+  }
 };
 
 const getInterviewId = () => route.params.id as string;
@@ -412,11 +422,11 @@ const handleRegenerateReport = async () => {
 };
 
 onMounted(async () => {
+  // 画板和键盘笔记不依赖报告内容，必须立即发起，避免被慢报告接口阻塞。
+  void Promise.allSettled([loadInterviewBoards(), loadKeyboardNote()]);
+
   const detailLoaded = await getInterviewDetail();
   if (detailLoaded) await getInterviewReport();
-
-  void loadInterviewBoards();
-  void loadKeyboardNote();
 });
 </script>
 

@@ -13,7 +13,11 @@ import {
   getInterviewDetailApi,
   getInterviewReportApi,
   InterviewDetailItem,
-  type InterviewDetailType
+  type InterviewDetailType,
+  getInterviewBoardsApi,
+  getKeyboardInterviewNoteApi,
+  type InterviewCanvasItem,
+  type InterviewCanvasListResponse
 } from "@/api/interview";
 
 defineOptions({
@@ -55,7 +59,8 @@ const canExportReport = computed(
 const tabOptions = computed(() => [
   { key: "report", label: t("report.tab.report") },
   { key: "transcript", label: t("report.tab.transcript") },
-  { key: "note", label: t("report.tab.note"), disabled: true }
+  { key: "handwriting", label: t("report.tab.handwriting") },
+  { key: "keyboard", label: t("report.tab.keyboard") }
 ]);
 
 const moreOptions = computed(() => [
@@ -88,6 +93,8 @@ const moreOptions = computed(() => [
 const tabValue = ref(0);
 const interviewDetail = ref<InterviewDetailType>();
 const suggestions = ref<InterviewDetailItem[]>([]);
+const handwritingBoards = ref<InterviewCanvasItem[]>([]);
+const keyboardNoteContent = ref("");
 
 // 报告可用状态与后端 _REPORT_READY_STATUSES
 //（backend/app/transport/http/routes/reports.py:25）保持一致。
@@ -246,6 +253,43 @@ const getInterviewDetail = async () => {
   }
 };
 
+/** 获取所有画板 */
+const createDrawingBoardImageUrl = (
+  imageBase64?: string | null,
+  imageFormat?: string | null
+) => {
+  if (!imageBase64) return "";
+  return `data:image/${imageFormat || "png"};base64,${imageBase64}`;
+};
+
+const handwritingImageUrls = computed(() =>
+  handwritingBoards.value
+    .map(board =>
+      createDrawingBoardImageUrl(board.image_base64, board.image_format)
+    )
+    .filter(Boolean)
+);
+
+const loadInterviewBoards = async () => {
+  const sessionId = route.params.id as string;
+  if (!sessionId) return;
+
+  const response: InterviewCanvasListResponse =
+    await getInterviewBoardsApi(sessionId);
+  handwritingBoards.value = Array.isArray(response?.items)
+    ? response.items
+    : [];
+};
+
+/** 获取键盘笔记 */
+const loadKeyboardNote = async () => {
+  const sessionId = route.params.id as string;
+  if (!sessionId) return;
+
+  const response = await getKeyboardInterviewNoteApi(sessionId);
+  keyboardNoteContent.value = response.item?.text ?? "";
+};
+
 const getInterviewId = () => route.params.id as string;
 
 const handleMoreChange = (option: SelectOption) => {
@@ -370,6 +414,9 @@ const handleRegenerateReport = async () => {
 onMounted(async () => {
   const detailLoaded = await getInterviewDetail();
   if (detailLoaded) await getInterviewReport();
+
+  void loadInterviewBoards();
+  void loadKeyboardNote();
 });
 </script>
 
@@ -452,7 +499,7 @@ onMounted(async () => {
           </el-scrollbar>
         </aside>
 
-        <article class="report-card">
+        <div class="report-card">
           <el-scrollbar class="report-scroll">
             <!-- Report -->
             <template v-if="activeTab === 'report'">
@@ -517,10 +564,54 @@ onMounted(async () => {
                 </div>
               </article>
             </div>
-            <!-- Notes -->
-            <div v-else class="note-image" />
+            <!-- Handwriting -->
+            <div v-else-if="activeTab === 'handwriting'">
+              <div v-if="handwritingBoards.length > 0" class="handwriting">
+                <div
+                  v-for="(board, index) in handwritingBoards"
+                  :key="board.canvas_index"
+                  class="handwriting-card"
+                >
+                  <el-image
+                    v-if="
+                      createDrawingBoardImageUrl(
+                        board.image_base64,
+                        board.image_format
+                      )
+                    "
+                    class="handwriting-thumbnail"
+                    :src="
+                      createDrawingBoardImageUrl(
+                        board.image_base64,
+                        board.image_format
+                      )
+                    "
+                    fit="contain"
+                    :preview-src-list="handwritingImageUrls"
+                    :initial-index="index"
+                    preview-teleported
+                  />
+                  <div v-else class="handwriting-thumbnail" />
+                  <div class="handwriting-card-title">
+                    {{ t("report.handwriting.board", { number: index + 1 }) }}
+                  </div>
+                </div>
+              </div>
+              <div v-else class="handwriting-empty">
+                {{ t("report.handwriting.empty") }}
+              </div>
+            </div>
+            <!-- Keyboard Note -->
+            <div v-else-if="activeTab === 'keyboard'" class="keyboard">
+              <div v-if="keyboardNoteContent" class="keyboard-content">
+                {{ keyboardNoteContent }}
+              </div>
+              <div v-else class="keyboard-empty">
+                {{ t("report.keyboard.empty") }}
+              </div>
+            </div>
           </el-scrollbar>
-        </article>
+        </div>
       </div>
     </div>
   </div>
@@ -714,6 +805,11 @@ onMounted(async () => {
     backdrop-filter: blur(10px);
   }
 
+  .report-card {
+    overflow: hidden;
+    padding: 0;
+  }
+
   .report-scroll,
   .insight-scroll {
     display: flex;
@@ -723,7 +819,7 @@ onMounted(async () => {
   }
 
   .report-content {
-    padding: 0 16px;
+    padding: 16px;
   }
 
   .report-loading,
@@ -992,6 +1088,93 @@ onMounted(async () => {
     color: #334155;
   }
 
+  .handwriting {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    align-content: start;
+    padding: 16px;
+  }
+
+  @media (width < 1400px) {
+    .handwriting {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @media (width < 950px) {
+    .handwriting {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (width < 640px) {
+    .handwriting {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .handwriting-empty {
+    display: grid;
+    place-items: center;
+    min-height: 240px;
+    color: #94a3b8;
+  }
+
+  .handwriting-card {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 12px;
+    background-color: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    border-radius: 16px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.08);
+    backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+
+    &:hover {
+      border-color: rgb(255 255 255 / 90%);
+      box-shadow: 0 0 16px rgb(0 0 0 / 12%);
+      transform: translateY(-2px);
+    }
+  }
+
+  .handwriting-thumbnail {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    border: 1px solid rgb(226 232 240 / 90%);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .handwriting-card-title {
+    overflow: hidden;
+    font-size: 15px;
+    font-weight: 600;
+    color: #24324a;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .keyboard-content,
+  .keyboard-empty {
+    padding: 20px;
+    color: #334155;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .keyboard-empty {
+    display: grid;
+    place-items: center;
+    min-height: 240px;
+    color: #94a3b8;
+  }
+
   /* 笔记图片样式 */
   .note-image {
     display: flex;
@@ -1155,6 +1338,22 @@ onMounted(async () => {
 
   .record-page .tab-bar {
     width: 100%;
+  }
+
+  .record-page .handwriting {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .record-page .handwriting-card {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .record-page .handwriting {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch
+} from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import dayjs from "dayjs";
@@ -219,6 +226,10 @@ const activeDrawingBoardId = ref(1);
 const isDrawingBoardDrawerOpen = ref(false);
 let signatureExportTimerId: number | null = null;
 let keyboardNoteSaveTimerId: number | null = null;
+let handwritingBoardInitialized = false;
+let signatureSavePromise: Promise<boolean> | null = null;
+let keyboardNoteSavePromise: Promise<boolean> | null = null;
+let interviewActionPending = false;
 const autoSaveInterval = 5000; // 5秒自动保存一次
 let nextDrawingBoardId = 2;
 const signatureSaveStatus = ref<"idle" | "saving" | "success">("idle");
@@ -243,16 +254,31 @@ const brushColorPresets = [
 const selectedBrushColor = ref(brushColorPresets[0]);
 const isEraserMode = ref(false);
 const penStrokeWidth = ref(2);
-const eraserStrokeWidth = 8;
-const signatureOptions = computed(() => ({
+const signatureOptions = {
   penColor: selectedBrushColor.value,
   backgroundColor: "rgb(255, 255, 255)",
-  minWidth: isEraserMode.value ? eraserStrokeWidth : penStrokeWidth.value,
-  maxWidth: isEraserMode.value ? eraserStrokeWidth : penStrokeWidth.value,
+  minWidth: 2,
+  maxWidth: 2,
   throttle: 12,
   minDistance: 5,
-  compositeOperation: isEraserMode.value ? "destination-out" : "source-over"
-}));
+  compositeOperation: "source-over",
+  canvasContextOptions: {
+    willReadFrequently: true
+  }
+};
+
+const syncSignatureStyle = () => {
+  const signature = signatureRef.value?.getInstance?.();
+  if (!signature) return;
+  signature.minWidth = penStrokeWidth.value;
+  signature.maxWidth = penStrokeWidth.value;
+  signature.penColor = selectedBrushColor.value;
+  signature.compositeOperation = isEraserMode.value
+    ? "destination-out"
+    : "source-over";
+};
+
+watch(penStrokeWidth, syncSignatureStyle);
 
 const noteInputRef = ref();
 
@@ -547,33 +573,41 @@ const handleStartInterview = async () => {
   }
 };
 
-const handlePauseInterview = async () => {
-  if (!isInterviewStarted.value) return;
-  let suspended = false;
+const handlePauseInterview = async (): Promise<boolean> => {
+  if (!isInterviewStarted.value) return true;
+  if (interviewActionPending) return false;
+  interviewActionPending = true;
+
   try {
-    await suspendInterviewApi(getInterviewSessionId());
-    suspended = true;
-  } catch (e: unknown) {
-    // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
-    const hasResponse = (e as { response?: unknown })?.response !== undefined;
-    if (!hasResponse) {
-      ElMessage.error(t("interview.pause_failed"));
+    const savedBeforePause = await flushPendingSaves();
+    if (!savedBeforePause) return false;
+
+    try {
+      await suspendInterviewApi(getInterviewSessionId());
+    } catch (e: unknown) {
+      // 后端 4xx/5xx 已由 http 响应拦截器统一 toast；这里只在网络层异常时给兜底。
+      const hasResponse = (e as { response?: unknown })?.response !== undefined;
+      if (!hasResponse) {
+        ElMessage.error(t("interview.pause_failed"));
+      }
+      return false;
     }
-  }
-  sendListenState("stop");
-  stopMicrophone();
-  isInterviewStarted.value = false;
-  stopInterviewTimer();
-  if (interviewDetail.value) {
-    interviewDetail.value.status = "suspended";
-  }
-  if (activeMode.value !== "transcript") {
-    activeModeIndex.value = 2;
-    await setMode("transcript");
-  }
-  // API 真把 status 落库成功后再通知首页刷新；失败时 toast 已提示，无需静默重试
-  if (suspended) {
+
+    sendListenState("stop");
+    stopMicrophone();
+    isInterviewStarted.value = false;
+    stopInterviewTimer();
+    if (interviewDetail.value) {
+      interviewDetail.value.status = "suspended";
+    }
+    if (activeMode.value !== "transcript") {
+      activeModeIndex.value = 2;
+      await setMode("transcript");
+    }
     interviewStore.markInterviewStatusChanged();
+    return true;
+  } finally {
+    interviewActionPending = false;
   }
 };
 
@@ -1169,7 +1203,8 @@ onBeforeUnmount(() => {
 
 const handleBack = async () => {
   if (isInterviewStarted.value) {
-    void handlePauseInterview();
+    const paused = await handlePauseInterview();
+    if (!paused) return;
   }
   if (window.history.length > 1) {
     router.back();
@@ -1179,21 +1214,39 @@ const handleBack = async () => {
 };
 
 const setMode = async (mode: string) => {
-  // 手写组件在切换到其他模式时会被卸载，先把当前画板保存下来。
+  // 手写组件使用 v-show 保留画布实例，切换时只关闭画板抽屉。
   if (isHandwritingMode.value && mode !== "handwriting") {
     isDrawingBoardDrawerOpen.value = false;
-    saveActiveDrawingBoard();
   }
   activeMode.value = mode;
-  await scrollTranscriptToTop();
 
-  // 返回手写模式后组件会重新挂载，需要把当前画板的笔画恢复到新实例。
+  // 首次显示隐藏的手写组件时，需要恢复画板内容。
   if (mode === "handwriting") {
     await nextTick();
-    const board = drawingBoards.value.find(
-      item => item.id === activeDrawingBoardId.value
-    );
-    if (board) await restoreDrawingBoard(board);
+    const canvas = signatureRef.value?.getInstance?.().canvas;
+    if (canvas?.width === 0 || canvas?.height === 0) {
+      window.dispatchEvent(new Event("resize"));
+    }
+    if (!handwritingBoardInitialized) {
+      await new Promise<void>(resolve => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => resolve());
+        });
+      });
+      const board = drawingBoards.value.find(
+        item => item.id === activeDrawingBoardId.value
+      );
+      if (board) {
+        await restoreDrawingBoard(board);
+        handwritingBoardInitialized = true;
+      }
+    }
+  } else if (mode === "keyboard") {
+    await nextTick();
+    focusNoteEditor();
+  } else if (mode === "transcript") {
+    await nextTick();
+    await scrollTranscriptToTop();
   }
 };
 
@@ -1264,10 +1317,12 @@ const focusNoteEditor = () => {
 const setBrushColor = (color: string) => {
   selectedBrushColor.value = color;
   isEraserMode.value = false;
+  syncSignatureStyle();
 };
 
 const toggleEraserMode = () => {
   isEraserMode.value = !isEraserMode.value;
+  syncSignatureStyle();
 };
 
 async function handleUndo() {
@@ -1276,6 +1331,13 @@ async function handleUndo() {
   );
   if (!activeBoard) return;
   activeBoard.dataUrl = await signatureHistory.undo(activeBoard);
+}
+
+function captureDrawingSnapshot() {
+  const activeBoard = drawingBoards.value.find(
+    board => board.id === activeDrawingBoardId.value
+  );
+  if (activeBoard) signatureHistory.captureSnapshot(activeBoard);
 }
 
 async function handleRedo() {
@@ -1288,6 +1350,7 @@ async function handleRedo() {
 
 function selectBrushMode() {
   isEraserMode.value = false;
+  syncSignatureStyle();
 }
 
 const updateActiveDrawingBoardThumbnail = () => {
@@ -1313,6 +1376,7 @@ function clearKeyboardNoteSaveTimer() {
 }
 
 async function saveKeyboardNote() {
+  if (keyboardNoteSavePromise) return keyboardNoteSavePromise;
   clearKeyboardNoteSaveTimer();
   const data: KeyboardNoteType = {
     text: noteContent.value,
@@ -1320,13 +1384,23 @@ async function saveKeyboardNote() {
   };
 
   keyboardNoteSaveStatus.value = "saving";
-  try {
-    await addKeyboardInterviewNoteApi(route.params.id as string, data);
-    keyboardNoteSaveStatus.value = "success";
-  } catch (error) {
-    keyboardNoteSaveStatus.value = "idle";
-    console.error("[InterviewPage] 保存键盘笔记失败", error);
-  }
+  keyboardNoteSavePromise = addKeyboardInterviewNoteApi(
+    route.params.id as string,
+    data
+  )
+    .then(() => {
+      keyboardNoteSaveStatus.value = "success";
+      return true;
+    })
+    .catch(error => {
+      keyboardNoteSaveStatus.value = "idle";
+      console.error("[InterviewPage] 保存键盘笔记失败", error);
+      return false;
+    })
+    .finally(() => {
+      keyboardNoteSavePromise = null;
+    });
+  return keyboardNoteSavePromise;
 }
 
 function scheduleKeyboardNoteSave() {
@@ -1338,16 +1412,33 @@ function scheduleKeyboardNoteSave() {
   }, autoSaveInterval);
 }
 
+async function flushPendingSaves() {
+  const hasPendingSignatureSave = signatureExportTimerId !== null;
+  const hasPendingKeyboardSave = keyboardNoteSaveTimerId !== null;
+
+  clearSignatureExportTimer();
+  clearKeyboardNoteSaveTimer();
+
+  const results = await Promise.all([
+    signatureSavePromise ??
+      (hasPendingSignatureSave ? saveSignature() : Promise.resolve(true)),
+    keyboardNoteSavePromise ??
+      (hasPendingKeyboardSave ? saveKeyboardNote() : Promise.resolve(true))
+  ]);
+
+  return results.every(Boolean);
+}
+
 /**
  * 导出当前画板的笔画轨迹、canvas图，保存到后端
  */
-async function exportSignature(dataUrl?: string) {
+async function exportSignature(dataUrl?: string): Promise<boolean> {
   clearSignatureExportTimer();
   const strokes = signatureHistory.readStrokes();
-  if (strokes.length === 0) return;
+  if (strokes.length === 0) return true;
 
   const imageDataUrl = dataUrl ?? signatureRef.value?.save?.();
-  if (!imageDataUrl) return;
+  if (!imageDataUrl) return false;
 
   const filedata = imageDataUrl.replace(
     /^data:image\/(?:png|jpeg|jpg|bmp);base64,/i,
@@ -1364,10 +1455,20 @@ async function exportSignature(dataUrl?: string) {
   try {
     await addCanvasInterviewBoardApi(route.params.id as string, canvasBoard);
     signatureSaveStatus.value = "success";
+    return true;
   } catch (error) {
     signatureSaveStatus.value = "idle";
     console.error("[InterviewPage] 保存画板失败", error);
+    return false;
   }
+}
+
+function saveSignature(dataUrl?: string) {
+  if (signatureSavePromise) return signatureSavePromise;
+  signatureSavePromise = exportSignature(dataUrl).finally(() => {
+    signatureSavePromise = null;
+  });
+  return signatureSavePromise;
 }
 
 function scheduleSignatureAutoExport() {
@@ -1384,8 +1485,7 @@ function scheduleSignatureAutoExport() {
 
   signatureExportTimerId = window.setTimeout(() => {
     signatureExportTimerId = null;
-    console.log("[signature.toData()]", strokes);
-    exportSignature(dataUrl);
+    void saveSignature(dataUrl);
   }, autoSaveInterval);
 }
 
@@ -1520,6 +1620,8 @@ const deleteDrawingBoard = async (board: DrawingBoard) => {
 const handleEndInterview = async () => {
   // 终态（ended/extracting/done）下不可再次结束：按钮已禁用，此处兜底。
   if (isTerminalStatus.value) return;
+  if (interviewActionPending) return;
+  interviewActionPending = true;
   try {
     await ElMessageBox.confirm(
       t("interview.end_confirm"),
@@ -1531,12 +1633,19 @@ const handleEndInterview = async () => {
       }
     );
   } catch {
+    interviewActionPending = false;
     return;
   }
   // 二次保护：confirm 等待期间状态可能已变。
-  if (isTerminalStatus.value) return;
+  if (isTerminalStatus.value) {
+    interviewActionPending = false;
+    return;
+  }
 
   try {
+    const savedBeforeEnd = await flushPendingSaves();
+    if (!savedBeforeEnd) return;
+
     await endInterviewApi(getInterviewSessionId());
     interviewStore.markInterviewStatusChanged();
   } catch (e: unknown) {
@@ -1546,6 +1655,8 @@ const handleEndInterview = async () => {
       ElMessage.error(t("interview.end_failed"));
     }
     return;
+  } finally {
+    interviewActionPending = false;
   }
 
   stopInterviewTimer();
@@ -1959,7 +2070,7 @@ onMounted(() => {
               </div>
             </el-scrollbar>
 
-            <div v-else class="handwriting-shell">
+            <div v-show="isHandwritingMode" class="handwriting-shell">
               <div class="handwriting-toolbar">
                 <div class="handwriting-toolbar-group">
                   <div class="handwriting-tools">
@@ -2140,6 +2251,8 @@ onMounted(() => {
                   :w="'100%'"
                   :h="'100%'"
                   :clearOnResize="false"
+                  @ready="syncSignatureStyle"
+                  @beginStroke="captureDrawingSnapshot"
                   @endStroke="scheduleSignatureAutoExport"
                 />
               </div>

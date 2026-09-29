@@ -16,6 +16,7 @@ def test_url_keys_exact_set():
         "asr.funasr_server.ws_url",
         "llm.base_url",
         "ocr.base_url",
+        "handwriting.base_url",
     }
 
 
@@ -25,9 +26,10 @@ def test_url_keys_ws_url_allowed_schemes():
 
 
 def test_url_keys_http_base_urls_allowed_schemes():
-    """LLM / OCR 入口走 HTTP(S)。"""
+    """LLM / OCR / 手写 OCR 入口都走 HTTP(S)。"""
     assert URL_KEYS["llm.base_url"] == {"http", "https"}
     assert URL_KEYS["ocr.base_url"] == {"http", "https"}
+    assert URL_KEYS["handwriting.base_url"] == {"http", "https"}
 
 
 def test_validate_value_accepts_ws_url_ws():
@@ -44,10 +46,11 @@ def test_validate_value_accepts_ws_url_with_path():
 
 def test_validate_value_accepts_url_keys_empty_string():
     """空串放行：admin PUT "" 清空 ws_url → runtime 走 funasr_server.py:144
-    未配置即 fail-fast 路径。llm.base_url / ocr.base_url 同理。"""
+    未配置即 fail-fast 路径。llm.base_url / ocr.base_url / handwriting.base_url 同理。"""
     validate_value("asr.funasr_server.ws_url", "")  # 不抛
     validate_value("llm.base_url", "")  # 不抛
     validate_value("ocr.base_url", "")  # 不抛
+    validate_value("handwriting.base_url", "")  # 不抛
 
 
 def test_validate_value_accepts_llm_base_url_https():
@@ -215,3 +218,17 @@ def test_sanitize_loaded_values_keeps_valid_url():
     loaded = {"asr.funasr_server.ws_url": "wss://asr.example.com/ws"}
     sanitized, _ = cs._sanitize_loaded_values(loaded)
     assert sanitized == loaded
+
+
+def test_validate_handwriting_base_url_https():
+    """手写 OCR 入口走 HTTPS——百度的 https://aip.baidubce.com 默认值。"""
+    validate_value("handwriting.base_url", "https://aip.baidubce.com")  # 不抛
+
+
+def test_validate_value_rejects_handwriting_base_url_ws():
+    """ws 协议不是 http/https,拒。"""
+    with pytest.raises(I18nError) as ei:
+        validate_value("handwriting.base_url", "ws://x")
+    assert ei.value.code == Keys.CONFIG_INVALID_ENUM_VALUE.value
+    assert ei.value.params["field"] == "handwriting.base_url"
+    assert ei.value.http_status == 400

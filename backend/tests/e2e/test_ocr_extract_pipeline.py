@@ -64,7 +64,7 @@ def test_ocr_to_extract_pipeline_zh_cn(e2e_client):
     fake_image = b"\x89PNG\r\n\x1a\n_FAKE"
     b64 = base64.b64encode(fake_image).decode()
 
-    with patch("app.adapters.ocr.factory.get_ocr") as mock_get_ocr, \
+    with patch("app.adapters.ocr.factory.get_general_ocr") as mock_get_ocr, \
          patch("app.adapters.llm.factory.get_llm") as mock_get_llm, \
          patch("app.transport.http.routes.interviews.get_config_store", return_value=fake_store):
         mock_get_ocr.return_value.configured = True
@@ -103,7 +103,7 @@ def test_ocr_to_extract_pipeline_en(e2e_client):
     fake_image = b"\x89PNG\r\n\x1a\n_FAKE"
     b64 = base64.b64encode(fake_image).decode()
 
-    with patch("app.adapters.ocr.factory.get_ocr") as mock_get_ocr, \
+    with patch("app.adapters.ocr.factory.get_general_ocr") as mock_get_ocr, \
          patch("app.adapters.llm.factory.get_llm") as mock_get_llm, \
          patch("app.transport.http.routes.interviews.get_config_store", return_value=fake_store):
         mock_get_ocr.return_value.configured = True
@@ -133,7 +133,7 @@ def test_ocr_prompt_constant_used_by_endpoint(e2e_client):
     fake_image = b"\x89PNG\r\n\x1a\n_FAKE"
     b64 = base64.b64encode(fake_image).decode()
 
-    with patch("app.adapters.ocr.factory.get_ocr") as mock_get_ocr:
+    with patch("app.adapters.ocr.factory.get_general_ocr") as mock_get_ocr:
         mock_get_ocr.return_value.configured = True
         mock_get_ocr.return_value.recognize = fake_recognize
         e2e_client.post("/api/v1/interviews/ocr", json={"image_base64": b64})

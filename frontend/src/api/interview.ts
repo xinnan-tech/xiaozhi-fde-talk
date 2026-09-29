@@ -217,6 +217,43 @@ export type InterviewReportType = {
   content_md: string;
 };
 
+export type CanvasBoardType = {
+  id: number;
+  payload: {
+    strokes: unknown[];
+  };
+  filedata: string;
+  client_updated_at: string;
+};
+
+export type InterviewCanvasItem = {
+  canvas_index: number;
+  image_base64?: string | null;
+  image_format?: string | null;
+  canvas_payload?: {
+    strokes?: unknown[];
+  } | null;
+};
+
+export type InterviewCanvasListResponse = {
+  items: InterviewCanvasItem[];
+};
+
+export type KeyboardNoteType = {
+  text: string;
+  client_created_at: string;
+};
+
+export type KeyboardNoteResponse = {
+  item:
+    | (KeyboardNoteType & {
+        session_id: string;
+        user_id: string;
+        updated_at: string;
+      })
+    | null;
+};
+
 /** 获取访谈详情 */
 export const getInterviewDetailApi = (id: string) => {
   return http.request<InterviewDetailType>(
@@ -309,5 +346,62 @@ export const deleteInterviewApi = (sessionId: string) => {
   return http.request<unknown>(
     "delete",
     baseUrlApi(`/api/v1/interviews/${sessionId}`)
+  );
+};
+
+/** 获取所有画板 */
+export const getInterviewBoardsApi = (sessionId: string) => {
+  return http.request<InterviewCanvasListResponse>(
+    "get",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/canvases`)
+  );
+};
+
+/** 获取键盘笔记 */
+export const getKeyboardInterviewNoteApi = (sessionId: string) => {
+  return http.request<KeyboardNoteResponse>(
+    "get",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/notes/keyboard`)
+  );
+};
+
+/** 保存键盘笔记 */
+export const addKeyboardInterviewNoteApi = (
+  sessionId: string,
+  data: KeyboardNoteType
+) => {
+  return http.request<KeyboardNoteResponse>(
+    "post",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/notes/keyboard`),
+    { data }
+  );
+};
+
+/** 删除指定画板 */
+export const deleteCanvasInterviewBoardApi = (
+  sessionId: string,
+  canvasIndex: number
+) => {
+  return http.request<{ deleted_ids: number[] }>(
+    "delete",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/canvases/${canvasIndex}`)
+  );
+};
+
+/** 新增画板 */
+export const addCanvasInterviewBoardApi = (
+  sessionId: string,
+  data: CanvasBoardType
+) => {
+  return http.request<unknown>(
+    "post",
+    baseUrlApi(`/api/v1/interviews/${sessionId}/canvases/${data.id}`),
+    {
+      data: {
+        payload: data.payload,
+        filedata: data.filedata,
+        client_updated_at: data.client_updated_at
+      }
+    }
   );
 };

@@ -98,10 +98,16 @@ async def test_runtime_flush_now_passes_transcript_only(make_state):
 
 
 @pytest.mark.asyncio
-async def test_runtime_persist_for_recompute_passes_coaching_only(make_state):
-    """重算落盘应收窄到 coaching 分组。"""
+async def test_runtime_persist_for_recompute_passes_coaching_and_notes(make_state):
+    """重算落盘应收窄到 coaching + notes 分组,且 dirty 清零必须与 fields 对称——
+
+    否则 transcript 脏位会被重算路径误清,下次 _flush_now 早退,用户最新
+    口述段丢失。
+    """
     rt = SessionRuntime(make_state())
     rt._send_fn = AsyncMock()
+    rt._dirty_segments = 7  # 模拟 _on_utterance 已累积脏段
+    rt._dirty_notes = True  # 模拟 engine.on_note_added 触发路径
     captured: dict = {}
 
     async def fake_save_state(*, fields=None):
@@ -109,7 +115,9 @@ async def test_runtime_persist_for_recompute_passes_coaching_only(make_state):
 
     rt._save_state = fake_save_state
     await rt._persist_for_recompute()
-    assert captured["fields"] == {"coaching"}
+    assert captured["fields"] == {"coaching", "notes"}
+    assert rt._dirty_notes is False  # 落盘分组覆盖 notes → 清脏位
+    assert rt._dirty_segments == 7  # 落盘分组不含 transcript → 保留脏位
 
 
 @pytest.mark.asyncio

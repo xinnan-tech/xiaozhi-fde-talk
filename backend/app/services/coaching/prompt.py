@@ -119,13 +119,25 @@ def build_user(state: SessionState) -> str:
         ensure_ascii=False,
     ) or "[]"
     skipped = sorted(state.skipped_ids)
-    # 用户输入一律用 <user_*> 标签包裹 + 转义，与指令隔离防注入
-    return (
-        f"<user_transcript>\n{_escape_xml(transcript)}\n</user_transcript>\n\n"
-        f"<user_progress>\n{_escape_xml(current)}\n</user_progress>\n\n"
-        f"<user_skipped>{_escape_xml(','.join(skipped))}</user_skipped>\n\n"
-        "Output the updated complete list now."
-    )
+    parts = [f"<user_transcript>\n{_escape_xml(transcript)}\n</user_transcript>"]
+    # 键盘笔记:覆盖式,空时整块不输出(节省 token + 提示 LLM 没键盘输入)
+    if state.keyboard_text:
+        parts.append(
+            f"<user_keyboard>\n{_escape_xml(state.keyboard_text)}\n</user_keyboard>"
+        )
+    # 手写笔记:append,每张图独立段。injected_at 取注入 state 的时刻,
+    # 不是 DB 原图提交时刻——prompt 渲染时间戳来自这里
+    if state.handwriting_notes:
+        hw_lines = "\n".join(
+            f"[img#{n.image_id} | {n.injected_at.strftime('%H:%M:%S')}] "
+            f"{_escape_xml(n.text)}"
+            for n in state.handwriting_notes
+        )
+        parts.append(f"<user_handwriting>\n{hw_lines}\n</user_handwriting>")
+    parts.append(f"<user_progress>\n{_escape_xml(current)}\n</user_progress>")
+    parts.append(f"<user_skipped>{_escape_xml(','.join(skipped))}</user_skipped>")
+    parts.append("Output the updated complete list now.")
+    return "\n\n".join(parts)
 
 
 # 首评 prompt：访谈尚未开始，据 base_info/goal + 模板基线生成第一批问题。

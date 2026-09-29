@@ -72,6 +72,7 @@
   "asr.feed_fail": "ASR feed failed: {err}",
   "ocr.not_configured": "OCR not configured (ocr.base_url / ocr.api_key / ocr.model)",
   "ocr.invoke_failed": "OCR invocation failed: {err}",
+  "handwriting.not_configured": "Handwriting OCR not configured (handwriting.base_url / handwriting.api_key / handwriting.model). Configure it under \"⚙️ Admin → Handwriting\".",
   "diag.llm.config_missing_raw": "LLM config missing: {detail}",
   "diag.llm.config_missing": "LLM not configured (missing: {missing}), please fill under '⚙️ Backend Config'",
   "diag.llm.invoke_fail": "LLM call failed: {detail}",

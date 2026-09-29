@@ -1,10 +1,10 @@
 """/api/v1/diagnostics — 部署后连通性自检。
 
-- POST /diagnostics          并发跑 ASR + LLM + OCR
+- POST /diagnostics          并发跑 ASR + LLM + OCR + 手写 OCR
 - POST /diagnostics/asr      单跑 ASR
 - POST /diagnostics/llm      单跑 LLM
-
 - POST /diagnostics/ocr      单跑 OCR
+- POST /diagnostics/handwriting  单跑手写 OCR
 结果结构统一为 {ok, code, message, latency_ms, detail?}（详见 services/diagnostics.py）。
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.domain.auth import CurrentUser
-from app.services.diagnostics import diagnose_all, diagnose_asr, diagnose_llm, diagnose_ocr
+from app.services.diagnostics import diagnose_all, diagnose_asr, diagnose_llm, diagnose_ocr, diagnose_handwriting
 from app.transport.http.dependencies import require_admin
 
 router = APIRouter(prefix="/diagnostics")
@@ -36,3 +36,8 @@ async def run_llm(user: CurrentUser = Depends(require_admin)):
 @router.post("/ocr")
 async def run_ocr(user: CurrentUser = Depends(require_admin)):
     return await diagnose_ocr()
+
+
+@router.post("/handwriting")
+async def run_handwriting(user: CurrentUser = Depends(require_admin)):
+    return await diagnose_handwriting()

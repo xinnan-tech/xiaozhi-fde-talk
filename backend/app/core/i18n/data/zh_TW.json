@@ -72,6 +72,7 @@
   "asr.feed_fail": "ASR feed 失敗：{err}",
   "ocr.not_configured": "OCR 未設定（ocr.base_url / ocr.api_key / ocr.model）",
   "ocr.invoke_failed": "OCR 呼叫失敗：{err}",
+  "handwriting.not_configured": "手寫 OCR 未設定（handwriting.base_url / handwriting.api_key / handwriting.model），請至「⚙️ 後端配置 → 手寫識別」補齊",
   "diag.llm.config_missing_raw": "LLM 設定缺失：{detail}",
   "diag.llm.config_missing": "LLM 未設定（缺失：{missing}），請到「⚙️ 後端設定」補齊",
   "diag.llm.invoke_fail": "LLM 呼叫失敗：{detail}",

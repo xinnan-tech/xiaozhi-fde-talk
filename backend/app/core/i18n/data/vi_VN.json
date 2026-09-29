@@ -72,6 +72,7 @@
   "asr.feed_fail": "ASR feed thất bại: {err}",
   "ocr.not_configured": "OCR chưa được cấu hình (ocr.base_url / ocr.api_key / ocr.model)",
   "ocr.invoke_failed": "Lệnh gọi OCR thất bại: {err}",
+  "handwriting.not_configured": "Chưa cấu hình OCR viết tay (handwriting.base_url / handwriting.api_key / handwriting.model). Vui lòng vào \"⚙️ Cấu hình quản trị → Nhận dạng chữ viết tay\" để cấu hình.",
   "diag.llm.config_missing_raw": "Thiếu cấu hình LLM: {detail}",
   "diag.llm.config_missing": "LLM chưa được cấu hình (thiếu: {missing}), vui lòng điền trong '⚙️ Cấu hình Backend'",
   "diag.llm.invoke_fail": "Lệnh gọi LLM thất bại: {detail}",

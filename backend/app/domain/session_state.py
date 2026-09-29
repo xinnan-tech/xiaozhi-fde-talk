@@ -12,12 +12,25 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 from app.domain.coaching import CoachingItem, ItemStatus
 from app.domain.session import Session, SessionStatus, TranscriptSegment
 
 _SEG_ID_RE = re.compile(r"s(\d+)$")
+
+
+@dataclass
+class HandwritingNoteSegment:
+    """手写笔记段:OCR 成功后注入,跟 HandwritingImage 一对一(按 image_id)。
+
+    `injected_at` 是注入 state 的时刻(不等于 DB 的 image.created_at),prompt
+    渲染时间戳取此字段。`text` 是 OCR 后的文本,pending/failed 不会进入 state。
+    """
+    image_id: int
+    text: str
+    injected_at: datetime
 
 
 @dataclass
@@ -28,6 +41,10 @@ class SessionState:
     ignored_ids: set[str] = field(default_factory=set)
     coverage: dict[str, list[str]] = field(default_factory=dict)  # item_id -> [seg_id]
     transcript: list[TranscriptSegment] = field(default_factory=list)
+    # 键盘笔记:每 session+user 唯一 1 条(覆盖式,单字符串而非列表——列表+过滤是浪费)
+    keyboard_text: Optional[str] = None
+    # 手写笔记:每张图 1 段(append 累计,按 image_id 去重防 task 重入)
+    handwriting_notes: list[HandwritingNoteSegment] = field(default_factory=list)
     # WebSocket locale captured at hello time. Runtime.push_* frames consult this
     # to resolve user-facing text (connection.kicked, session.ended close reason,
     # audio.low_level, asr_unavailable push). HTTP routes do not write this.

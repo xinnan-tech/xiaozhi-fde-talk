@@ -88,6 +88,9 @@ class CoachingEngine:
         self._closed = False          # end 到达后不再通过 WS 发消息
         self._last_ts = 0.0           # 上次触发时刻（min_interval 限频基准）
         self._transcript_len_at_last = 0  # 据此判断窗口非空（成功才推进）
+        # 笔记 image_id 集合追踪,append/delete 都能触发重算
+        self._hw_notes_image_ids_at_last: set[int] = set()
+        self._kb_text_at_last: Optional[str] = None
         self._facts = FactDatabase()
         self._sched_task: asyncio.Task | None = None
         self._tpl_meta = {
@@ -279,6 +282,16 @@ class CoachingEngine:
         else:
             self._arm(self._pause_s, "停顿防抖")
 
+    def on_note_added(self) -> None:
+        """笔记新增/删除（runtime 注入键盘文本 / 手写 OCR 成功 / 删图后调用）。
+
+        引擎不区分来源——复用 `on_utterance` 的 `_arm(pause_s)` 防抖,只关心
+        "有新内容进来"。不立刻 fire,等用户停顿满 pause_s 再触发重算。
+        """
+        # 不递增 segment count——它是 ASR 专用阈值;笔记触发单纯靠 pause_s 防抖,
+        # 段数阈值对笔记无意义(用户可能一口气写 10 张图,不希望立刻 fire)
+        self._arm(self._pause_s, "笔记防抖")
+
     def on_listen_stopped(self) -> None:
         """listen:stop 落定（管线 flush 完、尾句已入 transcript）后由 runtime 调用。
 
@@ -310,11 +323,22 @@ class CoachingEngine:
     async def _sched_fire(self, reason: str) -> None:
         if self._timer_paused or self._closed or not self._bound or self._in_progress:
             return
-        if len(self.state.transcript) <= self._transcript_len_at_last:
+        # 任一字段有变化就触发重算——transcript 段数、handwriting 笔记段数、keyboard 文本都算
+        transcript_dirty = (
+            len(self.state.transcript) > self._transcript_len_at_last
+        )
+        current_note_ids = {n.image_id for n in self.state.handwriting_notes}
+        notes_dirty = current_note_ids != self._hw_notes_image_ids_at_last
+        kb_dirty = self.state.keyboard_text != self._kb_text_at_last
+        if not (transcript_dirty or notes_dirty or kb_dirty):
             self._pending_segments = 0
             return
         new_segs = len(self.state.transcript) - self._transcript_len_at_last
-        logger.info("coaching 事件重算（%s，%d 条新段）", reason, new_segs)
+        new_notes = len(current_note_ids - self._hw_notes_image_ids_at_last)
+        logger.info(
+            "coaching 事件重算（%s，transcript +%d, hw_notes +%d）",
+            reason, new_segs, new_notes,
+        )
         self._pending_segments = 0
         self._track(self._recompute())
 
@@ -337,6 +361,10 @@ class CoachingEngine:
                 )
                 self.state.items = self._apply(validate_llm_output(parsed))
                 self._transcript_len_at_last = len(self.state.transcript)
+                self._hw_notes_image_ids_at_last = {
+                    n.image_id for n in self.state.handwriting_notes
+                }
+                self._kb_text_at_last = self.state.keyboard_text
                 await self._persist()
                 await self._safe_send(_coaching_update("final", version, self.state.items))
                 logger.info("coaching 重算 v%s 完成：%d 条", version, len(self.state.items))

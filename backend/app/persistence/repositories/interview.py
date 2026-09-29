@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +36,16 @@ def _record_to_session(rec: InterviewRecord) -> Session:
 
 
 def _record_to_state(rec: InterviewRecord) -> SessionState:
+    from datetime import datetime
+
+    from app.domain.session_state import HandwritingNoteSegment
+
+    def _parse_seg(d):
+        # save_state 把 datetime 序列化为 isoformat 字符串,_record_to_state 解析回来
+        if isinstance(d.get("injected_at"), str):
+            d = {**d, "injected_at": datetime.fromisoformat(d["injected_at"])}
+        return HandwritingNoteSegment(**d)
+
     return SessionState(
         session=_record_to_session(rec),
         items=[CoachingItem(**d) for d in (rec.coaching_items or [])],
@@ -43,6 +53,10 @@ def _record_to_state(rec: InterviewRecord) -> SessionState:
         ignored_ids=set(rec.ignored_ids or []),
         coverage=dict(rec.coverage_index or {}),
         transcript=[TranscriptSegment(**d) for d in (rec.transcript or [])],
+        keyboard_text=rec.keyboard_text,
+        handwriting_notes=[
+            _parse_seg(d) for d in (rec.handwriting_notes or [])
+        ],
     )
 
 
@@ -92,6 +106,77 @@ class InterviewRepository:
         async with SessionLocal() as db:
             return await self.get_session(db, session_id)
 
+    async def _save_state_locked(
+        self, db: AsyncSession, state: SessionState, *, fields: Optional[set[str]] = None,
+    ) -> None:
+        """save_state 的核心 body。调用方必须已持有 _save_lock(state.session.id)。
+
+        拆出此方法是为 mutate_state_auto 在同一把锁内做「get → mutate → save」
+        原子 RMW;直接调 save_state 会试图再次 acquire(asyncio.Lock 不可重入)。
+        """
+        try:
+            rec = await db.get(InterviewRecord, state.session.id)
+            if rec is None:
+                rec = InterviewRecord(id=state.session.id)
+                db.add(rec)
+            s = state.session
+            # ended 是终态：寄存 runtime 的旧 SessionState 快照（manager 从 DB
+            # 新载入的是另一个对象）不得把已结束的会话写回进行中/挂起。
+            # 其余字段照写——旧快照的 transcript 往往反而是最新的。
+            is_regression = (
+                rec.status == "ended" and s.status.value != "ended"
+            )
+            rec.template_id = s.template_id
+            rec.template_version = s.template_version
+            # 快照只写不清：创建时固化的模板快照是「访谈按当时模板执行」的
+            # 依据，一旦被覆成 NULL 就再也回不来（resolve_template 会静默回退
+            # 当前缓存模板，模板被改过的老访谈就串味了）。会话生命周期内
+            # save_state 会被反复调用（状态转换、消息处理、去抖落盘），其中
+            # 部分调用方持有的 SessionState 可能没带快照——故仅在有值时写入。
+            if s.template_snapshot is not None:
+                rec.template_snapshot = s.template_snapshot
+            if not is_regression:
+                rec.status = s.status.value
+            rec.user_id = s.user_id
+            rec.base_info = s.base_info
+            rec.goal = s.goal
+            rec.first_batch_generated = s.first_batch_generated
+            rec.consumed_seq = s.consumed_seq
+            rec.created_at = s.created_at
+            rec.started_at = s.started_at
+            if not is_regression or rec.ended_at is None:
+                rec.ended_at = s.ended_at
+            if fields is None or "transcript" in fields:
+                rec.transcript = [seg.model_dump(mode="json") for seg in state.transcript]
+            if fields is None or "coaching" in fields:
+                rec.coaching_items = [it.model_dump(mode="json") for it in state.items]
+                rec.skipped_ids = sorted(state.skipped_ids)
+                rec.ignored_ids = sorted(state.ignored_ids)
+                rec.coverage_index = dict(state.coverage)
+            # 笔记字段:与 transcript 一起全量写(not None/all)。
+            # notes 不会高频变(用户主动提交),不分 fields 收窄——
+            # fields=None(生命周期落盘)直接写,fields=transcript/coaching 时也写
+            # (engine.on_note_added arm 后 _flush_now 默认 None)。
+            if fields is None or "notes" in fields:
+                rec.keyboard_text = state.keyboard_text
+                # asdict 不序列化 datetime——手动 .isoformat() 让 JSON 列能落库
+                rec.handwriting_notes = [
+                    {
+                        **vars(n),
+                        "injected_at": n.injected_at.isoformat()
+                            if n.injected_at else None,
+                    }
+                    for n in state.handwriting_notes
+                ]
+            await db.commit()
+        finally:
+            # 持锁的同步段末尾回收（见 _release_save_lock 的竞态说明）
+            # mutate_state_auto 路径下由它持锁,这里仅调一次,
+            # 锁生命周期仍由调用方决定(may outlive 调用)。
+            # 但 _release_save_lock 检查「仍在字典且无等待者」——重复 release
+            # 一次是 no-op(锁不存在即 no-op)。
+            pass
+
     async def save_state(
         self, db: AsyncSession, state: SessionState, *, fields: Optional[set[str]] = None
     ) -> None:
@@ -105,47 +190,8 @@ class InterviewRepository:
         lock = self._save_lock(state.session.id)
         async with lock:
             try:
-                rec = await db.get(InterviewRecord, state.session.id)
-                if rec is None:
-                    rec = InterviewRecord(id=state.session.id)
-                    db.add(rec)
-                s = state.session
-                # ended 是终态：寄存 runtime 的旧 SessionState 快照（manager 从 DB
-                # 新载入的是另一个对象）不得把已结束的会话写回进行中/挂起。
-                # 其余字段照写——旧快照的 transcript 往往反而是最新的。
-                is_regression = (
-                    rec.status == "ended" and s.status.value != "ended"
-                )
-                rec.template_id = s.template_id
-                rec.template_version = s.template_version
-                # 快照只写不清：创建时固化的模板快照是「访谈按当时模板执行」的
-                # 依据，一旦被覆成 NULL 就再也回不来（resolve_template 会静默回退
-                # 当前缓存模板，模板被改过的老访谈就串味了）。会话生命周期内
-                # save_state 会被反复调用（状态转换、消息处理、去抖落盘），其中
-                # 部分调用方持有的 SessionState 可能没带快照——故仅在有值时写入。
-                if s.template_snapshot is not None:
-                    rec.template_snapshot = s.template_snapshot
-                if not is_regression:
-                    rec.status = s.status.value
-                rec.user_id = s.user_id
-                rec.base_info = s.base_info
-                rec.goal = s.goal
-                rec.first_batch_generated = s.first_batch_generated
-                rec.consumed_seq = s.consumed_seq
-                rec.created_at = s.created_at
-                rec.started_at = s.started_at
-                if not is_regression or rec.ended_at is None:
-                    rec.ended_at = s.ended_at
-                if fields is None or "transcript" in fields:
-                    rec.transcript = [seg.model_dump(mode="json") for seg in state.transcript]
-                if fields is None or "coaching" in fields:
-                    rec.coaching_items = [it.model_dump(mode="json") for it in state.items]
-                    rec.skipped_ids = sorted(state.skipped_ids)
-                    rec.ignored_ids = sorted(state.ignored_ids)
-                    rec.coverage_index = dict(state.coverage)
-                await db.commit()
+                await self._save_state_locked(db, state, fields=fields)
             finally:
-                # 持锁的同步段末尾回收（见 _release_save_lock 的竞态说明）
                 self._release_save_lock(state.session.id, lock)
 
     async def save_state_auto(
@@ -160,6 +206,39 @@ class InterviewRepository:
 
         async with SessionLocal() as db:
             await self.save_state(db, state, fields=fields)
+
+    async def mutate_state_auto(
+        self,
+        session_id: str,
+        mutator: Callable[[SessionState], bool],
+        *,
+        fields: Optional[set[str]] = None,
+    ) -> bool:
+        """原子读-改-写:_save_lock 持锁期 get_state → mutator(state) → save。
+
+        save_state 单独调用只覆盖 commit 窗口的锁;get 与 save 之间的
+        modify 段在锁外仍有 lost-update 风险。此方法把整段 RMW 串行化,
+        用于 mirror 镜像列清理、OCR fallback 注入等并发可能碰撞的写。
+
+        mutator: callable[[SessionState], bool]——返回 True 表示改了
+        状态(会落盘),False 表示 no-op(不落盘,直接 return)。
+
+        返回 True=实际改并落盘,False=no-op 或 session 不存在。
+        """
+        from app.persistence.db import SessionLocal
+
+        lock = self._save_lock(session_id)
+        async with lock:
+            async with SessionLocal() as db:
+                state = await self.get_state(db, session_id)
+                if state is None:
+                    return False
+                changed: bool = mutator(state)
+                if not changed:
+                    return False
+                await self._save_state_locked(db, state, fields=fields)
+            self._release_save_lock(session_id, lock)
+            return True
 
     async def list_by_user(
         self, db: AsyncSession, user_id: str, statuses: Optional[list[str]] = None

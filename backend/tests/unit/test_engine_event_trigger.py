@@ -222,3 +222,79 @@ async def test_on_listen_stopped_skips_while_in_progress(make_state):
     await asyncio.sleep(0.05)
     assert e._llm.chat_text.await_count == 0
     e._in_progress = False
+
+
+async def test_note_added_fires_recompute_without_utterance(make_state):
+    """P1-1 回归:纯笔记注入(无 ASR 新句段)也能触发重算。
+
+    旧实现 _sched_fire 只看 transcript 长度——纯打字 / 纯手写 OCR 成功时,
+    游标未变,LLM 永远收不到 <user_keyboard> / <user_handwriting> 块。
+    """
+    from datetime import datetime, timezone
+
+    e = _engine(make_state, pause_s=0.02)
+    await e.first_compute()
+    # 关键:transcript 长度不变——纯笔记提交场景
+    initial_transcript_len = len(e.state.transcript)
+    # 注入手写笔记(模拟 OCR 成功后的 inject_handwriting_note)
+    from app.domain.session_state import HandwritingNoteSegment
+    e.state.handwriting_notes.append(HandwritingNoteSegment(
+        image_id=1, text="ocr result",
+        injected_at=datetime.now(timezone.utc),
+    ))
+    e.on_note_added()
+    await asyncio.sleep(0.1)
+    assert e._llm.chat_text.await_count >= 1
+    assert len(e.state.transcript) == initial_transcript_len  # transcript 没动
+    await e._drain_bg()
+
+
+async def test_keyboard_inject_fires_recompute(make_state):
+    """P1-1 回归:键盘注入(覆盖式)触发重算——覆盖语义也能让 LLM 看到最新文本。"""
+    e = _engine(make_state, pause_s=0.02)
+    await e.first_compute()
+    initial_count = e._llm.chat_text.await_count
+    e.state.keyboard_text = "用户新输入"
+    e.on_note_added()
+    await asyncio.sleep(0.1)
+    assert e._llm.chat_text.await_count > initial_count
+    await e._drain_bg()
+
+
+async def test_handwriting_deletion_fires_recompute(make_state):
+    """P1-2 回归:纯笔记删除(无 ASR 新句段)也触发重算。
+
+    旧实现 _sched_fire 用 len(notes) > _hw_notes_len_at_last,删除走
+    len 减小被早退条件吞——LLM 持续看到已删 canvas 的 OCR。
+    """
+    from datetime import datetime, timezone
+
+    from app.domain.session_state import HandwritingNoteSegment
+
+    e = _engine(make_state, pause_s=0.02)
+    await e.first_compute()
+    # 加 2 条 OCR 段(模拟两次 OCR 成功)
+    e.state.handwriting_notes.append(HandwritingNoteSegment(
+        image_id=1, text="ocr-1",
+        injected_at=datetime.now(timezone.utc),
+    ))
+    e.state.handwriting_notes.append(HandwritingNoteSegment(
+        image_id=2, text="ocr-2",
+        injected_at=datetime.now(timezone.utc),
+    ))
+    e.on_note_added()
+    await asyncio.sleep(0.1)
+    await e._drain_bg()
+    before_delete = e._llm.chat_text.await_count
+
+    # 关键:删除其中一条(模拟 /canvases 删除),transcript 不动
+    e.state.handwriting_notes = [
+        n for n in e.state.handwriting_notes if n.image_id != 1
+    ]
+    transcript_len_before = len(e.state.transcript)
+    e.on_note_added()
+    await asyncio.sleep(0.1)
+    # image_id 集合差 != 旧集合 → 应触发重算
+    assert e._llm.chat_text.await_count > before_delete
+    assert len(e.state.transcript) == transcript_len_before
+    await e._drain_bg()

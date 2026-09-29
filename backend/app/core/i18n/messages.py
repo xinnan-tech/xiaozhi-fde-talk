@@ -99,6 +99,9 @@ class Keys(StrEnum):
     # ---- OCR adapter ----
     OCR_NOT_CONFIGURED = "ocr.not_configured"
     OCR_INVOKE_FAILED = "ocr.invoke_failed"
+    # 手写 OCR 未配置（admin 未填 handwriting.* key）：POST /notes/handwriting
+    # 时阻断,前端引导用户去 admin 配置。键盘面板不受影响（天然对齐修改六）。
+    HANDWRITING_NOT_CONFIGURED = "handwriting.not_configured"
 
     # ---- Diagnostics (LLM) ----
     DIAG_LLM_CONFIG_MISSING = "diag.llm.config_missing"

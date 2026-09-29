@@ -46,6 +46,9 @@ ALL_B_KEYS: list[str] = [
     "session.liveness_window_s",
     "session.max_concurrent",
     "ocr.type", "ocr.base_url", "ocr.api_key", "ocr.secret_key", "ocr.model",
+    "ocr.language",
+    "handwriting.type", "handwriting.base_url", "handwriting.api_key",
+    "handwriting.secret_key", "handwriting.model", "handwriting.language",
 ]
 
 # 敏感字段（GET 返 null，PUT 空 = 不动）。只列 ALL_B_KEYS 内的键：
@@ -54,6 +57,8 @@ SENSITIVE_KEYS: frozenset[str] = frozenset({
     "llm.api_key",
     "ocr.api_key",
     "ocr.secret_key",
+    "handwriting.api_key",
+    "handwriting.secret_key",
     "asr.doubao_stream.api_key",
     "system.jwt_secret",
 })
@@ -117,6 +122,21 @@ ENUM_KEYS: dict[str, set[str]] = {
     "llm.type": {"openai", "stub"},
     # OCR 模型类型：openai 兼容（qwen-vl、gpt-4o）或百度
     "ocr.type": {"openai", "baidu"},
+    # 手写 OCR 模型类型：与通用 OCR 同样两选一
+    "handwriting.type": {"openai", "baidu"},
+    # 通用 OCR 语言（百度 language_type）：常用 10 种
+    "ocr.language": {
+        "CHN_ENG", "ENG", "JAP", "KOR", "FRE", "SPA",
+        "POR", "GER", "ITA", "RUS",
+    },
+    # 手写 OCR 语言：auto_detect + 上面 10 种 + 额外 15 种（共 26 种）
+    "handwriting.language": {
+        "auto_detect",
+        "CHN_ENG", "ENG", "JAP", "KOR", "FRE", "SPA",
+        "POR", "GER", "ITA", "RUS",
+        "DUT", "MAL", "SWE", "IND", "POL", "ROM", "TUR",
+        "GRE", "HUN", "THA", "VIE", "ARA", "HIN",
+    },
     # ASR 类型：set_many 过滤非激活字段时拼 f"asr.{active_asr_type}." 前缀，
     # 若 active_asr_type 是空白 / 未知字符串会把所有 asr.* 子字段静默丢弃，
     # 仍 200 返回「保存成功」——靠 ENUM 校验在写入前挡掉，admin 收到 400 而
@@ -129,6 +149,7 @@ URL_KEYS: dict[str, set[str]] = {
     "asr.funasr_server.ws_url": {"ws", "wss"},
     "llm.base_url": {"http", "https"},
     "ocr.base_url": {"http", "https"},
+    "handwriting.base_url": {"http", "https"},
 }
 
 # bool key 集合：写入前校验，只接受 "true" / "false"。
@@ -306,6 +327,14 @@ DEFAULTS: dict[str, str] = {
     "ocr.api_key": "",
     "ocr.secret_key": "",
     "ocr.model": "general_basic",
+    "ocr.language": "CHN_ENG",
+    # 手写 OCR（独立 group,与通用 OCR 完全分离配置）
+    "handwriting.type": "baidu",
+    "handwriting.base_url": "https://aip.baidubce.com",
+    "handwriting.api_key": "",
+    "handwriting.secret_key": "",
+    "handwriting.model": "handwriting",
+    "handwriting.language": "auto_detect",
 }
 
 

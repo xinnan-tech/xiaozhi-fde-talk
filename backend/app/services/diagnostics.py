@@ -26,7 +26,7 @@ import httpx
 from app.adapters.asr.funasr_server import FunASRServerProvider
 from app.adapters.llm.factory import get_llm
 from app.adapters.ocr.base import OCRError
-from app.adapters.ocr.factory import get_ocr
+from app.adapters.ocr.factory import get_general_ocr, get_handwriting_ocr
 from app.core.config_store import get_config_store
 from app.core.i18n.ocr_prompts import OCR_PROMPT
 from app.core.i18n import Keys, t
@@ -565,7 +565,7 @@ async def diagnose_ocr(timeout_s: float = 20.0) -> dict[str, Any]:
                        key=Keys.DIAG_OCR_BAD_IMAGE,
                        key_params={"detail": str(e)[:200]})
 
-    provider = get_ocr()
+    provider = get_general_ocr()
     t0 = time.monotonic()
     try:
         text = await asyncio.wait_for(
@@ -586,17 +586,76 @@ async def diagnose_ocr(timeout_s: float = 20.0) -> dict[str, Any]:
         return _extract_ocr_error(e) | {"latency_ms": int((time.monotonic() - t0) * 1000)}
 
 
+async def diagnose_handwriting(timeout_s: float = 20.0) -> dict[str, Any]:
+    """用内嵌测试图调手写 OCR,期望非空文本回复。
+
+    读 `handwriting.*` 独立 group 的配置(不读 `ocr.*`)——两组配置完全独立。
+    """
+    cfg = get_config_store()
+    base_url = cfg.get_sync("handwriting.base_url") or ""
+    api_key = cfg.get_sync("handwriting.api_key") or ""
+    handwriting_model = cfg.get_sync("handwriting.model") or ""
+    missing = [k for k, v in [("handwriting.base_url", base_url),
+                              ("handwriting.api_key", api_key),
+                              ("handwriting.model", handwriting_model)] if not v]
+    if missing:
+        return _result("config_missing",
+                       key=Keys.DIAG_OCR_CONFIG_MISSING,
+                       key_params={"missing": ", ".join(missing)})
+
+    _OCR_TEST_IMG = _FIXTURE_DIR / "ocr_test_card.png"
+    try:
+        test_image_bytes = _OCR_TEST_IMG.read_bytes()
+    except Exception as e:
+        return _result("server",
+                       key=Keys.DIAG_OCR_BAD_IMAGE,
+                       key_params={"detail": str(e)[:200]})
+
+    provider = get_handwriting_ocr()
+    t0 = time.monotonic()
+    try:
+        text = await asyncio.wait_for(
+            provider.recognize(test_image_bytes, prompt=OCR_PROMPT),
+            timeout=timeout_s,
+        )
+        latency = int((time.monotonic() - t0) * 1000)
+        return {"ok": True, "code": "ok",
+                "message": _localized(Keys.DIAG_OCR_OK),
+                "latency_ms": latency,
+                "detail": {"model": handwriting_model,
+                           "language": cfg.get_sync("handwriting.language") or "auto_detect",
+                           "reply": (text or "(空/灰色图片)")[:160]}}
+    except asyncio.TimeoutError:
+        return _result("unreachable",
+                       key=Keys.DIAG_OCR_TIMEOUT,
+                       key_params={})
+    except Exception as e:
+        return _extract_ocr_error(e) | {"latency_ms": int((time.monotonic() - t0) * 1000)}
+
+
 # ---------- 合并 ----------
 
 async def diagnose_all() -> dict[str, Any]:
-    """并发跑 ASR + LLM + OCR，返回三方结果 + 总评。"""
-    asr_res, llm_res, ocr_res = await asyncio.gather(
-        diagnose_asr(), diagnose_llm(), diagnose_ocr(), return_exceptions=True,
+    """并发跑 ASR + LLM + OCR + 手写 OCR,返回四方结果 + 总评。"""
+    asr_res, llm_res, ocr_res, hw_res = await asyncio.gather(
+        diagnose_asr(), diagnose_llm(), diagnose_ocr(), diagnose_handwriting(),
+        return_exceptions=True,
     )
 
     def _safe(r):
         return r if isinstance(r, dict) else {"ok": False, "error": repr(r)}
 
-    asr_res, llm_res, ocr_res = _safe(asr_res), _safe(llm_res), _safe(ocr_res)
-    overall = asr_res.get("ok") and llm_res.get("ok") and ocr_res.get("ok")
-    return {"ok": overall, "asr": asr_res, "llm": llm_res, "ocr": ocr_res}
+    asr_res, llm_res, ocr_res, hw_res = (
+        _safe(asr_res), _safe(llm_res), _safe(ocr_res), _safe(hw_res),
+    )
+    overall = (
+        asr_res.get("ok") and llm_res.get("ok")
+        and ocr_res.get("ok") and hw_res.get("ok")
+    )
+    return {
+        "ok": overall,
+        "asr": asr_res,
+        "llm": llm_res,
+        "ocr": ocr_res,
+        "handwriting": hw_res,
+    }

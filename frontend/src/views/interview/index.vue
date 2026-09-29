@@ -1437,7 +1437,7 @@ async function exportSignature(dataUrl?: string): Promise<boolean> {
   const strokes = signatureHistory.readStrokes();
   if (strokes.length === 0) return true;
 
-  const imageDataUrl = dataUrl ?? signatureRef.value?.save?.();
+  const imageDataUrl = dataUrl ?? signatureHistory.saveImage();
   if (!imageDataUrl) return false;
 
   const filedata = imageDataUrl.replace(

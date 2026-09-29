@@ -96,7 +96,25 @@ export function useSignatureHistory(
     const strokes = readStrokes();
     state.strokes = [...strokes];
     state.redoStrokes = [];
-    return signature.save?.("image/png") ?? "";
+    return saveImage();
+  };
+
+  /** 将透明区域铺成白色后导出，确保橡皮擦区域不是透明像素。 */
+  const saveImage = () => {
+    const signature = getSignature();
+    const canvas = getCanvas();
+    if (!signature || !canvas) return "";
+
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = canvas.width;
+    exportCanvas.height = canvas.height;
+    const context = exportCanvas.getContext("2d");
+    if (!context) return signature.save?.("image/png") ?? "";
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(canvas, 0, 0);
+    return exportCanvas.toDataURL("image/png");
   };
 
   const captureSnapshot = (state: SignatureHistoryState) => {
@@ -171,6 +189,7 @@ export function useSignatureHistory(
     redo,
     captureSnapshot,
     restore,
+    saveImage,
     sync,
     undo
   };

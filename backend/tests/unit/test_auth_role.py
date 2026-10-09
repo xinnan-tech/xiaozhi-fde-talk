@@ -56,3 +56,56 @@ async def test_extract_auth_role_from_db_overrides_token_claim(monkeypatch):
     u = await extract_auth("Bearer x")
     assert u.role == "user"
     assert u.username == "bob"
+
+
+async def test_refresh_new_access_role_from_db_overrides_old_claim(monkeypatch):
+    """降级场景回归：旧 refresh claim role=admin + DB role=user → 新 access role=user。
+
+    refresh 换发的新 access 身份一律取 DB（get_auth_state），不拷旧 payload——
+    与 extract_auth 的 claim-不受信约定互为镜像，防止过期权限经 refresh 续期。
+    """
+    from datetime import datetime, timezone
+
+    from starlette.responses import Response
+
+    from app.persistence.repositories import user as user_mod
+    from app.persistence.repositories.user import AuthState
+    from app.services.auth.token import decode_token as real_decode
+    from app.transport.http.routes import auth as auth_mod
+
+    # 旧 refresh payload：claim 声称 admin/alice——已与 DB 不符的过期身份
+    monkeypatch.setattr(
+        "app.transport.http.routes.auth.decode_token",
+        lambda _tok: {
+            "sub": "u1", "username": "alice", "role": "admin",
+            "pwd_ver": 1000, "type": "refresh", "jti": "j-test-role-refresh",
+        },
+    )
+    monkeypatch.setattr(
+        "app.transport.http.routes.auth.is_refresh_token_revoked",
+        lambda _jti: False,
+    )
+    # DB 快照：真实身份是 user/bob（pwd_ver 与 claim 一致，不触发吊销路径）
+    async def fake_state(user_id):
+        return AuthState(
+            password_changed_at=datetime.fromtimestamp(1000, tz=timezone.utc),
+            role="user",
+            username="bob",
+        )
+    monkeypatch.setattr(user_mod.user_repo, "get_auth_state", fake_state)
+    # jwt_secret 由 SecretResolver 在 lifespan 注入——单测没跑 lifespan，
+    # 补一个值让 create_access_token / decode_token 能真实签发 + 解码。
+    from app.core.settings import get_settings
+    monkeypatch.setattr(get_settings(), "jwt_secret", "unit-test-secret")
+
+    class FakeRequest:
+        """最小请求桩：client=None → _client_ip 返 "unknown"，绕开 XFF 分支。"""
+
+        client = None
+        cookies = {"refresh-token": "stale-refresh-token"}
+
+    out = await auth_mod.refresh(FakeRequest(), Response())
+    payload = real_decode(out["access_token"])
+    assert payload["role"] == "user"        # DB 的 user 压过旧 claim 的 admin
+    assert payload["username"] == "bob"
+    assert int(payload["pwd_ver"]) == 1000  # pwd_ver 原样保留（吊销对照值不动）

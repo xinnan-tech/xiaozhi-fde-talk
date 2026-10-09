@@ -285,7 +285,7 @@ async def register(
 # refresh token / logout 端点（HttpOnly cookie 模型）
 # ─────────────────────────────────────────────────────────────────────
 
-async def _decode_refresh_or_raise(token_str: str, db: AsyncSession) -> tuple[dict, AuthState]:
+async def _decode_refresh_or_raise(token_str: str) -> tuple[dict, AuthState]:
     """解析 refresh token：签名 + type=refresh + 未撤销 + pwd_ver 仍有效。
 
     返回 (payload, auth_state)——state 供 refresh 端点构造 extra：role/username
@@ -339,7 +339,6 @@ def _read_refresh_cookie(request: Request) -> str | None:
 async def refresh(
     request: Request,
     response: Response,
-    db: AsyncSession = Depends(get_db),
 ) -> dict:
     """用 refresh token（来自 cookie）换新 access，写回 access cookie。
 
@@ -352,7 +351,7 @@ async def refresh(
     if not refresh_token:
         # 401 + code：与「过期 / 撤销」同语义分支，前端按 401 走清 cookie 流程。
         raise I18nError(Keys.AUTH_REFRESH_INVALID, http_status=401)
-    payload, state = await _decode_refresh_or_raise(refresh_token, db)
+    payload, state = await _decode_refresh_or_raise(refresh_token)
     user_id = payload["sub"]
     cur_pwd_ver = int(payload["pwd_ver"])
     # extra 从 DB 快照构造，不拷旧 payload 的 role/username——旧 claim 可能已

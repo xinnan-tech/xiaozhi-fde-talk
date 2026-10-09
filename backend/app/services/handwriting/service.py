@@ -42,63 +42,6 @@ def sniff_image_format(image_bytes: bytes) -> str:
     return ""
 
 
-async def create_pending_image(
-    db: AsyncSession,
-    *,
-    session_id: str,
-    user_id: str,
-    image_base64: str,
-    image_hash: str,
-    image_format: str,
-    image_bytes_size: int,
-    client_created_at: datetime,
-) -> HandwritingImage:
-    """落库 (ocr_status=pending),返回新行 ORM 句柄。
-
-    按 (user_id, image_hash) 判重——同用户同字节图去重,避免重复启 OCR task。
-    跨 session 不去重(各自独立存储,防跨 session 数据归属混乱)。
-    """
-    existing = await db.execute(
-        select(HandwritingImage).where(
-            HandwritingImage.user_id == user_id,
-            HandwritingImage.image_hash == image_hash,
-        ).limit(1)
-    )
-    existing_row = existing.scalar_one_or_none()
-    if existing_row is not None:
-        return existing_row
-
-    row = HandwritingImage(
-        session_id=session_id,
-        user_id=user_id,
-        image_base64=image_base64,
-        image_format=image_format,
-        image_bytes_size=image_bytes_size,
-        ocr_status=OcrStatus.PENDING.value,
-        text="",
-        retry_count=0,
-        image_hash=image_hash,
-        client_created_at=client_created_at,
-    )
-    db.add(row)
-    try:
-        await db.flush()
-    except IntegrityError:
-        # 并发撞 UNIQUE(user_id, image_hash)——回滚后按 user+hash 兜底重查
-        await db.rollback()
-        existing = await db.execute(
-            select(HandwritingImage).where(
-                HandwritingImage.user_id == user_id,
-                HandwritingImage.image_hash == image_hash,
-            ).limit(1)
-        )
-        existing_row = existing.scalar_one_or_none()
-        if existing_row is None:
-            raise
-        return existing_row
-    return row
-
-
 async def replace_canvas_image(
     db: AsyncSession,
     *,
@@ -113,13 +56,13 @@ async def replace_canvas_image(
 ) -> Optional[tuple[HandwritingImage, bool]]:
     """同 canvas_index 改图(image_hash 变了):UPDATE 现有行的 image 字段。
 
-    返回 (row, ocr_task_fired) 或 None(canvas 行不存在——走 create_pending_image_auto 兜底)。
-    ocr_task_fired=True 表示 image_hash 与 DB 不一致,需要后台重跑 OCR;
-    False 表示 hash 一致(image_base64 内容相同),跳过 OCR。
+    返回 (row, ocr_task_fired) 或 None(canvas 行不存在——走 upsert_canvas_image
+    的 dedup/INSERT 分支兜底)。ocr_task_fired=True 表示 image_hash 与 DB 不一致,
+    需要后台重跑 OCR;False 表示 hash 一致(image_base64 内容相同),跳过 OCR。
 
     保留原 image_id(画板号 = canvas_index,DB 主键 = image_id 一一对应稳定)。
+    事务边界:不 commit——与 canvas payload upsert 共享调用方事务。
     """
-    from sqlalchemy import update as sa_update
     result = await db.execute(
         select(HandwritingImage).where(
             HandwritingImage.session_id == session_id,
@@ -138,15 +81,15 @@ async def replace_canvas_image(
     row.client_created_at = client_created_at
     if ocr_task_fired:
         # 图变了 → 重置 OCR 状态 + 清旧文本,等后台 task 重跑
-        row.ocr_status = "pending"
+        row.ocr_status = OcrStatus.PENDING.value
         row.text = ""
         row.retry_count = 0
         row.injected_at = None
-    await db.commit()
     return (row, ocr_task_fired)
 
 
-async def replace_canvas_image_auto(
+async def upsert_canvas_image(
+    db: AsyncSession,
     *,
     session_id: str,
     user_id: str,
@@ -156,43 +99,62 @@ async def replace_canvas_image_auto(
     image_hash: str,
     canvas_index: int,
     client_created_at: datetime,
-) -> Optional[tuple[HandwritingImage, bool]]:
-    """自动管理 session 版本。"""
-    async with SessionLocal() as db:
-        return await replace_canvas_image(
-            db,
-            session_id=session_id,
-            user_id=user_id,
-            image_base64=image_base64,
-            image_format=image_format,
-            image_bytes_size=image_bytes_size,
-            image_hash=image_hash,
-            canvas_index=canvas_index,
-            client_created_at=client_created_at,
-        )
-
-
-async def create_pending_image_auto(
-    *,
-    session_id: str,
-    user_id: str,
-    image_base64: str,
-    image_hash: str,
-    image_format: str,
-    image_bytes_size: int,
-    client_created_at: datetime,
-    canvas_index: int | None = None,
 ) -> tuple[HandwritingImage, bool]:
-    """自动管理 session。返回 (row, created) ——created=False 表示去重命中。
+    """canvas 行存在 → UPDATE image 字段;不存在 → 按 (user_id, image_hash)
+    dedup / INSERT。返回 (row, ocr_task_fired)。
 
-    canvas_index:画板号(可选)——canvas 与 image 一一映射时,handler 显式传。
-    新建行直接写入;命中 dedup 时若 canvas_index 为 NULL 也补上(已存在行
-    不会有 canvas_index,但 POST 画板时必须知道当前是几号画板)。
-
-    dedup 按 (user_id, image_hash)——同用户同字节图去重,避免重复启 OCR task。
+    事务边界:不 commit——与 canvas payload upsert 共享调用方事务,单一
+    commit 保证 image 重置与 payload 写入原子(任一段失败整体回滚,避免
+    image 行卡 ocr_status=pending 而 OCR task 未 fire)。
     """
-    async with SessionLocal() as db:
-        # 先查 dedup,避免无谓 flush
+    replace_result = await replace_canvas_image(
+        db,
+        session_id=session_id,
+        user_id=user_id,
+        image_base64=image_base64,
+        image_format=image_format,
+        image_bytes_size=image_bytes_size,
+        image_hash=image_hash,
+        canvas_index=canvas_index,
+        client_created_at=client_created_at,
+    )
+    if replace_result is not None:
+        return replace_result
+
+    # ---- canvas 行不存在 → dedup / INSERT ----
+    existing = await db.execute(
+        select(HandwritingImage).where(
+            HandwritingImage.user_id == user_id,
+            HandwritingImage.image_hash == image_hash,
+        ).limit(1)
+    )
+    existing_row = existing.scalar_one_or_none()
+    if existing_row is not None:
+        # dedup 命中 + canvas_index 未设:补上(OCR-only 行升级为画板)
+        if existing_row.canvas_index is None:
+            existing_row.canvas_index = canvas_index
+        return existing_row, False
+    row = HandwritingImage(
+        session_id=session_id,
+        user_id=user_id,
+        image_base64=image_base64,
+        image_format=image_format,
+        image_bytes_size=image_bytes_size,
+        ocr_status=OcrStatus.PENDING.value,
+        text="",
+        retry_count=0,
+        image_hash=image_hash,
+        canvas_index=canvas_index,
+        client_created_at=client_created_at,
+    )
+    db.add(row)
+    try:
+        await db.flush()
+    except IntegrityError:
+        # 并发撞 UNIQUE(user_id, image_hash)——回滚后按 (user_id, image_hash)
+        # 兜底重查。此时事务内只有本 INSERT(payload 段在调用方排在后面),
+        # 整体回滚不会丢其它段的写。
+        await db.rollback()
         existing = await db.execute(
             select(HandwritingImage).where(
                 HandwritingImage.user_id == user_id,
@@ -200,43 +162,10 @@ async def create_pending_image_auto(
             ).limit(1)
         )
         existing_row = existing.scalar_one_or_none()
-        if existing_row is not None:
-            # dedup 命中 + canvas_index 未设:补上(OCR-only 行升级为画板)
-            if canvas_index is not None and existing_row.canvas_index is None:
-                existing_row.canvas_index = canvas_index
-                await db.commit()
-                return existing_row, False
-            return existing_row, False
-        row = HandwritingImage(
-            session_id=session_id,
-            user_id=user_id,
-            image_base64=image_base64,
-            image_format=image_format,
-            image_bytes_size=image_bytes_size,
-            ocr_status=OcrStatus.PENDING.value,
-            text="",
-            retry_count=0,
-            image_hash=image_hash,
-            canvas_index=canvas_index,
-            client_created_at=client_created_at,
-        )
-        db.add(row)
-        try:
-            await db.commit()
-        except IntegrityError:
-            # 并发撞 UNIQUE(user_id, image_hash)——回滚后按 (user_id, image_hash) 兜底重查
-            await db.rollback()
-            existing = await db.execute(
-                select(HandwritingImage).where(
-                    HandwritingImage.user_id == user_id,
-                    HandwritingImage.image_hash == image_hash,
-                ).limit(1)
-            )
-            existing_row = existing.scalar_one_or_none()
-            if existing_row is None:
-                raise
-            return existing_row, False
-        return row, True
+        if existing_row is None:
+            raise
+        return existing_row, False
+    return row, True
 
 
 async def get_by_id_auto(image_id: int) -> Optional[HandwritingImage]:

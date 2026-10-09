@@ -62,7 +62,9 @@ async def upsert_canvas_payload(
     先 POST 图创建 image_id 对应行,才能 upsert canvas payload。
 
     image_hash / OCR 状态字段不在这条路径里——若同时携带 filedata,handler
-    走 create_pending_image_auto 独立路径。
+    走 image upsert 独立路径。
+
+    事务边界:不 commit——与 image upsert 共享调用方事务,单一 commit。
     """
     new_hash = compute_canvas_payload_hash(payload)
     # 找该 (session_id, user_id, canvas_index) 行
@@ -80,26 +82,7 @@ async def upsert_canvas_payload(
         return CanvasUpsertResult(row=row, payload_skipped=True, payload_updated=False)
     row.canvas_payload = payload
     row.canvas_payload_hash = new_hash
-    await db.commit()
     return CanvasUpsertResult(row=row, payload_skipped=False, payload_updated=True)
-
-
-async def upsert_canvas_payload_auto(
-    *,
-    session_id: str,
-    user_id: str,
-    canvas_index: int,
-    payload: dict,
-) -> Optional[CanvasUpsertResult]:
-    """自动管理 session 的 upsert 版本。"""
-    async with SessionLocal() as db:
-        return await upsert_canvas_payload(
-            db,
-            session_id=session_id,
-            user_id=user_id,
-            canvas_index=canvas_index,
-            payload=payload,
-        )
 
 
 async def list_canvases_auto(*, session_id: str, user_id: str) -> list[HandwritingImage]:

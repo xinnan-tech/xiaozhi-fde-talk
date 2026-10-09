@@ -311,3 +311,73 @@ def test_canvas_delete_clears_mirror_when_runtime_none(make_status_client, monke
     # 镜像列必须按 notes 分组写回,且已删 image_id 已被过滤
     assert captured["fields"] == {"notes"}
     assert captured["remaining"] == [10]  # image_id=42 的段被过滤掉
+
+
+# ---- handler 成功路径:runtime 注入段的名字解析回归 ----
+
+def test_keyboard_post_in_progress_reaches_runtime_inject(
+    make_status_client, monkeypatch,
+):
+    """in_progress 键盘 POST 走完整链路:落库 + registry.get + runtime 注入。
+
+    回归:handler 曾裸用未定义的 runtime_registry 名字 → 任意一次
+    POST /notes/keyboard 直接 NameError 500。该测试走不到 mock 的
+    manager.get 状态拦截(in_progress 放行),专门覆盖 727 行注入段。
+    """
+    from datetime import datetime, timezone
+    from app.domain.note import KeyboardNote
+
+    fake_note = KeyboardNote(
+        session_id="s1", user_id="u1", text="hi",
+        client_created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    monkeypatch.setattr(
+        "app.services.keyboard.service.upsert_keyboard_text_auto",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "app.services.keyboard.service.get_keyboard_text_auto",
+        AsyncMock(return_value=fake_note),
+    )
+    runtime = SimpleNamespace(inject_keyboard_text=AsyncMock())
+    monkeypatch.setattr(
+        "app.services.sessions.runtime.registry.get",
+        MagicMock(return_value=runtime),
+    )
+
+    client = make_status_client(SessionStatus.IN_PROGRESS)
+    resp = client.post(
+        "/api/v1/interviews/s1/notes/keyboard",
+        json={"text": "hi", "client_created_at": "2026-09-23T10:00:00Z"},
+    )
+    assert resp.status_code == 200, resp.text
+    runtime.inject_keyboard_text.assert_awaited_once_with("hi")
+
+
+def test_canvas_batch_delete_reaches_runtime_cleanup(
+    make_status_client, monkeypatch,
+):
+    """批量删除走完整链路:delete_canvases_batch_auto + registry.get + runtime 清理。
+
+    回归:batch_delete_canvases 曾裸用未定义的 runtime_registry →
+    DB 已删行后 NameError 500,state 清理段永远走不到。
+    """
+    monkeypatch.setattr(
+        "app.services.handwriting.canvas_service.delete_canvases_batch_auto",
+        AsyncMock(return_value=[10, 11]),
+    )
+    runtime = SimpleNamespace(remove_handwriting_notes=AsyncMock())
+    monkeypatch.setattr(
+        "app.services.sessions.runtime.registry.get",
+        MagicMock(return_value=runtime),
+    )
+
+    client = make_status_client(SessionStatus.ENDED)
+    resp = client.post(
+        "/api/v1/interviews/s1/canvases/batch-delete",
+        json={"canvas_indexes": [1, 2]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted_ids"] == [10, 11]
+    runtime.remove_handwriting_notes.assert_awaited_once_with([10, 11])

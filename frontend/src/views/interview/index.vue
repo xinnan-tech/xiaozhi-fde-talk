@@ -1727,9 +1727,18 @@ const getInterviewDetail = async () => {
 };
 
 onMounted(() => {
-  getInterviewDetail();
-  void loadInterviewBoards();
-  void loadKeyboardNote();
+  void getInterviewDetail().catch(error => {
+    console.error("[InterviewPage] 加载访谈详情失败", error);
+    ElMessage.error(t("interview.load_failed"));
+  });
+  void loadInterviewBoards().catch(error => {
+    console.error("[InterviewPage] 加载画板失败", error);
+    ElMessage.error(t("interview.handwriting.load_failed"));
+  });
+  void loadKeyboardNote().catch(error => {
+    console.error("[InterviewPage] 加载键盘笔记失败", error);
+    ElMessage.error(t("interview.notes.load_failed"));
+  });
 });
 </script>
 

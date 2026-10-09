@@ -96,11 +96,11 @@ env/
 .coverage
 htmlcov/
 
-# FunASR 下载的模型文件（体积大，不提交到 Git）
-backend/models/*
-!backend/models/funasr-runtime-resources/
-!backend/models/funasr-runtime-resources/**
-# Docker 容器在仓库根解压的 funasr 资源副本（容器自动产生，不入库）
+# FunASR 模型与运行时缓存（容器首次启动自动下载，体积大且与镜像版本绑定，不入库）
+backend/models/**
+# 例外：手维护的小配置（hotwords.txt）需要入库
+!backend/models/funasr-runtime-resources/hotwords.txt
+# Docker 容器可能解压到仓库根的资源副本（防御性规则，不入库）
 /funasr-runtime-resources/
 
 # XiaoZhi FDE Talk (backend) - 导出文件

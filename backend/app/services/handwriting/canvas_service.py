@@ -154,20 +154,28 @@ async def delete_canvas_auto(
 async def delete_canvases_batch_auto(
     *, session_id: str, user_id: str, canvas_indexes: list[int],
 ) -> list[int]:
-    """批量按 canvas_index 列表删行。
+    """批量按 canvas_index 列表删行。返实际删除的 image_id 列表。
 
-    返实际删除的 image_id 列表(跨 session/跨 user 静默跳过)。
-    一次 SQL 循环 DELETE,每个 canvas_index 单独 owner 校验。
+    单次 SELECT + 单次 DELETE,避免 N+1。跨 session/跨 user 行静默跳过。
     """
     if not canvas_indexes:
         return []
-    deleted_ids: list[int] = []
-    for idx in canvas_indexes:
-        image_id = await delete_canvas_auto(
-            session_id=session_id,
-            user_id=user_id,
-            canvas_index=idx,
+    from sqlalchemy import delete as sa_delete
+    from app.persistence.models import HandwritingImage as _HI
+
+    async with SessionLocal() as db:
+        existing = await db.execute(
+            select(_HI).where(
+                _HI.session_id == session_id,
+                _HI.user_id == user_id,
+                _HI.canvas_index.in_(canvas_indexes),
+            )
         )
-        if image_id is not None:
-            deleted_ids.append(image_id)
-    return deleted_ids
+        ids_to_delete = [r.id for r in existing.scalars().all()]
+        if not ids_to_delete:
+            return []
+        await db.execute(
+            sa_delete(_HI).where(_HI.id.in_(ids_to_delete))
+        )
+        await db.commit()
+        return ids_to_delete

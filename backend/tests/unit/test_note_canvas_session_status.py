@@ -57,47 +57,38 @@ def _session_state(status: SessionStatus):
     )
 
 
-def _make_client(state: SessionStatus):
-    """起一个带 get_current_user override 的 TestClient,manager.get 返指定 status。
-
-    返回 (client, fake_state) tuple。client 绑定上下文管理器,测试在
-    with 块内调用才能让 mock 生效。
-    """
-    from app.app import create_app
-
-    app = create_app()
-    app.dependency_overrides[get_current_user] = _current_user
-
-    fake_state = _session_state(state)
-    patcher = patch("app.transport.http.routes.interviews.manager")
-    mock_mgr = patcher.start()
-    mock_mgr.get = AsyncMock(return_value=fake_state)
-
-    return TestClient(app), fake_state, patcher
-
-
 # ---- 笔记 POST 状态机 ----
 
 @pytest.fixture
 def make_status_client():
-    """返回 (TestClient, patcher) — patcher 必须在 client 用完后 stop。"""
+    """返回 (TestClient)——内部用 patch 启动 manager + interview_repo。
+
+    delete/list_canvases 走 DB 读,同步 mock interview_repo.get_state_auto。
+    注意:start() 返回的是 mock 替身,unpatch 必须保存 patcher 对象本身
+    调 stop()——对替身调 stop() 是 no-op,patch 泄漏会污染后续测试。
+    """
     from app.app import create_app
 
-    started = []
+    patchers = []
 
     def _make(state: SessionStatus):
         app = create_app()
         app.dependency_overrides[get_current_user] = _current_user
         fake_state = _session_state(state)
-        patcher = patch("app.transport.http.routes.interviews.manager")
-        mock_mgr = patcher.start()
-        mock_mgr.get = AsyncMock(return_value=fake_state)
-        started.append(patcher)
+        mgr_patcher = patch("app.transport.http.routes.interviews.manager")
+        mgr_mock = mgr_patcher.start()
+        mgr_mock.get = AsyncMock(return_value=fake_state)
+        repo_patcher = patch(
+            "app.transport.http.routes.interviews.interview_repo"
+        )
+        repo_mock = repo_patcher.start()
+        repo_mock.get_state_auto = AsyncMock(return_value=fake_state)
+        patchers.extend([mgr_patcher, repo_patcher])
         return TestClient(app)
 
     yield _make
 
-    for p in started:
+    for p in patchers:
         try:
             p.stop()
         except Exception:
@@ -156,12 +147,21 @@ def test_canvas_post_rejects_ended(make_status_client):
 
 
 def test_canvas_delete_allows_ended(make_status_client, monkeypatch):
-    """画板 DELETE 不强制状态机,ended 状态也能删(handler 用 manager.get 直返)。
+    """画板 DELETE 不强制状态机,ended 状态也能删。
 
     mocked delete_canvas_auto 返 image_id=42 → 期望 200 + deleted_ids=[42],
     不被 409 拦。如果返 409,说明状态机被错误地加到 DELETE 路径上。
     """
     client = make_status_client(SessionStatus.ENDED)
+
+    # 让 registry.get 返 None 走 else 分支(走镜像列 mutate_state_auto);
+    # mock mutate_state_auto 返 AsyncMock 避免 await MagicMock 报错
+    import app.services.sessions.runtime as runtime_mod
+    monkeypatch.setattr(runtime_mod.registry, "get", MagicMock(return_value=None))
+    monkeypatch.setattr(
+        "app.transport.http.routes.interviews.interview_repo.mutate_state_auto",
+        AsyncMock(return_value=True),
+    )
 
     # 拦截 service.delete_canvas_auto 返 image_id
     @asynccontextmanager
@@ -255,10 +255,10 @@ def test_canvas_delete_clears_mirror_when_runtime_none(make_status_client, monke
     import app.services.handwriting.canvas_service as canvas_svc
     monkeypatch.setattr(canvas_svc, "SessionLocal", _canvas_ctx)
 
-    # runtime.get(…) → None:模拟 suspended/ended session 从新标签接入
+    # registry.get 返 None 走 else 分支(mutate_state_auto)
     import app.services.sessions.runtime as runtime_mod
     monkeypatch.setattr(
-        runtime_mod.registry, "get", lambda sid: None,
+        runtime_mod.registry, "get", MagicMock(return_value=None),
     )
 
     # interview_repo.get_state_auto 返含 image_id=42 的 state_mirror
@@ -275,7 +275,7 @@ def test_canvas_delete_clears_mirror_when_runtime_none(make_status_client, monke
         injected_at=datetime.now(timezone.utc),
     )
     fake_mirror = SimpleNamespace(
-        session=SimpleNamespace(id="s1"),
+        session=SimpleNamespace(id="s1", user_id="u1"),
         keyboard_text=None,
         handwriting_notes=[seg_kept, seg_deleted],
     )
@@ -294,9 +294,16 @@ def test_canvas_delete_clears_mirror_when_runtime_none(make_status_client, monke
     async def fake_get_state_auto(sid):
         return fake_mirror
 
-    import app.persistence.repositories.interview as repo_mod
-    monkeypatch.setattr(repo_mod.interview_repo, "mutate_state_auto", fake_mutate_state_auto)
-    monkeypatch.setattr(repo_mod.interview_repo, "get_state_auto", fake_get_state_auto)
+    # fixture 把 interview_repo 整个换成了 MagicMock,跨模块引用 id 不同——
+    # 必须 patch handler 实际 import 的那个引用,持久层改的 patch 是死路径。
+    monkeypatch.setattr(
+        "app.transport.http.routes.interviews.interview_repo.mutate_state_auto",
+        fake_mutate_state_auto,
+    )
+    monkeypatch.setattr(
+        "app.transport.http.routes.interviews.interview_repo.get_state_auto",
+        fake_get_state_auto,
+    )
 
     resp = client.delete("/api/v1/interviews/s1/canvases/1")
     assert resp.status_code == 200

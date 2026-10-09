@@ -23,6 +23,7 @@ from app.services.sessions.manager import manager
 from app.services.sessions.runtime import registry
 from app.services.sessions.state import SessionState
 from app.services.template.loader import resolve_template
+from app.persistence.repositories.interview import interview_repo
 from app.transport.http.dependencies import get_current_user
 from app.transport.http.schemas import (
     CanvasListResponse,
@@ -53,10 +54,13 @@ router = APIRouter(prefix="/interviews")
 # 先验 token，再按 user_id 抢令牌——没登录的用户在被 401 挡掉前不会消耗桶。
 _llm_user_limiter = RateLimiter(capacity=20, refill_per_hour=20)
 
-# OCR 后台 task 强引用集：event loop 只持弱引用,长跑 task(5 轮 × 30s ≈
+# OCR 后台 task 强引用集——event loop 只持弱引用,长跑 task(5 轮 × 30s ≈
 # 2 分钟)在 memory pressure 下会被 GC,DB 行卡 pending 永远等不到结果。
 # add_done_callback 在 task 结束自动从集合移除,不泄漏。
 _ocr_bg_tasks: set["_asyncio.Task"] = set()
+
+# 进程内 canvas_index 写锁:并发 POST 同 canvas_index 串行化(避免双 OCR task 触发)
+_canvas_locks: dict[int, "_asyncio.Lock"] = {}
 
 
 def _reset_for_test() -> None:
@@ -719,7 +723,6 @@ async def upsert_keyboard_note(
         session_id=state.session.id, user_id=user.user_id,
     )
     # 注入 state:调度防抖重算(arm pause_s 后才 fire,与 ASR 句段走同一 _arm 路径)
-    from app.services.sessions.runtime import registry as runtime_registry
 
     runtime = runtime_registry.get(state.session.id)
     if runtime is not None:
@@ -770,28 +773,26 @@ async def save_canvas(
     canvas_index: int = Path(..., ge=1, description="前端自增画板号,1/2/3..."),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """upsert 画板 state + 截图(payload + filedata 一次 POST 都必填)。
+    """upsert 画板 state + 截图(payload + filedata 一次 POST 都必填)。"""
+    # 限流:连点画板可瞬间堆 OCR task(每 task 5×30s),与 recognize_image 路由对齐
+    if not _llm_user_limiter.try_acquire(user.user_id):
+        raise I18nError(Keys.HTTP_AUTH_RATE_LIMITED, http_status=429)
 
-    payload 走 canvas hash 跳过,filedata 走 image hash 跳过——同画板多次
-    POST 仅当两边内容都一致时才都 skip。canvas_index 与 image_id 不一定
-    相等:create_pending_image_auto 内部 backfill canvas_index 到行。
-    """
     state = await _load_session_for_note(session_id, user.user_id)
 
-    # ---- 校验阶段:任何 DB 写入前的硬校验(避免脏写)----
     import base64 as _b64
     from app.services.handwriting.service import (
         compute_image_hash_from_bytes,
         sniff_image_format,
     )
 
+    # 校验阶段:任何 DB 写入前的硬校验
     try:
         image_bytes = _b64.b64decode(req.filedata)
     except Exception:
         raise I18nError(Keys.HTTP_OCR_IMAGE_BASE64_INVALID, http_status=422)
     if len(image_bytes) > 10 * 1024 * 1024:
-        raise I18nError(
-            Keys.HTTP_OCR_IMAGE_TOO_LARGE, http_status=413,
+        raise I18nError(Keys.HTTP_OCR_IMAGE_TOO_LARGE, http_status=413,
             size_mb=len(image_bytes) / (1024 * 1024),
         )
     image_format = sniff_image_format(image_bytes)
@@ -818,51 +819,50 @@ async def save_canvas(
 
     image_hash = compute_image_hash_from_bytes(image_bytes)
 
-    # ---- DB 写入阶段(校验通过后)----
+    # ---- DB 写入阶段(canvas_index 进程内锁串行化;image 与 payload 两段独立短事务)----
     from app.services.handwriting.canvas_service import upsert_canvas_payload_auto
     from app.services.handwriting.service import (
         create_pending_image_auto,
         replace_canvas_image_auto,
     )
 
-    # canvas 行存在 → UPDATE(image 字段覆盖),否则 INSERT
-    replace_result = await replace_canvas_image_auto(
-        session_id=state.session.id,
-        user_id=user.user_id,
-        image_base64=req.filedata,
-        image_hash=image_hash,
-        image_format=image_format,
-        image_bytes_size=len(image_bytes),
-        canvas_index=canvas_index,
-        client_created_at=req.client_updated_at,
-    )
-    if replace_result is not None:
-        row, ocr_task_fired = replace_result
-    else:
-        # canvas 行不存在(首次 POST)→ INSERT + backfill canvas_index
-        row, created = await create_pending_image_auto(
+    # 进程内 canvas_index 写锁:并发 POST 同 canvas_index 串行化,避免双 OCR
+    lock = _canvas_locks.setdefault(canvas_index, _asyncio.Lock())
+    async with lock:
+        # replace 优先(canvas 行存在 → UPDATE image 字段);None 走 create
+        replace_result = await replace_canvas_image_auto(
             session_id=state.session.id,
             user_id=user.user_id,
             image_base64=req.filedata,
             image_hash=image_hash,
             image_format=image_format,
             image_bytes_size=len(image_bytes),
-            client_created_at=req.client_updated_at,
             canvas_index=canvas_index,
+            client_created_at=req.client_updated_at,
         )
-        # 新建行 → 触发 OCR;dedup 命中已存在行 → 跳过(已 ocr 过)。
-        # 注意:dedup 命中 ocr_status=failed 的旧行也跳过——边缘 case,
-        # 留给用户在画板上手动重传(下次 POST canvas_index 走 replace 路径
-        # 按 image_hash 变化重置 OCR 状态机)。
-        ocr_task_fired = created
+        if replace_result is not None:
+            row, ocr_task_fired = replace_result
+        else:
+            # canvas 行不存在(首次 POST)→ INSERT
+            row, created = await create_pending_image_auto(
+                session_id=state.session.id,
+                user_id=user.user_id,
+                image_base64=req.filedata,
+                image_hash=image_hash,
+                image_format=image_format,
+                image_bytes_size=len(image_bytes),
+                client_created_at=req.client_updated_at,
+                canvas_index=canvas_index,
+            )
+            ocr_task_fired = created
 
-    # payload upsert(无论 canvas 行新建还是已存在,都走 hash 跳过 / 覆盖)
-    payload_result = await upsert_canvas_payload_auto(
-        session_id=state.session.id,
-        user_id=user.user_id,
-        canvas_index=canvas_index,
-        payload=req.payload,
-    )
+        # payload upsert(独立 hash 跳过/覆盖)
+        payload_result = await upsert_canvas_payload_auto(
+            session_id=state.session.id,
+            user_id=user.user_id,
+            canvas_index=canvas_index,
+            payload=req.payload,
+        )
 
     image_id = row.id
 
@@ -882,8 +882,8 @@ async def save_canvas(
 
     return SaveCanvasResponse(
         canvas_index=canvas_index,
-        payload_skipped=payload_result.payload_skipped if payload_result else False,
-        payload_updated=payload_result.payload_updated if payload_result else False,
+        payload_skipped=payload_result.payload_skipped,
+        payload_updated=payload_result.payload_updated,
         image_id=image_id,
         ocr_task_fired=ocr_task_fired,
     )
@@ -903,7 +903,8 @@ async def list_canvases(
     """
     from app.services.handwriting.canvas_service import list_canvases_auto
 
-    state = await manager.get(session_id)
+    # 走 DB 读:ended/done 状态 evict 后 manager 拿不到,但报告页要展示历史
+    state = await interview_repo.get_state_auto(session_id)
     if state is None or state.session.user_id != user.user_id:
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     rows = await list_canvases_auto(
@@ -942,9 +943,8 @@ async def delete_canvas(
     """
     from app.services.handwriting.canvas_service import delete_canvas_auto
 
-    # DELETE canvas 不强制状态机:ended 状态用户也能清理误操作的画板。
-    # POST 才强制 _NOTE_ALLOWED_STATUSES(不允许 ended 后还在写)。
-    state = await manager.get(session_id)
+    # 走 DB 读:ended 状态 evict 后 manager 拿不到,DELETE 仍允许清理
+    state = await interview_repo.get_state_auto(session_id)
     if state is None or state.session.user_id != user.user_id:
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     image_id = await delete_canvas_auto(
@@ -954,17 +954,13 @@ async def delete_canvas(
     )
     if image_id is not None:
         # 同步清理 state.handwriting_notes 里该 image_id 段——LLM 不再看到已删的 OCR 文本
-        from app.services.sessions.runtime import registry as runtime_registry
-
-        runtime = runtime_registry.get(state.session.id)
+        runtime = registry.get(state.session.id)
         if runtime is not None:
             await runtime.remove_handwriting_notes([image_id])
         else:
             # runtime 已 evict/drop(suspended/ended session 从新标签接入)→
             # 镜像列直接读 → 过滤 → 写回。走 mutate_state_auto 持锁 RMW,
             # 避免并发删/OCR 注入撞车丢段。
-            from app.persistence.repositories.interview import interview_repo
-
             await interview_repo.mutate_state_auto(
                 state.session.id,
                 lambda s: _remove_image_ids(s, [image_id]),
@@ -989,9 +985,9 @@ async def batch_delete_canvases(
     删除后同步清理 state.handwriting_notes 里各 image_id 段。
     """
     from app.services.handwriting.canvas_service import delete_canvases_batch_auto
-    from app.services.sessions.runtime import registry as runtime_registry
 
-    state = await manager.get(session_id)
+    # 走 DB 读:ended 状态 evict 后 manager 拿不到,DELETE 仍允许清理
+    state = await interview_repo.get_state_auto(session_id)
     if state is None or state.session.user_id != user.user_id:
         raise I18nError(Keys.HTTP_SESSION_NOT_FOUND, http_status=404)
     deleted_ids = await delete_canvases_batch_auto(
@@ -1005,8 +1001,6 @@ async def batch_delete_canvases(
             await runtime.remove_handwriting_notes(deleted_ids)
         else:
             # runtime 已 evict/drop → 镜像列清理(单删路径已有同款逻辑)
-            from app.persistence.repositories.interview import interview_repo
-
             await interview_repo.mutate_state_auto(
                 state.session.id,
                 lambda s: _remove_image_ids(s, deleted_ids),

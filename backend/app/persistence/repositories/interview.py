@@ -228,7 +228,7 @@ class InterviewRepository:
         from app.persistence.db import SessionLocal
 
         lock = self._save_lock(session_id)
-        async with lock:
+        try:
             async with SessionLocal() as db:
                 state = await self.get_state(db, session_id)
                 if state is None:
@@ -237,8 +237,9 @@ class InterviewRepository:
                 if not changed:
                     return False
                 await self._save_state_locked(db, state, fields=fields)
-            self._release_save_lock(session_id, lock)
             return True
+        finally:
+            self._release_save_lock(session_id, lock)
 
     async def list_by_user(
         self, db: AsyncSession, user_id: str, statuses: Optional[list[str]] = None

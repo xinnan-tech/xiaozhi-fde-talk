@@ -590,6 +590,8 @@ async def diagnose_handwriting(timeout_s: float = 20.0) -> dict[str, Any]:
     """用内嵌测试图调手写 OCR,期望非空文本回复。
 
     读 `handwriting.*` 独立 group 的配置(不读 `ocr.*`)——两组配置完全独立。
+    样本为印刷体图(与通用 OCR 共用 ocr_test_card.png):验连通/配置/配额,
+    测不出手写体识别率问题。
     """
     cfg = get_config_store()
     base_url = cfg.get_sync("handwriting.base_url") or ""

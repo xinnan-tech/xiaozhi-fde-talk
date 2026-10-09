@@ -115,8 +115,8 @@ async def test_ocr_task_re_reads_image_each_attempt(monkeypatch):
 
     await ocr_task_mod._ocr_with_retry(image_id=42, session_id="s1")
 
-    # 失败 2 次 + 成功 1 次 = 3 轮 fetch(每轮都重新 SELECT img)
-    assert fetch_count["n"] == 3
+    # 失败 2 次 + 成功 1 次 = 3 轮 fetch(每轮 SELECT img + 成功时再 SELECT 写结果)
+    assert fetch_count["n"] == 4
     # provider 调用 3 次(2 失败 + 1 成功)
     assert call_count["n"] == 3
     # 第 3 次成功 → text 写入

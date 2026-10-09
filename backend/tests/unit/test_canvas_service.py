@@ -469,30 +469,37 @@ async def test_replace_canvas_image_returns_none_when_row_missing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delete_canvases_batch_returns_only_owned_ids(monkeypatch):
-    """批量删除:跨 session/跨 user 跳过,只返 owned image_id。"""
-    call_log = {"delete_calls": []}
+    """批量删除:单次 SELECT 拉 owned 行,单次 DELETE 删;不存在的 id 静默跳过。"""
+    import contextlib
 
-    async def fake_delete_canvas_auto(*, session_id, user_id, canvas_index):
-        call_log["delete_calls"].append(canvas_index)
-        # canvas_index 99 不存在,其它都返 image_id
-        if canvas_index == 99:
-            return None
-        return canvas_index  # 用 canvas_index 当 image_id 简化
+    rows = [
+        _make_canvas_row(image_id=10, canvas_index=1, user_id="u1", session_id="s1"),
+        _make_canvas_row(image_id=20, canvas_index=2, user_id="u1", session_id="s1"),
+        _make_canvas_row(image_id=30, canvas_index=3, user_id="u1", session_id="s1"),
+    ]
+
+    @contextlib.asynccontextmanager
+    async def _ctx():
+        sess = MagicMock()
+        result_mock = MagicMock()
+
+        async def execute(stmt):
+            result_mock.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=rows)))
+            return result_mock
+        sess.execute = execute
+        sess.commit = AsyncMock()
+        yield sess
 
     import app.services.handwriting.canvas_service as canvas_svc
-    monkeypatch.setattr(
-        canvas_svc, "delete_canvas_auto", fake_delete_canvas_auto,
-    )
+    monkeypatch.setattr(canvas_svc, "SessionLocal", _ctx)
 
     from app.services.handwriting.canvas_service import delete_canvases_batch_auto
 
     deleted_ids = await delete_canvases_batch_auto(
         session_id="s1", user_id="u1",
-        canvas_indexes=[1, 2, 3, 99],
+        canvas_indexes=[1, 2, 3, 99],  # 99 不存在被跳过
     )
-    # 99 不存在被跳过,1/2/3 都返了
-    assert sorted(deleted_ids) == [1, 2, 3]
-    assert call_log["delete_calls"] == [1, 2, 3, 99]
+    assert sorted(deleted_ids) == [10, 20, 30]
 
 
 @pytest.mark.asyncio

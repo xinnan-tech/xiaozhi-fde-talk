@@ -133,6 +133,9 @@ async def test_save_lock_recycled_via_save_state():
             created_at=None, started_at=None, ended_at=None,
         ),
         transcript=[], items=[], skipped_ids=set(), ignored_ids=set(), coverage={},
+        # 笔记字段(notes 走 cold-start 镜像列——save_state 必读,
+        # 测试 fixture 必须提供即使空值)
+        keyboard_text=None, handwriting_notes=[],
     )
 
     repo = InterviewRepository()
@@ -170,6 +173,8 @@ async def test_save_state_cannot_regress_from_ended():
                 ended_at=ended_at if status == "ended" else None,
             ),
             transcript=[], items=[], skipped_ids=set(), ignored_ids=set(), coverage={},
+            # 笔记字段(save_state 必读)
+            keyboard_text=None, handwriting_notes=[],
         )
 
     repo = InterviewRepository()

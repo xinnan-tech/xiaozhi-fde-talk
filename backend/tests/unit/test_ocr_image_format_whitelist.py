@@ -33,7 +33,7 @@ def client():
 
 def _post_ocr(client, payload: bytes) -> "tuple[int, dict]":
     b64 = base64.b64encode(payload).decode()
-    with patch("app.adapters.ocr.factory.get_ocr") as mock_get_ocr:
+    with patch("app.adapters.ocr.factory.get_general_ocr") as mock_get_ocr:
         mock_get_ocr.return_value.configured = True
         mock_get_ocr.return_value.recognize = _ok_recognize
         r = client.post("/api/v1/interviews/ocr", json={"image_base64": b64})

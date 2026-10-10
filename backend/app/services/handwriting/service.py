@@ -1,0 +1,227 @@
+"""手写笔记服务。
+
+每张图 1 行,按 (user_id, image_hash) 联合唯一索引判重。
+OCR 由 ocr_task._ocr_with_retry 异步跑,不在本服务内启动。
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domain.note import OcrStatus
+from app.persistence.db import SessionLocal
+from app.persistence.models import HandwritingImage
+
+
+def compute_image_hash(image_base64: str) -> str:
+    """对图 base64 字节算 sha256——只算图本身,不含 session/timestamp。"""
+    image_bytes = base64.b64decode(image_base64)
+    return hashlib.sha256(image_bytes).hexdigest()
+
+
+def compute_image_hash_from_bytes(image_bytes: bytes) -> str:
+    """复用已解码字节算 hash,handler b64decode 一次后给两个用途。"""
+    return hashlib.sha256(image_bytes).hexdigest()
+
+
+def sniff_image_format(image_bytes: bytes) -> str:
+    """按 magic bytes 嗅探 jpeg / png / bmp,其它格式返空串。"""
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if image_bytes.startswith(b"BM"):
+        return "bmp"
+    return ""
+
+
+async def replace_canvas_image(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    user_id: str,
+    image_base64: str,
+    image_format: str,
+    image_bytes_size: int,
+    image_hash: str,
+    canvas_index: int,
+    client_created_at: datetime,
+) -> Optional[tuple[HandwritingImage, bool]]:
+    """同 canvas_index 改图(image_hash 变了):UPDATE 现有行的 image 字段。
+
+    返回 (row, ocr_task_fired) 或 None(canvas 行不存在——走 upsert_canvas_image
+    的 dedup/INSERT 分支兜底)。ocr_task_fired=True 表示 image_hash 与 DB 不一致,
+    需要后台重跑 OCR;False 表示 hash 一致(image_base64 内容相同),跳过 OCR。
+
+    保留原 image_id(画板号 = canvas_index,DB 主键 = image_id 一一对应稳定)。
+    事务边界:不 commit——与 canvas payload upsert 共享调用方事务。
+    """
+    result = await db.execute(
+        select(HandwritingImage).where(
+            HandwritingImage.session_id == session_id,
+            HandwritingImage.user_id == user_id,
+            HandwritingImage.canvas_index == canvas_index,
+        ).limit(1)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        return None
+    ocr_task_fired = row.image_hash != image_hash
+    row.image_base64 = image_base64
+    row.image_format = image_format
+    row.image_bytes_size = image_bytes_size
+    row.image_hash = image_hash
+    row.client_created_at = client_created_at
+    if ocr_task_fired:
+        # 图变了 → 重置 OCR 状态 + 清旧文本,等后台 task 重跑
+        row.ocr_status = OcrStatus.PENDING.value
+        row.text = ""
+        row.retry_count = 0
+        row.injected_at = None
+    return (row, ocr_task_fired)
+
+
+async def upsert_canvas_image(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    user_id: str,
+    image_base64: str,
+    image_format: str,
+    image_bytes_size: int,
+    image_hash: str,
+    canvas_index: int,
+    client_created_at: datetime,
+) -> tuple[HandwritingImage, bool]:
+    """canvas 行存在 → UPDATE image 字段;不存在 → 按 (user_id, image_hash)
+    dedup / INSERT。返回 (row, ocr_task_fired)。
+
+    事务边界:不 commit——与 canvas payload upsert 共享调用方事务,单一
+    commit 保证 image 重置与 payload 写入原子(任一段失败整体回滚,避免
+    image 行卡 ocr_status=pending 而 OCR task 未 fire)。
+    """
+    replace_result = await replace_canvas_image(
+        db,
+        session_id=session_id,
+        user_id=user_id,
+        image_base64=image_base64,
+        image_format=image_format,
+        image_bytes_size=image_bytes_size,
+        image_hash=image_hash,
+        canvas_index=canvas_index,
+        client_created_at=client_created_at,
+    )
+    if replace_result is not None:
+        return replace_result
+
+    # ---- canvas 行不存在 → dedup / INSERT ----
+    existing = await db.execute(
+        select(HandwritingImage).where(
+            HandwritingImage.user_id == user_id,
+            HandwritingImage.image_hash == image_hash,
+        ).limit(1)
+    )
+    existing_row = existing.scalar_one_or_none()
+    if existing_row is not None:
+        # dedup 命中 + canvas_index 未设:补上(OCR-only 行升级为画板)
+        if existing_row.canvas_index is None:
+            existing_row.canvas_index = canvas_index
+        return existing_row, False
+    row = HandwritingImage(
+        session_id=session_id,
+        user_id=user_id,
+        image_base64=image_base64,
+        image_format=image_format,
+        image_bytes_size=image_bytes_size,
+        ocr_status=OcrStatus.PENDING.value,
+        text="",
+        retry_count=0,
+        image_hash=image_hash,
+        canvas_index=canvas_index,
+        client_created_at=client_created_at,
+    )
+    db.add(row)
+    try:
+        await db.flush()
+    except IntegrityError:
+        # 并发撞 UNIQUE(user_id, image_hash)——回滚后按 (user_id, image_hash)
+        # 兜底重查。此时事务内只有本 INSERT(payload 段在调用方排在后面),
+        # 整体回滚不会丢其它段的写。
+        await db.rollback()
+        existing = await db.execute(
+            select(HandwritingImage).where(
+                HandwritingImage.user_id == user_id,
+                HandwritingImage.image_hash == image_hash,
+            ).limit(1)
+        )
+        existing_row = existing.scalar_one_or_none()
+        if existing_row is None:
+            raise
+        return existing_row, False
+    return row, True
+
+
+async def get_by_id_auto(image_id: int) -> Optional[HandwritingImage]:
+    """OCR task 用:取一行更新状态。"""
+    async with SessionLocal() as db:
+        return await db.get(HandwritingImage, image_id)
+
+
+async def delete_handwriting_image_auto(
+    *, session_id: str, user_id: str, image_id: int,
+) -> bool:
+    """按 image_id 删除单张图。owner 校验:只删当前用户的图,跨用户 / 不属于该 session 不删。
+
+    返回 True=实际删了,False=不存在或归属不符(都是 no-op,handler 不报错)。
+    幂等性:重复删同一个 id 第二次返 False,handler 同样 200 成功。
+    """
+    from sqlalchemy import delete as sa_delete
+
+    async with SessionLocal() as db:
+        # 先查归属,避免 DELETE 没匹配返 affected=0 时无法区分「不存在」与「权限不符」
+        row = await db.get(HandwritingImage, image_id)
+        if row is None or row.user_id != user_id or row.session_id != session_id:
+            return False
+        await db.delete(row)
+        await db.commit()
+        return True
+
+
+async def delete_handwriting_images_batch_auto(
+    *, session_id: str, user_id: str, image_ids: list[int],
+) -> list[int]:
+    """批量删除:只删 (session_id, user_id) 双匹配的图,跨 session/跨用户跳过。
+    幂等:已删除的 id 跳过(返的 deleted_ids 不含)。
+    """
+    if not image_ids:
+        return []
+    from sqlalchemy import delete as sa_delete
+
+    async with SessionLocal() as db:
+        # 先 SELECT IN(...) 拿回当前已存在且归属匹配的 id
+        result = await db.execute(
+            select(HandwritingImage.id).where(
+                HandwritingImage.id.in_(image_ids),
+                HandwritingImage.user_id == user_id,
+                HandwritingImage.session_id == session_id,
+            )
+        )
+        owned_ids = [r for r in result.scalars().all()]
+        if not owned_ids:
+            return []
+        await db.execute(
+            sa_delete(HandwritingImage).where(
+                HandwritingImage.id.in_(owned_ids),
+                HandwritingImage.user_id == user_id,
+                HandwritingImage.session_id == session_id,
+            )
+        )
+        await db.commit()
+        return owned_ids

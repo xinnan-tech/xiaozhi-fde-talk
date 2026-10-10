@@ -18,7 +18,7 @@ from app.transport.http.dependencies import require_admin
 
 router = APIRouter(prefix="/admin/config", tags=["admin"])
 
-_GROUPS = ("llm", "asr", "ocr", "coach", "auth", "session")
+_GROUPS = ("llm", "asr", "ocr", "handwriting", "coach", "auth", "session")
 
 # ASR 类型 → 子 key 前缀（存储层）
 _ASR_TYPE_PREFIXES = ("funasr_server", "doubao_stream")

@@ -16,7 +16,7 @@ from app.persistence.bootstrap import _column_exists, _ensure_columns, _SELF_HEA
 
 @pytest.fixture
 async def fake_old_db_engine():
-    """造一个缺自愈列的老 dev DB：reports 缺 transcript_signature 与 output_language、interviews 缺 first_batch_generated、users 缺 password_changed_at。"""
+    """造一个缺自愈列的老 dev DB：reports 缺 transcript_signature 与 output_language、interviews 缺 first_batch_generated、users 缺 password_changed_at、handwriting_images 缺 canvas_*。"""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         # 对应 ORM 模型之外的最小字段集（不引入 Base.metadata，避免新表自带列）
@@ -44,6 +44,20 @@ async def fake_old_db_engine():
             "  password_hash VARCHAR(255),"
             "  role VARCHAR(16) DEFAULT 'user',"
             "  created_at DATETIME"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE TABLE handwriting_images ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  session_id VARCHAR(36) NOT NULL,"
+            "  user_id VARCHAR(36) NOT NULL,"
+            "  image_base64 TEXT,"
+            "  image_format VARCHAR(8),"
+            "  image_bytes_size INTEGER,"
+            "  ocr_status VARCHAR(16) DEFAULT 'pending',"
+            "  text TEXT DEFAULT '',"
+            "  retry_count INTEGER DEFAULT 0,"
+            "  image_hash VARCHAR(64)"
             ")"
         ))
     yield engine
@@ -114,3 +128,40 @@ async def test_ensure_columns_handles_full_real_schema(fake_old_db_engine):
         # 列表里每个 (table, column) 都该已存在
         for table, column, _ddl in _SELF_HEAL_COLUMNS:
             assert await _column_exists(conn, table, column) is True
+
+
+@pytest.mark.asyncio
+async def test_ensure_columns_adds_notes_columns(fake_old_db_engine):
+    """笔记功能新增的 keyboard_text / handwriting_notes 列也走 dev 自愈——
+    已有旧 dev DB 没这 2 列时 ADD COLUMN 补上。
+
+    之所以走自愈路径:Base.metadata.create_all 对已存在的表不 ALTER,只对新表建;
+    旧 dev DB(用老 ORM 模型建的)缺这 2 列,必须显式 self-heal。
+    prod 走 alembic upgrade head 自动加(0003 迁移)。
+    """
+    async with fake_old_db_engine.begin() as conn:
+        # 列本应不存在(老 dev DB schema)
+        assert await _column_exists(conn, "interviews", "keyboard_text") is False
+        assert await _column_exists(conn, "interviews", "handwriting_notes") is False
+        await _ensure_columns(conn)
+        # 自愈后两列都在
+        assert await _column_exists(conn, "interviews", "keyboard_text") is True
+        assert await _column_exists(conn, "interviews", "handwriting_notes") is True
+        # P1 #2:handwriting_images 画板 state 3 列也要被自愈加上(避免老 dev DB
+        # 没这 3 列撞 ORM 模型)
+        assert await _column_exists(conn, "handwriting_images", "canvas_index") is True
+        assert await _column_exists(conn, "handwriting_images", "canvas_payload") is True
+        assert await _column_exists(conn, "handwriting_images", "canvas_payload_hash") is True
+        # 老行读出默认值:JSON DEFAULT '[]' 落进去是字面字符串 '[]'
+        # (SQLite JSON 本质是 TEXT,ORM 侧 _record_to_state 转回 list)
+        await conn.execute(text(
+            "INSERT INTO interviews (id, template_id, status, goal) VALUES ('i1', 't', 'created', 'g')"
+        ))
+        row = (await conn.execute(text(
+            "SELECT handwriting_notes FROM interviews WHERE id='i1'"
+        ))).one()
+        assert row[0] == "[]"
+        row2 = (await conn.execute(text(
+            "SELECT keyboard_text FROM interviews WHERE id='i1'"
+        ))).one()
+        assert row2[0] is None  # TEXT 无 default,nullable

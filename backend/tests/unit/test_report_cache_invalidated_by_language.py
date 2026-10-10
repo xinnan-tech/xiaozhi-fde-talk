@@ -27,6 +27,10 @@ class _FakeState:
     transcript: list[TranscriptSegment] = field(default_factory=list)
     session: MagicMock = field(default_factory=lambda: MagicMock(template_id="pm-research"))
     items: list = field(default_factory=list)  # _build_user reads state.items
+    # 笔记字段(_build_user 会读 keyboard_text / handwriting_notes;
+    # 测试 fixture 默认空值,与 gen_with_focus 报告生成器无关)
+    keyboard_text: str | None = None
+    handwriting_notes: list = field(default_factory=list)
 
 
 @dataclass

@@ -80,12 +80,25 @@ export interface OcrDiagnosticsResult {
   };
 }
 
+export interface HandwritingDiagnosticsResult {
+  ok: boolean;
+  code: string;
+  message: string;
+  latency_ms: number;
+  detail: {
+    model: string;
+    language: string;
+    reply: string;
+  };
+}
+
 /** 系统诊断结果 */
 export interface SystemDiagnostics {
   ok: boolean;
   asr: AsrDiagnosticsResult;
   llm: LlmDiagnosticsResult;
   ocr: OcrDiagnosticsResult;
+  handwriting: HandwritingDiagnosticsResult;
 }
 
 /** 系统配置 */
@@ -122,6 +135,14 @@ export const systemOcrDiagnosticsApi = () => {
   return http.request<OcrDiagnosticsResult>(
     "post",
     baseUrlApi("/api/v1/diagnostics/ocr")
+  );
+};
+
+/** 运行手写 OCR 自检 */
+export const systemHandwritingDiagnosticsApi = () => {
+  return http.request<HandwritingDiagnosticsResult>(
+    "post",
+    baseUrlApi("/api/v1/diagnostics/handwriting")
   );
 };
 

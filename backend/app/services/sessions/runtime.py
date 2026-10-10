@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
 from app.adapters.asr.level_monitor import LevelReading
@@ -20,6 +21,7 @@ from app.core.outbound_send import safe_send
 from app.core.policies import SessionPolicy, get_policy
 from app.core.security import redact_text
 from app.domain.session import Session, SessionStatus, TranscriptSegment
+from app.domain.session_state import HandwritingNoteSegment
 from app.persistence.repositories.interview import interview_repo
 from app.services.coaching.engine import CoachingEngine
 from app.services.sessions.outbound import BoundedOutboundBuffer
@@ -75,10 +77,18 @@ class SessionRuntime:
             on_misaligned=self._on_misaligned,
         )
         self._utterance_lock = asyncio.Lock()
+        # 笔记字段(kb_text / hw_notes)互斥锁:与 _utterance_lock 互不阻塞,
+        # 但笔记自身并发写需要串行——engine.on_note_added 触发的 flush 与
+        # 同时进来的 POST/delete 不能交错丢字段。
+        self._notes_lock = asyncio.Lock()
         self._first_computed = False
         self._send_dead = False
         self._asr_dead = False
         self._dirty_segments = 0
+        # 笔记脏标记:kb_text / hw_notes 任一变动置 true。
+        # _flush_now 早退检查需同时看 segments 和 notes,否则纯笔记提交(无 ASR 句段)
+        # 会永远卡住,_dirty_segments 永远是 0 触发早退。
+        self._dirty_notes = False
         self._flush_interval_s = 5.0       # 去抖落盘窗口
         self._flush_dirty_segments = 5     # 脏段达此值立即落盘（双触发）
         self._flush_task: asyncio.Task | None = None
@@ -391,6 +401,63 @@ class SessionRuntime:
             await self._save_state()
         _touch(self.state.session.id)
 
+    # ── 笔记注入 ──────────────────────────────────────────────
+
+    async def inject_keyboard_text(self, text: str) -> None:
+        """键盘 POST 落库后调用,直接覆盖 state.keyboard_text。
+
+        arm 现有防抖(不强制立刻 fire),与 ASR 句段同一条 _pending_segments 路径——
+        引擎不区分来源,只关心"有新内容进来"。
+        """
+        async with self._notes_lock:
+            self.state.keyboard_text = text
+            self._dirty_notes = True
+            self._schedule_flush()
+        self.engine.on_note_added()
+        _touch(self.state.session.id)
+
+    async def inject_handwriting_note(self, *, image_id: int, text: str) -> None:
+        """手写 OCR 成功后由 asyncio task 调用,append 到 state.handwriting_notes。
+
+        幂等保证:按 image_id 去重,即使 task 重复调用(理论上 asyncio 不应重入),
+        也不会在 state.handwriting_notes 里出现重复段。
+        """
+        async with self._notes_lock:
+            if any(n.image_id == image_id for n in self.state.handwriting_notes):
+                return
+            seg = HandwritingNoteSegment(
+                image_id=image_id,
+                text=text,
+                injected_at=datetime.now(timezone.utc),
+            )
+            self.state.handwriting_notes.append(seg)
+            self._dirty_notes = True
+            self._schedule_flush()
+        self.engine.on_note_added()
+        _touch(self.state.session.id)
+
+    async def remove_handwriting_notes(self, image_ids: list[int]) -> None:
+        """删除手写图后调用,按 image_id 集合从 state.handwriting_notes 同步移除。
+
+        移除后 arm 防抖重算——LLM 不应再看到已删图对应的 OCR 文本。
+        image_ids 为空时 no-op,不 fire 防抖(避免空操作触发空跑)。
+        """
+        if not image_ids:
+            return
+        ids = set(image_ids)
+        async with self._notes_lock:
+            before = len(self.state.handwriting_notes)
+            self.state.handwriting_notes = [
+                n for n in self.state.handwriting_notes if n.image_id not in ids
+            ]
+            removed = before - len(self.state.handwriting_notes)
+            if removed:
+                self._dirty_notes = True
+                self._schedule_flush()
+        if removed:
+            self.engine.on_note_added()
+            _touch(self.state.session.id)
+
     # ── 内部 ──────────────────────────────────────────────────
 
     async def _on_asr_dead(self) -> None:
@@ -479,7 +546,11 @@ class SessionRuntime:
         _touch(self.state.session.id)
 
     def _schedule_flush(self) -> None:
-        """调度去抖落盘：脏段达阈值立即落盘，否则起去抖定时器。单槽（最多一个在途落盘任务）。"""
+        """调度去抖落盘：脏段达阈值立即落盘，否则起去抖定时器。单槽（最多一个在途落盘任务）。
+
+        阈值只看 _dirty_segments（段数天然累计）；_dirty_notes 是布尔，5s 防抖
+        兜底就够——用户连点提交不构成"高频事件"。
+        """
         if self._dirty_segments >= self._flush_dirty_segments:
             if self._flush_task is not None and not self._flush_task.done():
                 self._flush_task.cancel()
@@ -494,24 +565,44 @@ class SessionRuntime:
         await self._flush_now()
 
     async def _flush_now(self) -> None:
-        """去抖触发的落盘：仅当有脏转写段时落盘（仅 transcript 分组脏）。"""
+        """去抖触发的落盘：脏转写段 OR 脏笔记任一非空都落盘。
+
+        两种脏共用单槽:有 transcript 段落盘只写 {"transcript"},只写笔记落
+        {"notes"};两者都脏则合并 {"transcript", "notes"} 一次落盘(都在
+        _utterance_lock 内串行,与 _save_now 内部的 _save_state 互斥)。
+        """
         async with self._utterance_lock:
-            if self._dirty_segments == 0:
+            if self._dirty_segments == 0 and not self._dirty_notes:
                 return
-            await self._save_now(fields={"transcript"})
+            fields: set[str]
+            if self._dirty_segments > 0 and self._dirty_notes:
+                fields = {"transcript", "notes"}
+            elif self._dirty_segments > 0:
+                fields = {"transcript"}
+            else:
+                fields = {"notes"}
+            await self._save_now(fields=fields)
 
     async def _save_now(self, *, fields=None) -> None:
-        """实际落盘 + 清零脏段计数（调用方持 _utterance_lock）。
+        """实际落盘 + 清零脏段 / 脏笔记计数（调用方持 _utterance_lock）。
 
-        仅在保存成功后清零；失败则保留计数，下次调度重试（不抛——避免拖垮 flush 任务或生命周期调用方）。
-        fields 收窄写入分组（None=全写）。
+        仅在保存成功后清零;失败则保留计数,下次调度重试（不抛——避免拖垮
+        flush 任务或生命周期调用方）。fields 收窄写入分组（None=全写）。
+
+        dirty 清零必须与 fields 对称:仅当本次落盘实际覆盖某分组,才能清该
+        分组的脏位——否则下次 _flush_now 早退,未写分组脏位丢失。例如
+        _persist_for_recompute 写 coaching+notes 不写 transcript,若
+        无条件清 _dirty_segments 则最新口述段永远等不到下一次 flush。
         """
         try:
             await self._save_state(fields=fields)
         except Exception:  # noqa: BLE001
             logger.exception("落盘 save_state 失败：session=%s", self.state.session.id)
             return
-        self._dirty_segments = 0
+        if fields is None or "transcript" in fields:
+            self._dirty_segments = 0
+        if fields is None or "notes" in fields:
+            self._dirty_notes = False
 
     async def _force_flush(self) -> None:
         """生命周期（listen_stop/end/unbind）强制落盘：取消去抖，无条件保存全部状态（含 consumed_seq）。"""
@@ -546,10 +637,14 @@ class SessionRuntime:
     async def _persist_for_recompute(self) -> None:
         """engine 重算落盘经 _utterance_lock 串行，避免与 _on_utterance 建段交错。
 
-        仅 coaching 分组变（items/coverage/skipped），transcript 未动，收窄避免全量重写。
+        coaching 分组变（items/coverage/skipped） + 笔记分组（kb_text/hw_notes）
+        同一窗口落盘——engine.on_note_added 触发的重算场景里两条都可能是新的。
+        transcript 未动,默认不写。
         """
         async with self._utterance_lock:
-            await self._save_state(fields={"coaching"})
+            # 走 _save_now 而非 _save_state:落盘成功后清 _dirty_notes,
+            # 避免下次 _flush_now 又写一次相同 notes 分组。
+            await self._save_now(fields={"coaching", "notes"})
 
 
 class RuntimeRegistry:

@@ -54,8 +54,8 @@
     "@vueuse/motion": "^3.0.3",
     "animate.css": "^4.1.1",
     "axios": "^1.12.2",
-    "cropperjs": "1.6.3",
     "codemirror": "^6.0.2",
+    "cropperjs": "1.6.3",
     "dayjs": "^1.11.18",
     "element-plus": "^2.11.5",
     "js-cookie": "^3.0.5",
@@ -74,8 +74,7 @@
     "vue-i18n": "^11.4.8",
     "vue-router": "^4.6.3",
     "vue-tippy": "^6.7.1",
-    "vue-types": "^6.0.0",
-    "vue3-signature": "^0.4.4"
+    "vue-types": "^6.0.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.1.0",

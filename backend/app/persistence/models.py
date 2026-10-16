@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -83,6 +84,49 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class RefreshSessionRecord(Base):
+    """refresh token 会话登记簿（rotation / reuse 检测 / 全家撤销的事实源）。
+
+    撤销状态进 DB 而非进程内存：内存 set 随进程重启清零（已 rotate 的 token
+    复活）、多 worker（WEB_CONCURRENCY>1）各持一份互不可见——两种场景下
+    rotation 都是假的。行生命周期：
+    - active：login / register 签发、或上一次 rotation 换出的在用 token
+    - rotated：已被 rotation 换下；rotated_at 是 grace window 锚点
+      （60s 内同一 jti 再来仍放行——多 tab 并发刷新的容错；窗外再来
+      = reuse = 视同泄露，触发该用户全部 session 撤销）
+    - revoked：logout / reuse 击杀 / 全家撤销
+    - 无行：迁移前签发的 legacy token，按有效处理（首见时补登记）
+    expires_at 取自 JWT exp claim，仅供惰性清理过期行；token 过期本身
+    仍由 JWT exp 强制。
+    """
+    __tablename__ = "refresh_sessions"
+    __table_args__ = (
+        # DB 层拒绝脏 status：classify 的「未知 status → valid 兜底」从降级
+        # 语义变成不可达保险（写入侧 fail-closed）。
+        CheckConstraint(
+            "status IN ('active', 'rotated', 'revoked')",
+            name="ck_refresh_sessions_status",
+        ),
+    )
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # ondelete=CASCADE 同 ReportRecord.interview_id 惯例：删用户级联清会话行
+    # （PRAGMA foreign_keys=ON 使其在 SQLite 运行时真正生效，见 db.py）。
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), default="active", server_default="active"
+    )
+    issued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    rotated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class InterviewRecord(Base):

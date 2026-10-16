@@ -4015,32 +4015,3 @@ onMounted(() => {
   }
 }
 </style>
-
-<style>
-/*
-   * element-plus 把 tooltip 弹层 Teleport 到 body，scoped + :deep() 都够不到。
-   * 弹层实际渲染的类名是 el-popper is-dark，再拼上 tooltip-class = interview-stroke-tooltip，
-   * 因此这里用复合类名覆盖背景 / 边框 / 文本色，三角箭头是 el-popper__arrow::before。
-   * 故意不 scoped 走全局，仅靠唯一类名兜底避免冲突。
-   */
-.interview-stroke-tooltip.el-popper,
-.interview-stroke-tooltip.el-popper.is-dark {
-  background: #ffffff !important;
-  color: #1f2937 !important;
-  border: 1px solid rgba(203, 213, 225, 0.6) !important;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
-}
-
-.interview-stroke-tooltip.el-popper .el-popper__arrow::before {
-  background: #ffffff !important;
-  border: 1px solid rgba(203, 213, 225, 0.6) !important;
-  /*
-     * el-slider 默认 placement: top，popper.scss 里把 ::before 的上边 + 左边
-     * 设为 border-color: transparent !important，配合旋转 45° 让箭头呈下指三角形。
-     * 自己那条 shorthand 把所有边的颜色刷亮，得在这里再把上 / 左两侧置回透明，
-     * 否则四个边框全显，旋转后是个方块。
-     */
-  border-top-color: transparent !important;
-  border-left-color: transparent !important;
-}
-</style>

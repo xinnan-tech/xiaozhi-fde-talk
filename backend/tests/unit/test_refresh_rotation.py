@@ -71,12 +71,12 @@ async def _app():
 
 @pytest.fixture
 async def reset_state(_app):
-    """每个用例清 users + allow_registration + 限流桶（refresh_sessions 行
-    jti/user_id 均随机，跨用例不可见，无须清——见 auth.py::_reset_for_test 注释）。"""
+    """每个用例清 users + refresh_sessions + allow_registration + 限流桶。"""
     from sqlalchemy import text
     from app.transport.http.routes.auth import _reset_for_test
     async with SessionLocal() as s:
         await s.execute(text("DELETE FROM users"))
+        await s.execute(text("DELETE FROM refresh_sessions"))
         await s.execute(text("DELETE FROM system_config WHERE key = 'auth.allow_registration'"))
         await s.commit()
     get_config_store().invalidate()
@@ -84,6 +84,7 @@ async def reset_state(_app):
     yield _app
     async with SessionLocal() as s:
         await s.execute(text("DELETE FROM users"))
+        await s.execute(text("DELETE FROM refresh_sessions"))
         await s.execute(text("DELETE FROM system_config WHERE key = 'auth.allow_registration'"))
         await s.commit()
     get_config_store().invalidate()
@@ -351,6 +352,61 @@ async def test_rotate_row_purged_concurrently_raises_valueerror_not_500(reset_st
                 user_id=uid, new_jti="purge-new-" + uuid.uuid4().hex,
                 new_expires_at=expires,
             )
+
+
+@pytest.mark.asyncio
+async def test_logout_revoke_db_failure_returns_503_and_keeps_cookies(reset_state, monkeypatch):
+    """fail-closed：revoke 落库失败 → 503 且不清 cookie（客户端保留 token 可
+    重试）；清 cookie 返 200 会让用户以为已登出而行仍 active。"""
+    from app.persistence.repositories.refresh_session import refresh_session_repo
+
+    app = reset_state
+    await _make_user()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        await c.post("/api/v1/auth/login", json={
+            "username": "alice", "password": "StrongP@ssW0rd",
+        })
+        rt1 = c.cookies.get("refresh-token")
+
+        async def _boom(*a, **k):
+            raise RuntimeError("db down")
+        monkeypatch.setattr(refresh_session_repo, "revoke_by_jti", _boom)
+
+        r = await c.post("/api/v1/auth/logout")
+    assert r.status_code == 503
+    assert r.json().get("code") == "auth.logout_revocation_failed"
+    # cookie 未被服务端清除
+    assert "set-cookie" not in r.headers or "refresh-token=" not in (
+        r.headers.get("set-cookie") or ""
+    )
+
+
+@pytest.mark.asyncio
+async def test_classify_grace_seconds_override(reset_state):
+    """grace 窗宽走 B 类配置（auth.refresh_grace_seconds）：同一 rotated 行
+    在默认 60s 下判 reuse，调宽到 3600s 后判 valid。"""
+    from app.persistence.repositories.refresh_session import (
+        classify_refresh_session, refresh_session_repo,
+    )
+
+    app = reset_state
+    uid = await _make_user()
+    jti = "grace-cfg-" + uuid.uuid4().hex
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+
+    async with SessionLocal() as s:
+        s.add(RefreshSessionRecord(
+            jti=jti, user_id=uid, status="rotated",
+            rotated_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+            expires_at=expires,
+        ))
+        await s.commit()
+
+    async with SessionLocal() as s:
+        row = await refresh_session_repo.get(s, jti)
+        assert classify_refresh_session(row) == "reuse"
+        assert classify_refresh_session(row, grace_seconds=3600) == "valid"
 
 
 @pytest.mark.asyncio

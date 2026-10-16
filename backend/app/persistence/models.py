@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -101,10 +102,22 @@ class RefreshSessionRecord(Base):
     仍由 JWT exp 强制。
     """
     __tablename__ = "refresh_sessions"
+    __table_args__ = (
+        # DB 层拒绝脏 status：classify 的「未知 status → valid 兜底」从降级
+        # 语义变成不可达保险（写入侧 fail-closed）。
+        CheckConstraint(
+            "status IN ('active', 'rotated', 'revoked')",
+            name="ck_refresh_sessions_status",
+        ),
+    )
 
     jti: Mapped[str] = mapped_column(String(64), primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(36), index=True)
-    status: Mapped[str] = mapped_column(String(16), default="active")
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), default="active", server_default="active"
+    )
     issued_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

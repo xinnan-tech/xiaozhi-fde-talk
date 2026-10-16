@@ -19,7 +19,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config_store import get_config_store
+from app.core.config_store import get_auth_runtime_config, get_config_store
 from app.core.exceptions import AuthError
 from app.core.i18n import Keys
 from app.core.i18n.errors import I18nError
@@ -370,7 +370,10 @@ async def refresh(
         # revoked（显式 logout / 已被全员击杀）= 401；valid（active / grace 窗内 /
         # legacy 无行）= 继续走 rotation。
         row = await refresh_session_repo.get(db, jti)
-        verdict = classify_refresh_session(row)
+        cfg = await get_auth_runtime_config()
+        verdict = classify_refresh_session(
+            row, grace_seconds=cfg["refresh_grace_seconds"],
+        )
         if verdict == "reuse":
             # known trade-off：并发在途 rotate mint 的新 jti 不在本次 revoke 范围，下次 reuse 检测收口。
             killed = await refresh_session_repo.revoke_all_for_user(db, user_id)
@@ -430,7 +433,8 @@ async def logout(
 
     不强制 access token 鉴权：能拿到 refresh token 本身已是「合法持有者」
     （refresh 与 access 一起下发）。refresh 自身过期 / 非法也返 200，避免
-    用 freshness 探查内部状态。
+    用 freshness 探查内部状态。DB 撤销失败返 503 且不清 cookie（fail-closed，
+    撤销落库才算登出成功，客户端可重试）。
 
     不限流：端点幂等（无 cookie / 过期 / 非法一律 200），无任何成功语义
     可被滥用。曾与 refresh 共享 _refresh_limiter IP 桶，攻击者对单 IP
@@ -458,10 +462,15 @@ async def logout(
                         expires_at=datetime.fromtimestamp(exp, tz=timezone.utc),
                     )
                 except Exception as e:
-                    # DB 异常不挡 cookie 清除——旧内存实现 `_revoked_refresh_jtis.add`
-                    # 永不抛，logout 永远 200 的既有契约必须保留。仅记日志。
-                    # 撤销失败：grace/reuse 只挡 rotated 行；active 行仍可 refresh，残留风险靠此告警兜底。
-                    logger.warning("logout revoke 失败 jti=%s user=%s err=%s", jti, sub, e)
+                    # fail-closed：撤销没落库就不算登出成功。此时不清 cookie——
+                    # 客户端保留 token 可重试，DB 恢复后重试即真正撤销；
+                    # 若清了 cookie 返 200，用户以为已登出，行仍 active，
+                    # 持有该 token 的一方（含被盗场景）在 TTL 内照常可用。
+                    # 注意 DB 不可用期间 refresh 同样读不了表，不存在「宕机
+                    # 窗口内 token 被续期」，风险在恢复之后。
+                    raise I18nError(
+                        Keys.AUTH_LOGOUT_REVOCATION_FAILED, http_status=503,
+                    ) from e
                 finally:
                     if _IS_SQLITE:
                         # 同 refresh 路由：撤销失败路径立即释放写锁；

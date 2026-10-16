@@ -174,6 +174,7 @@ class Keys(StrEnum):
     AUTH_REFRESH_INVALID = "auth.refresh_invalid"
     AUTH_REFRESH_EXPIRED = "auth.refresh_expired"
     AUTH_REFRESH_REVOKED = "auth.refresh_revoked"
+    AUTH_LOGOUT_REVOCATION_FAILED = "auth.logout_revocation_failed"
 
     # ---- Pydantic request validation (422) ----
     VALIDATION_REQUIRED = "validation.required"

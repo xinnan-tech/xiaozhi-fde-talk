@@ -31,6 +31,7 @@ def classify_refresh_session(
     row: Optional[RefreshSessionRecord],
     *,
     now: Optional[datetime] = None,
+    grace_seconds: int = ROTATION_GRACE_SECONDS,
 ) -> str:
     """按行状态分类 refresh token：返回 "valid" / "revoked" / "reuse"。
 
@@ -40,6 +41,10 @@ def classify_refresh_session(
     - rotated 且超过 grace 窗 → reuse（泄露信号）。
     - 其余（active，或 rotated 窗内）→ valid。
     - 未知 status → warning + valid 兜底（兼容语义同 legacy，不因状态漂移踢存量用户）。
+      DB 层 CHECK 约束（ck_refresh_sessions_status）让脏 status 写不进来，
+      此分支实为不可达保险。
+
+    grace_seconds 走 config_store B 类（auth.refresh_grace_seconds）在线可调。
 
     SQLite 读回 naive datetime，统一按 UTC 解释（同 pwd_changed_at
     处理——CI UTC 约定）。
@@ -61,7 +66,7 @@ def classify_refresh_session(
             if rotated_at.tzinfo is None:
                 rotated_at = rotated_at.replace(tzinfo=timezone.utc)
             now = now or datetime.now(timezone.utc)
-            if (now - rotated_at).total_seconds() > ROTATION_GRACE_SECONDS:
+            if (now - rotated_at).total_seconds() > grace_seconds:
                 return "reuse"
     return "valid"
 
@@ -174,7 +179,16 @@ class RefreshSessionRepository:
             ))
         else:
             row.status = STATUS_REVOKED
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            # legacy 同 jti 与并发 refresh 补登记撞 PK（PG/MySQL）：回滚后
+            # 行已被对方登记，改走 UPDATE 收口，logout 不因此 503。
+            await db.rollback()
+            row = await self.get(db, jti)
+            if row is not None and row.status != STATUS_REVOKED:
+                row.status = STATUS_REVOKED
+                await db.commit()
 
     async def revoke_all_for_user(self, db: AsyncSession, user_id: str) -> int:
         """reuse 检测触发：撤销该用户全部 refresh session（全家击杀）。

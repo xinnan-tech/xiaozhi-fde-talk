@@ -125,6 +125,7 @@
   "auth.refresh_invalid": "invalid refresh token",
   "auth.refresh_expired": "refresh token expired",
   "auth.refresh_revoked": "refresh token revoked",
+  "auth.logout_revocation_failed": "Logout failed: session revocation was not persisted, please retry shortly",
   "validation.required": "is required",
   "validation.string_too_short": "must be at least {min} characters",
   "validation.string_too_long": "must be at most {max} characters",

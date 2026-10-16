@@ -26,11 +26,21 @@ def upgrade() -> None:
         "refresh_sessions",
         sa.Column("jti", sa.String(length=64), nullable=False),
         sa.Column("user_id", sa.String(length=36), nullable=False),
-        sa.Column("status", sa.String(length=16), nullable=False),
+        # server_default 同 0003 惯例：绕开 ORM 的 raw INSERT 忘填 status
+        # 时落 active，而非 NOT NULL 500。
+        sa.Column(
+            "status", sa.String(length=16), nullable=False,
+            server_default="active",
+        ),
         sa.Column("issued_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("rotated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("jti"),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
+        sa.CheckConstraint(
+            "status IN ('active', 'rotated', 'revoked')",
+            name="ck_refresh_sessions_status",
+        ),
     )
     op.create_index(
         op.f("ix_refresh_sessions_user_id"),

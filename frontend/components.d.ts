@@ -63,7 +63,6 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     Select: typeof import('./src/components/base/Select.vue')['default']
     SessionSection: typeof import('./src/components/template-editor/SessionSection.vue')['default']
-    SignCanvas: typeof import('./src/components/interview/SignCanvas.vue')['default']
     Src: typeof import('./src/components/ReText/src/index.vue')['default']
   }
   export interface GlobalDirectives {
@@ -124,6 +123,5 @@ declare global {
   const RouterView: typeof import('vue-router')['RouterView']
   const Select: typeof import('./src/components/base/Select.vue')['default']
   const SessionSection: typeof import('./src/components/template-editor/SessionSection.vue')['default']
-  const SignCanvas: typeof import('./src/components/interview/SignCanvas.vue')['default']
   const Src: typeof import('./src/components/ReText/src/index.vue')['default']
 }

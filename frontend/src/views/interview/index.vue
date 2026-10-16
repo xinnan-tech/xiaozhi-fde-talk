@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import {
   computed,
   nextTick,
@@ -53,10 +53,10 @@ import {
   type InterviewCanvasListResponse
 } from "@/api/interview";
 import { usePcmRecorder } from "@/composables/usePcmRecorder";
-import {
-  useSignatureHistory,
-  type SignatureHistoryState
-} from "@/composables/useSignatureHistory";
+import HandwritingPad, {
+  type HandwritingPadState,
+  type HandwritingStroke
+} from "@/components/interview/HandwritingPad.vue";
 import {
   useWebSocket,
   type InterviewServerMessage
@@ -204,13 +204,13 @@ type SuggestionMetric = SuggestionStatus | "all" | "pending";
 
 const activeMetric = ref<SuggestionMetric>("pending");
 const noteContent = ref("");
-const signatureRef = ref();
+const handwritingPadRef = ref();
 type DrawingBoard = {
   id: number;
   name: string;
   dataUrl: string;
-  strokes: SignatureHistoryState["strokes"];
-  redoStrokes: SignatureHistoryState["redoStrokes"];
+  strokes: HandwritingStroke[];
+  redoStrokes: HandwritingStroke[];
 };
 
 const drawingBoards = ref<DrawingBoard[]>([
@@ -234,7 +234,6 @@ const autoSaveInterval = 5000; // 5秒自动保存一次
 let nextDrawingBoardId = 2;
 const signatureSaveStatus = ref<"idle" | "saving" | "success">("idle");
 const keyboardNoteSaveStatus = ref<"idle" | "saving" | "success">("idle");
-const signatureHistory = useSignatureHistory(signatureRef);
 const activeDrawingBoard = computed(() =>
   drawingBoards.value.find(board => board.id === activeDrawingBoardId.value)
 );
@@ -253,32 +252,83 @@ const brushColorPresets = [
 ];
 const selectedBrushColor = ref(brushColorPresets[0]);
 const isEraserMode = ref(false);
-const penStrokeWidth = ref(2);
-const signatureOptions = {
-  penColor: selectedBrushColor.value,
-  backgroundColor: "rgb(255, 255, 255)",
-  minWidth: 2,
-  maxWidth: 2,
-  throttle: 12,
-  minDistance: 5,
-  compositeOperation: "source-over",
-  canvasContextOptions: {
-    willReadFrequently: true
+
+// 画笔 / 橡皮擦粗细各自独立记住，用户切换工具时不会把另一头的设置吃掉；
+// 走 window.localStorage 同步读写，UI 选项就是单个数字，没必要上 localforage 的 async 抽象。
+const PEN_WIDTH_KEY = "interview.handwriting.pen-width";
+const ERASER_WIDTH_KEY = "interview.handwriting.eraser-width";
+const STROKE_WIDTH_MIN = 1;
+const STROKE_WIDTH_MAX = 50;
+const STROKE_WIDTH_STEP = 0.5;
+const DEFAULT_STROKE_WIDTH = 2;
+
+function readPersistedStrokeWidth(key: string): number {
+  if (typeof window === "undefined") return DEFAULT_STROKE_WIDTH;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return DEFAULT_STROKE_WIDTH;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return DEFAULT_STROKE_WIDTH;
+    return Math.min(STROKE_WIDTH_MAX, Math.max(STROKE_WIDTH_MIN, parsed));
+  } catch {
+    // localStorage 在隐私模式 / 配额受限场景下可能抛错，骡到默认值即可。
+    return DEFAULT_STROKE_WIDTH;
   }
+}
+
+function writePersistedStrokeWidth(key: string, value: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, String(value));
+  } catch {
+    // 静默失败：隐私模式 / 配额超限不会阻塞当前会话。
+  }
+}
+
+const penStrokeWidth = ref(readPersistedStrokeWidth(PEN_WIDTH_KEY));
+const eraserStrokeWidth = ref(readPersistedStrokeWidth(ERASER_WIDTH_KEY));
+
+// 滑动条读 / 写当前选中工具的粗细：涂画笔时绑 penStrokeWidth，切到橡皮时绑 eraserStrokeWidth。
+const activeStrokeWidth = computed<number>({
+  get: () =>
+    isEraserMode.value ? eraserStrokeWidth.value : penStrokeWidth.value,
+  set: value => {
+    if (isEraserMode.value) {
+      eraserStrokeWidth.value = value;
+    } else {
+      penStrokeWidth.value = value;
+    }
+  }
+});
+
+watch(penStrokeWidth, value => {
+  writePersistedStrokeWidth(PEN_WIDTH_KEY, value);
+});
+watch(eraserStrokeWidth, value => {
+  writePersistedStrokeWidth(ERASER_WIDTH_KEY, value);
+});
+
+/**
+ * el-slider 的 format-tooltip：只回写当前工具标识，数值已经在 slider 旁的 Npx 常驻显示。
+ */
+function formatStrokeWidthTooltip(_value: number): string {
+  return isEraserMode.value ? "橡皮擦粗细" : "画笔粗细";
+}
+
+// 把父组件的画笔/橡皮/粗细变更同步到 HandwritingPad 实例，避免组件内部状态与 UI 选项脱钩。
+const syncHandwritingPadStyle = () => {
+  const instance = handwritingPadRef.value;
+  if (!instance) return;
+  instance.setPenColor(selectedBrushColor.value);
+  instance.setPenSize(activeStrokeWidth.value);
+  instance.setTool(isEraserMode.value ? "eraser" : "pen");
 };
 
-const syncSignatureStyle = () => {
-  const signature = signatureRef.value?.getInstance?.();
-  if (!signature) return;
-  signature.minWidth = penStrokeWidth.value;
-  signature.maxWidth = penStrokeWidth.value;
-  signature.penColor = selectedBrushColor.value;
-  signature.compositeOperation = isEraserMode.value
-    ? "destination-out"
-    : "source-over";
-};
-
-watch(penStrokeWidth, syncSignatureStyle);
+watch(
+  [penStrokeWidth, eraserStrokeWidth, selectedBrushColor, isEraserMode],
+  syncHandwritingPadStyle,
+  { immediate: true }
+);
 
 const noteInputRef = ref();
 
@@ -1223,8 +1273,9 @@ const setMode = async (mode: string) => {
   // 首次显示隐藏的手写组件时，需要恢复画板内容。
   if (mode === "handwriting") {
     await nextTick();
-    const canvas = signatureRef.value?.getInstance?.().canvas;
-    if (canvas?.width === 0 || canvas?.height === 0) {
+    // HandwritingPad 用 ResizeObserver 自动跟随父容器尺寸变化，这里只兜底兼容
+    // v-show 后再次出现时让父容器重排，确保子元素先有非零宽高再走恢复分支。
+    if (!handwritingBoardInitialized) {
       window.dispatchEvent(new Event("resize"));
     }
     if (!handwritingBoardInitialized) {
@@ -1317,40 +1368,47 @@ const focusNoteEditor = () => {
 const setBrushColor = (color: string) => {
   selectedBrushColor.value = color;
   isEraserMode.value = false;
-  syncSignatureStyle();
+  syncHandwritingPadStyle();
 };
 
 const toggleEraserMode = () => {
   isEraserMode.value = !isEraserMode.value;
-  syncSignatureStyle();
+  syncHandwritingPadStyle();
 };
 
-async function handleUndo() {
+function handleUndo() {
   const activeBoard = drawingBoards.value.find(
     board => board.id === activeDrawingBoardId.value
   );
   if (!activeBoard) return;
-  activeBoard.dataUrl = await signatureHistory.undo(activeBoard);
+  // HandwritingPad 内部维护自身撤销栈，调用后通过 update 事件回写到画板记录。
+  handwritingPadRef.value?.undo?.();
 }
 
-function captureDrawingSnapshot() {
-  const activeBoard = drawingBoards.value.find(
-    board => board.id === activeDrawingBoardId.value
-  );
-  if (activeBoard) signatureHistory.captureSnapshot(activeBoard);
-}
-
-async function handleRedo() {
+/**
+ * HandwritingPad 内部笔画状态变化时回写当前激活画板记录，让 canUndoDrawing / canRedoDrawing
+ * 这两个 computed 实时反映 UI 可用性，并保证 scheduleSignatureAutoExport 取到最新 strokes。
+ */
+function handleHandwritingPadStateChange(state: HandwritingPadState): void {
   const activeBoard = drawingBoards.value.find(
     board => board.id === activeDrawingBoardId.value
   );
   if (!activeBoard) return;
-  activeBoard.dataUrl = await signatureHistory.redo(activeBoard);
+  activeBoard.strokes = state.strokes;
+  activeBoard.redoStrokes = state.redoStack;
+}
+
+function handleRedo() {
+  const activeBoard = drawingBoards.value.find(
+    board => board.id === activeDrawingBoardId.value
+  );
+  if (!activeBoard) return;
+  handwritingPadRef.value?.redo?.();
 }
 
 function selectBrushMode() {
   isEraserMode.value = false;
-  syncSignatureStyle();
+  syncHandwritingPadStyle();
 }
 
 const updateActiveDrawingBoardThumbnail = () => {
@@ -1358,7 +1416,17 @@ const updateActiveDrawingBoardThumbnail = () => {
     board => board.id === activeDrawingBoardId.value
   );
   if (!activeBoard) return;
-  activeBoard.dataUrl = signatureHistory.sync(activeBoard);
+  // 把当前 HandwritingPad 内部的笔画同步进 drawingBoards 缓存（含 strokes 与 PNG 缩略图），
+  const instance = handwritingPadRef.value;
+  if (!instance) return;
+  const nextStrokes = instance.getStrokes?.();
+  if (Array.isArray(nextStrokes)) {
+    activeBoard.strokes = nextStrokes;
+  }
+  const nextDataUrl = instance.saveImage?.();
+  if (typeof nextDataUrl === "string" && nextDataUrl) {
+    activeBoard.dataUrl = nextDataUrl;
+  }
 };
 
 function clearSignatureExportTimer() {
@@ -1434,10 +1502,11 @@ async function flushPendingSaves() {
  */
 async function exportSignature(dataUrl?: string): Promise<boolean> {
   clearSignatureExportTimer();
-  const strokes = signatureHistory.readStrokes();
+  const instance = handwritingPadRef.value;
+  const strokes = instance?.getStrokes?.() ?? [];
   if (strokes.length === 0) return true;
 
-  const imageDataUrl = dataUrl ?? signatureHistory.saveImage();
+  const imageDataUrl = dataUrl ?? instance?.saveImage?.() ?? "";
   if (!imageDataUrl) return false;
 
   const filedata = imageDataUrl.replace(
@@ -1539,7 +1608,7 @@ const loadInterviewBoards = async () => {
     id: item.canvas_index,
     name: t("interview.handwriting.board", { number: index + 1 }),
     dataUrl: createDrawingBoardImageUrl(item.image_base64, item.image_format),
-    strokes: item.canvas_payload?.strokes ?? [],
+    strokes: (item.canvas_payload?.strokes ?? []) as HandwritingStroke[],
     redoStrokes: []
   }));
   activeDrawingBoardId.value = drawingBoards.value[0].id;
@@ -1556,7 +1625,26 @@ const loadKeyboardNote = async () => {
 };
 
 const restoreDrawingBoard = async (board: DrawingBoard) => {
-  await signatureHistory.restore(board);
+  // strokes 字段服务侧 schema 在迁移前是 Vue3Signature 私有结构，无法被 HandwritingPad 复用；
+  // 兼容策略：把缩略图 PNG 作为画板底图，新笔画继续叠在上面，覆盖一次保存即完成数据迁移。
+  const instance = handwritingPadRef.value;
+  if (!instance) return;
+  const legacyStrokes = Array.isArray(board.strokes) ? board.strokes : [];
+  const looksLikeHandwritingPadStrokes = legacyStrokes.every(
+    stroke =>
+      stroke &&
+      typeof stroke === "object" &&
+      Array.isArray((stroke as HandwritingStroke).points) &&
+      typeof (stroke as HandwritingStroke).color === "string" &&
+      typeof (stroke as HandwritingStroke).size === "number" &&
+      ((stroke as HandwritingStroke).tool === "pen" ||
+        (stroke as HandwritingStroke).tool === "eraser")
+  );
+  if (looksLikeHandwritingPadStrokes) {
+    instance.loadStrokes(legacyStrokes as HandwritingStroke[]);
+    return;
+  }
+  instance.loadStrokes([], board.dataUrl);
 };
 
 const selectDrawingBoard = async (board: DrawingBoard) => {
@@ -2239,30 +2327,28 @@ onMounted(() => {
                     />
                     <div class="stroke-width-control">
                       <el-slider
-                        v-model="penStrokeWidth"
+                        v-model="activeStrokeWidth"
                         :min="1"
-                        :max="10"
-                        :step="0.5"
-                        :show-tooltip="false"
+                        :max="50"
+                        :step="1"
+                        :show-tooltip="true"
+                        :format-tooltip="formatStrokeWidthTooltip"
+                        tooltip-class="interview-stroke-tooltip"
                         size="small"
                       />
-                      <span>{{ penStrokeWidth }}px</span>
+                      <span>{{ activeStrokeWidth }}px</span>
                     </div>
                   </div>
                 </div>
               </div>
 
               <div class="handwriting-pad">
-                <Vue3Signature
-                  ref="signatureRef"
-                  class="signature-canvas"
-                  :sigOption="signatureOptions"
-                  :w="'100%'"
-                  :h="'100%'"
-                  :clearOnResize="false"
-                  @ready="syncSignatureStyle"
-                  @beginStroke="captureDrawingSnapshot"
-                  @endStroke="scheduleSignatureAutoExport"
+                <HandwritingPad
+                  ref="handwritingPadRef"
+                  class="handwriting-pad-shell"
+                  @ready="syncHandwritingPadStyle"
+                  @strokeEnd="scheduleSignatureAutoExport"
+                  @update="handleHandwritingPadStateChange"
                 />
               </div>
             </div>
@@ -3556,7 +3642,7 @@ onMounted(() => {
     box-shadow: 0 10px 24px rgb(31 47 86 / 7%);
   }
 
-  .signature-canvas {
+  .handwriting-pad-shell {
     display: block;
     width: 100%;
     height: 100%;
@@ -3927,5 +4013,34 @@ onMounted(() => {
   :deep(.session-action-button.el-button [class*="el-icon"] + span) {
     display: none;
   }
+}
+</style>
+
+<style>
+/*
+   * element-plus 把 tooltip 弹层 Teleport 到 body，scoped + :deep() 都够不到。
+   * 弹层实际渲染的类名是 el-popper is-dark，再拼上 tooltip-class = interview-stroke-tooltip，
+   * 因此这里用复合类名覆盖背景 / 边框 / 文本色，三角箭头是 el-popper__arrow::before。
+   * 故意不 scoped 走全局，仅靠唯一类名兜底避免冲突。
+   */
+.interview-stroke-tooltip.el-popper,
+.interview-stroke-tooltip.el-popper.is-dark {
+  background: #ffffff !important;
+  color: #1f2937 !important;
+  border: 1px solid rgba(203, 213, 225, 0.6) !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+}
+
+.interview-stroke-tooltip.el-popper .el-popper__arrow::before {
+  background: #ffffff !important;
+  border: 1px solid rgba(203, 213, 225, 0.6) !important;
+  /*
+     * el-slider 默认 placement: top，popper.scss 里把 ::before 的上边 + 左边
+     * 设为 border-color: transparent !important，配合旋转 45° 让箭头呈下指三角形。
+     * 自己那条 shorthand 把所有边的颜色刷亮，得在这里再把上 / 左两侧置回透明，
+     * 否则四个边框全显，旋转后是个方块。
+     */
+  border-top-color: transparent !important;
+  border-left-color: transparent !important;
 }
 </style>

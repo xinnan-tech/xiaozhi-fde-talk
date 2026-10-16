@@ -52,6 +52,7 @@ declare module 'vue' {
     ElTag: typeof import('element-plus/es')['ElTag']
     ElText: typeof import('element-plus/es')['ElText']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
+    HandwritingPad: typeof import('./src/components/interview/HandwritingPad.vue')['default']
     HomeOnboarding: typeof import('./src/components/home/HomeOnboarding.vue')['default']
     ImageCropDialog: typeof import('./src/components/interview/ImageCropDialog.vue')['default']
     JsonMode: typeof import('./src/components/template-editor/JsonMode.vue')['default']
@@ -62,6 +63,7 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     Select: typeof import('./src/components/base/Select.vue')['default']
     SessionSection: typeof import('./src/components/template-editor/SessionSection.vue')['default']
+    SignCanvas: typeof import('./src/components/interview/SignCanvas.vue')['default']
     Src: typeof import('./src/components/ReText/src/index.vue')['default']
   }
   export interface GlobalDirectives {
@@ -111,6 +113,7 @@ declare global {
   const ElTag: typeof import('element-plus/es')['ElTag']
   const ElText: typeof import('element-plus/es')['ElText']
   const ElTooltip: typeof import('element-plus/es')['ElTooltip']
+  const HandwritingPad: typeof import('./src/components/interview/HandwritingPad.vue')['default']
   const HomeOnboarding: typeof import('./src/components/home/HomeOnboarding.vue')['default']
   const ImageCropDialog: typeof import('./src/components/interview/ImageCropDialog.vue')['default']
   const JsonMode: typeof import('./src/components/template-editor/JsonMode.vue')['default']
@@ -121,5 +124,6 @@ declare global {
   const RouterView: typeof import('vue-router')['RouterView']
   const Select: typeof import('./src/components/base/Select.vue')['default']
   const SessionSection: typeof import('./src/components/template-editor/SessionSection.vue')['default']
+  const SignCanvas: typeof import('./src/components/interview/SignCanvas.vue')['default']
   const Src: typeof import('./src/components/ReText/src/index.vue')['default']
 }

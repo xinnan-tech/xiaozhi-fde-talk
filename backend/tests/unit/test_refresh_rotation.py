@@ -354,6 +354,18 @@ async def test_rotate_row_purged_concurrently_raises_valueerror_not_500(reset_st
             )
 
 
+def test_refresh_sessions_user_id_fk_cascades_on_user_delete():
+    """user_id FK 必须 ondelete=CASCADE：PRAGMA foreign_keys=ON（db.py）使
+    SQLite 运行时真执行，删用户须级联清会话行，否则各 fixture 的
+    DELETE FROM users 会撞 FK（同 test_report_fk 的 ReportRecord 约定）。"""
+    fk = next(
+        c for c in RefreshSessionRecord.__table__.foreign_keys
+        if c.parent.name == "user_id"
+    )
+    assert fk.column.table.name == "users"
+    assert fk.ondelete == "CASCADE"
+
+
 @pytest.mark.asyncio
 async def test_logout_revoke_db_failure_returns_503_and_keeps_cookies(reset_state, monkeypatch):
     """fail-closed：revoke 落库失败 → 503 且不清 cookie（客户端保留 token 可

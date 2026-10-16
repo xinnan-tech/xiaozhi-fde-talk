@@ -36,7 +36,7 @@ def upgrade() -> None:
         sa.Column("rotated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("jti"),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.CheckConstraint(
             "status IN ('active', 'rotated', 'revoked')",
             name="ck_refresh_sessions_status",

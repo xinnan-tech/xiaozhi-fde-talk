@@ -76,6 +76,7 @@ class Keys(StrEnum):
     SESSION_DELETE_FORBIDDEN = "session.delete_forbidden"
     SESSION_BASE_INFO_VALUE_TOO_LONG = "session.base_info_value_too_long"
     SESSION_BASE_INFO_TOTAL_TOO_LARGE = "session.base_info_total_too_large"
+    SESSION_GOAL_TOO_LONG = "session.goal_too_long"
 
     # ---- Reports ----
     REPORT_FORMAT_NOT_IMPLEMENTED = "report.format_not_implemented"

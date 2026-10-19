@@ -57,6 +57,7 @@
   "session.delete_forbidden": "Interview in state {state} cannot be deleted",
   "session.base_info_value_too_long": "base_info.{field} value too long ({byte_len} > {max_bytes} bytes)",
   "session.base_info_total_too_large": "base_info total size too large ({byte_len} > {max_bytes} bytes)",
+  "session.goal_too_long": "goal field too long ({byte_len} > {max_bytes} bytes)",
   "report.format_not_implemented": "Format {fmt!r} is not implemented",
   "llm.not_configured": "LLM not configured (LLM_BASE_URL / LLM_API_KEY / LLM_MODEL)",
   "llm.non_retryable": "LLM call non-retryable: HTTP {status} {body}",

@@ -55,6 +55,10 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 // 鼠标悬停移动光标时只做一次 drawImage + 一个圆，避免每帧都 O(N) 重画所有笔画。
 let strokesLayer: HTMLCanvasElement | null = null;
 let strokesLayerCtx: CanvasRenderingContext2D | null = null;
+let backgroundLayer: HTMLCanvasElement | null = null;
+let backgroundLayerCtx: CanvasRenderingContext2D | null = null;
+// 缓存已解码的历史 PNG，resize 时无需重新走一次异步 Image 解码。
+let backgroundImage: HTMLImageElement | null = null;
 // 记录当前 canvas 的 CSS 尺寸，用于在 ResizeObserver 触发的重绘里复用。
 const cssWidth = ref(1);
 const cssHeight = ref(1);
@@ -167,8 +171,30 @@ function ensureStrokesLayer(): void {
 }
 
 /**
- * 把当前所有笔画重新绘制到离屏画布：白底 + 笔画。
- * 笔画数据没变就不需要调，每一帧重画所有笔画是肉眼延迟的元凶。
+ * 确保历史 PNG 背景层存在且与可见画布同尺寸。
+ * 与 ensureStrokesLayer 同构，但独立维护：resize 时两层各自缩放，互不覆盖。
+ */
+function ensureBackgroundLayer(): void {
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const targetWidth = canvas.width;
+  const targetHeight = canvas.height;
+  if (!backgroundLayer) {
+    backgroundLayer = document.createElement("canvas");
+    backgroundLayerCtx = backgroundLayer.getContext("2d");
+  }
+  if (
+    !backgroundLayerCtx ||
+    backgroundLayer.width !== targetWidth ||
+    backgroundLayer.height !== targetHeight
+  ) {
+    backgroundLayer.width = targetWidth;
+    backgroundLayer.height = targetHeight;
+  }
+}
+
+/**
+ * 这里如果再填一层白底会把历史画面整个盖住，导致首次落笔后旧内容被静默擦掉。
  */
 function paintStrokesLayer(): void {
   ensureStrokesLayer();
@@ -178,13 +204,39 @@ function paintStrokesLayer(): void {
   lctx.save();
   lctx.setTransform(1, 0, 0, 1, 0, 0);
   lctx.clearRect(0, 0, layer.width, layer.height);
-  lctx.fillStyle = "#ffffff";
-  lctx.fillRect(0, 0, layer.width, layer.height);
+  if (!backgroundImage) {
+    lctx.fillStyle = "#ffffff";
+    lctx.fillRect(0, 0, layer.width, layer.height);
+  }
   lctx.scale(dpr, dpr);
   for (const stroke of strokes.value) {
     drawStroke(lctx, stroke.points, stroke.color, stroke.size, stroke.tool);
   }
   lctx.restore();
+}
+
+/**
+ * 把已解码的历史 PNG 铺到背景层（不铺白底，保留 PNG 自身的像素）。
+ * 只在 loadStrokes 首次设置 / resize 时调用，笔画变化不触发。
+ */
+function paintBackgroundLayer(): void {
+  if (!backgroundLayerCtx || !backgroundLayer || !backgroundImage) return;
+  backgroundLayerCtx.save();
+  backgroundLayerCtx.setTransform(1, 0, 0, 1, 0, 0);
+  backgroundLayerCtx.clearRect(
+    0,
+    0,
+    backgroundLayer.width,
+    backgroundLayer.height
+  );
+  backgroundLayerCtx.drawImage(
+    backgroundImage,
+    0,
+    0,
+    backgroundLayer.width,
+    backgroundLayer.height
+  );
+  backgroundLayerCtx.restore();
 }
 
 /**
@@ -211,7 +263,7 @@ function drawCursorCircleOn(target: CanvasRenderingContext2D): void {
 }
 
 /**
- * 把离屏笔画层整张 blit 到可见画布，再在顶层叠一个光标圆。
+ * 把离屏背景层 + 笔画层依次 blit 到可见画布，再在顶层叠一个光标圆。
  * 这是鼠标悬停 / 工具色变更路径的主入口，O(1) 一次 drawImage + 一个 arc。
  *
  * 注意：setTransform 会冲掉之前留下来的 dpr 缩放，用 save/restore 包起来保证调用后
@@ -223,6 +275,10 @@ function renderVisibleFromLayer(): void {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // 背景层（历史 PNG）先行，笔画层（含新笔）覆盖其上。
+  if (backgroundLayer && backgroundImage) {
+    ctx.drawImage(backgroundLayer, 0, 0);
+  }
   ctx.drawImage(strokesLayer, 0, 0);
   ctx.restore();
   // drawCursorCircleOn 内部 save/restore，会自行退回 ctx 之前的状态。
@@ -262,6 +318,11 @@ function resizeCanvas(): void {
   // 设置 canvas.width/height 会把 ctx 状态全部清零，这里重新挂上 dpr 缩放，
   // 否则后续直接调 drawStroke 落到内部 1:1 像素上，移动端 dpr>1 时笔迹会偏。
   ctx.scale(dpr, dpr);
+  // 尺寸变了：背景层要跟着 resize 并重新铺一次历史 PNG，否则历史画面会被拉伸变形或直接丢失。
+  if (backgroundImage) {
+    ensureBackgroundLayer();
+    paintBackgroundLayer();
+  }
   redrawCanvas();
 }
 
@@ -408,29 +469,32 @@ function loadStrokes(
   redoStack.value = [];
   // 把 PNG 当作背景叠到当前 canvas，保证视觉与历史结果一致，再让新笔画覆盖。
   if (backgroundDataUrl) {
-    ensureStrokesLayer();
-    const layer = strokesLayer;
-    const lctx = strokesLayerCtx;
-    if (!layer || !lctx) return;
+    ensureBackgroundLayer();
     const tempImg = new Image();
     tempImg.onload = () => {
-      lctx.setTransform(1, 0, 0, 1, 0, 0);
-      lctx.clearRect(0, 0, layer.width, layer.height);
-      lctx.drawImage(tempImg, 0, 0, layer.width, layer.height);
-      lctx.scale(dpr, dpr);
-      for (const stroke of strokes.value) {
-        drawStroke(lctx, stroke.points, stroke.color, stroke.size, stroke.tool);
-      }
+      backgroundImage = tempImg;
+      paintBackgroundLayer();
+      // 历史 PNG 只进背景层，笔画层重画时不再填白底，历史画面不会被擦掉。
+      paintStrokesLayer();
       renderVisibleFromLayer();
       publishState();
     };
     tempImg.onerror = () => {
-      redrawCanvas();
+      // 历史 PNG 加载失败：清空背景层并退回到"白底 + 笔画"的行为，避免白板残留。
+      backgroundImage = null;
+      backgroundLayer = null;
+      backgroundLayerCtx = null;
+      paintStrokesLayer();
+      renderVisibleFromLayer();
       publishState();
     };
     tempImg.src = backgroundDataUrl;
     return;
   }
+  // 没有历史背景：显式清空背景层，防止从老画板切到新画板后残留上一张的历史画面。
+  backgroundImage = null;
+  backgroundLayer = null;
+  backgroundLayerCtx = null;
   paintStrokesLayer();
   renderVisibleFromLayer();
   publishState();

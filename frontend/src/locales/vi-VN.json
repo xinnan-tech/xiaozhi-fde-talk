@@ -423,6 +423,8 @@
   "interview.handwriting.delete": "Xóa",
   "interview.handwriting.delete_board": "Xóa bảng vẽ",
   "interview.handwriting.pen": "Bút vẽ",
+  "interview.handwriting.pen_width": "Độ dày bút vẽ",
+  "interview.handwriting.eraser_width": "Độ dày tẩy",
   "interview.save.saving": "Đang lưu",
   "interview.save.success": "Đã lưu",
   "interview.runtime.mic_permission": "Không thể truy cập micro. Kiểm tra quyền của trình duyệt.",

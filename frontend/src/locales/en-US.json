@@ -423,6 +423,8 @@
   "interview.handwriting.delete": "Delete",
   "interview.handwriting.delete_board": "Delete board",
   "interview.handwriting.pen": "Pen",
+  "interview.handwriting.pen_width": "Pen width",
+  "interview.handwriting.eraser_width": "Eraser width",
   "interview.save.saving": "Saving",
   "interview.save.success": "Saved",
   "interview.runtime.mic_permission": "Unable to access the microphone. Check your browser permissions.",

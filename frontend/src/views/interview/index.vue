@@ -257,9 +257,12 @@ const isEraserMode = ref(false);
 // 走 window.localStorage 同步读写，UI 选项就是单个数字，没必要上 localforage 的 async 抽象。
 const PEN_WIDTH_KEY = "interview.handwriting.pen-width";
 const ERASER_WIDTH_KEY = "interview.handwriting.eraser-width";
-const STROKE_WIDTH_MIN = 1;
-const STROKE_WIDTH_MAX = 50;
-const STROKE_WIDTH_STEP = 0.5;
+// 笔画粗细范围。迁移前 vue3-signature 上限10px，但手写场景（尤其移动端手指书写）
+// 需要更粗的笔画才能覆盖有效面积，因此放宽到 1-50px；step 取 1px 整数刻度便于点选。
+// 模板的 el-slider :min / :max / :step 全部绑这里，避免两处各写一份改漏。
+const strokeWidthMin = 1;
+const strokeWidthMax = 50;
+const strokeWidthStep = 1;
 const DEFAULT_STROKE_WIDTH = 2;
 
 function readPersistedStrokeWidth(key: string): number {
@@ -269,9 +272,9 @@ function readPersistedStrokeWidth(key: string): number {
     if (raw === null) return DEFAULT_STROKE_WIDTH;
     const parsed = Number(raw);
     if (!Number.isFinite(parsed)) return DEFAULT_STROKE_WIDTH;
-    return Math.min(STROKE_WIDTH_MAX, Math.max(STROKE_WIDTH_MIN, parsed));
+    return Math.min(strokeWidthMax, Math.max(strokeWidthMin, parsed));
   } catch {
-    // localStorage 在隐私模式 / 配额受限场景下可能抛错，骡到默认值即可。
+    // localStorage 在隐私模式 / 配额受限场景下可能抛错，回退到默认值即可。
     return DEFAULT_STROKE_WIDTH;
   }
 }
@@ -312,7 +315,9 @@ watch(eraserStrokeWidth, value => {
  * el-slider 的 format-tooltip：只回写当前工具标识，数值已经在 slider 旁的 Npx 常驻显示。
  */
 function formatStrokeWidthTooltip(_value: number): string {
-  return isEraserMode.value ? "橡皮擦粗细" : "画笔粗细";
+  return isEraserMode.value
+    ? t("interview.handwriting.eraser_width")
+    : t("interview.handwriting.pen_width");
 }
 
 // 把父组件的画笔/橡皮/粗细变更同步到 HandwritingPad 实例，避免组件内部状态与 UI 选项脱钩。
@@ -1416,7 +1421,11 @@ const updateActiveDrawingBoardThumbnail = () => {
     board => board.id === activeDrawingBoardId.value
   );
   if (!activeBoard) return;
-  // 把当前 HandwritingPad 内部的笔画同步进 drawingBoards 缓存（含 strokes 与 PNG 缩略图），
+  // 把当前 HandwritingPad 内部的笔画同步进 drawingBoards 缓存（含 strokes 与 PNG 缩略图）。
+  // 刻意不同步 redoStrokes：这条路径的语义是「切板 / 加板 / 删板前的最后快照」，
+  // 紧接着的 restoreDrawingBoard → loadStrokes 会把该画板整体替换并清空重做栈，
+  // 此时把旧重做栈写回只会让中间态误导 canRedoDrawing。重做栈是画板内状态，
+  // 跨画板保留也不符合语义——否则在 A 板撤销后切到 B 板点重做会冒出 A 板的笔画。
   const instance = handwritingPadRef.value;
   if (!instance) return;
   const nextStrokes = instance.getStrokes?.();
@@ -1640,7 +1649,12 @@ const restoreDrawingBoard = async (board: DrawingBoard) => {
       ((stroke as HandwritingStroke).tool === "pen" ||
         (stroke as HandwritingStroke).tool === "eraser")
   );
-  if (looksLikeHandwritingPadStrokes) {
+  // 必须额外校验 length > 0：[].every() 恒为 true，而老画板通过
+  // loadStrokes([], dataUrl) 加载后 strokes 为空、历史图在背景层；只要用户在
+  // 落笔前跑过一次 updateActiveDrawingBoardThumbnail（打开画板抽屉 / 切画板都会），
+  // 内存里就会变成「strokes=[] + dataUrl=非空白历史图」。此时若走无背景分支，
+  // 背景层会被清空，切回该画板就变成白板、历史内容静默丢失。
+  if (legacyStrokes.length > 0 && looksLikeHandwritingPadStrokes) {
     instance.loadStrokes(legacyStrokes as HandwritingStroke[]);
     return;
   }
@@ -2328,9 +2342,9 @@ onMounted(() => {
                     <div class="stroke-width-control">
                       <el-slider
                         v-model="activeStrokeWidth"
-                        :min="1"
-                        :max="50"
-                        :step="1"
+                        :min="strokeWidthMin"
+                        :max="strokeWidthMax"
+                        :step="strokeWidthStep"
                         :show-tooltip="true"
                         :format-tooltip="formatStrokeWidthTooltip"
                         tooltip-class="interview-stroke-tooltip"

@@ -13,17 +13,6 @@ export interface HandwritingStroke {
   tool: "pen" | "eraser";
 }
 
-const props = withDefaults(
-  defineProps<{
-    initialStrokes?: HandwritingStroke[];
-    fill?: boolean;
-  }>(),
-  {
-    initialStrokes: () => [],
-    fill: true
-  }
-);
-
 const emit = defineEmits<{
   (event: "ready"): void;
   (event: "strokeEnd"): void;
@@ -66,7 +55,6 @@ let ctx: CanvasRenderingContext2D | null = null;
 let dpr = 1;
 let resizeObserver: ResizeObserver | null = null;
 
-// ==================== 状态 ====================
 const strokes = ref<HandwritingStroke[]>([]);
 const redoStack = ref<HandwritingStroke[]>([]);
 const currentStroke = ref<HandwritingPoint[]>([]);
@@ -79,7 +67,6 @@ const currentSize = ref(4);
 // 鼠标悬停时的光标预览位置；落笔或离开画布时置 null，避免光标圆与笔画重叠。
 const cursorPos = ref<HandwritingPoint | null>(null);
 
-// ==================== 工具函数 ====================
 function getPosition(e: MouseEvent | TouchEvent): HandwritingPoint {
   const canvas = canvasRef.value;
   if (!canvas) return { x: 0, y: 0 };
@@ -326,8 +313,9 @@ function resizeCanvas(): void {
   redrawCanvas();
 }
 
-// ==================== 事件处理 ====================
 function handleStart(e: MouseEvent | TouchEvent): void {
+  // 模板只在 touch 事件上挂了 .prevent 修饰符，鼠标事件没有，
+  // 因此这里的 preventDefault 不是重复调用，而是补齐鼠标路径。
   e.preventDefault();
   if (!ctx) return;
   isDrawing.value = true;
@@ -349,6 +337,7 @@ function handleMove(e: MouseEvent | TouchEvent): void {
   if (!ctx) return;
   const pos = getPosition(e);
   if (isDrawing.value) {
+    // 同handleStart：鼠标路径没有 .prevent 修饰符，这里必须自己挡一次。
     e.preventDefault();
     // 正在落笔时悬浮圆必须让位，避免压笔尖位置出现鬼影；先清一次再补一笔。
     if (cursorPos.value) {
@@ -518,24 +507,15 @@ onMounted(() => {
   if (!canvasRef.value) return;
   dpr = window.devicePixelRatio || 1;
   ctx = canvasRef.value.getContext("2d");
-  // 首次挂载后用客户端读取的 initialStrokes 还原画板；
-  // 后续由父组件通过 loadStrokes 驱动，不要再读取 props.initialStrokes。
-  const initial = props.initialStrokes;
-  if (Array.isArray(initial) && initial.length > 0) {
-    loadStrokes(initial);
-  }
-  if (props.fill) {
-    resizeCanvas();
-    const target = canvasRef.value.parentElement;
-    if (target && typeof ResizeObserver !== "undefined") {
-      resizeObserver = new ResizeObserver(() => resizeCanvas());
-      resizeObserver.observe(target);
-    }
-  } else {
-    const canvas = canvasRef.value;
-    canvas.width = 1 * dpr;
-    canvas.height = 1 * dpr;
-    fillBackground(ctx!, canvas.width / dpr, canvas.height / dpr);
+  // getContext("2d") 在 GPU 上下文耗尽 / 隐私模式等场景可能返回 null，
+  // 这里显式守卫而不是用非空断言，避免后续 fill / drawImage 直接 TypeError。
+  if (!ctx) return;
+  // 画板内容完全由父组件通过 loadStrokes 驱动（切板 / 恢复 / 迁移兼容都走它）。
+  resizeCanvas();
+  const target = canvasRef.value.parentElement;
+  if (target && typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver(() => resizeCanvas());
+    resizeObserver.observe(target);
   }
   emit("ready");
 });
@@ -547,19 +527,6 @@ watch(
     if (cursorPos.value) drawCursor();
   },
   { immediate: false }
-);
-
-// 当父组件把 props.initialStrokes 整个替换时（例如页面已经加载到后端数据），刷新画板。
-// 笔画细粒度修改由 loadStrokes 接管，这里只对"初次出现且非空"做兜底还原。
-watch(
-  () => props.initialStrokes,
-  next => {
-    if (!Array.isArray(next) || next.length === 0) return;
-    if (strokes.value.length === 0) {
-      loadStrokes(next);
-    }
-  },
-  { deep: false }
 );
 
 onBeforeUnmount(() => {
@@ -584,7 +551,15 @@ defineExpose({
 
 <template>
   <div class="handwriting-pad-shell">
-    <div class="canvas-container" :class="{ fill: fill }">
+    <div class="canvas-container">
+      <!--
+        刻意不绑 touchleave：Touch Events 规范里没有这个事件，浏览器永不派发；手指滑出
+        画板时 touchmove 会继续派发给 touchstart 时锁定的 target（这也是 touch-action:
+        none 能阻止页面跟滚的前提），属规范行为而非缺陷。
+        touchcancel 则是真需要接的：来电 / 通知弹出、多指手势打断、边缘返回手势接管等
+        场景下系统会派发它；不接的话 isDrawing 会卡在 true 直到下次 touchstart，期间
+        用户只移动手指会走落笔分支凭空产生一笔脏数据。
+      -->
       <canvas
         ref="canvasRef"
         class="handwriting-pad-canvas"
@@ -595,6 +570,7 @@ defineExpose({
         @touchstart.prevent="handleStart"
         @touchmove.prevent="handleMove"
         @touchend.prevent="handleEnd"
+        @touchcancel.prevent="handleEnd"
       />
     </div>
   </div>

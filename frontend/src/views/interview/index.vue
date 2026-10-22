@@ -209,6 +209,9 @@ type SuggestionMetric = SuggestionStatus | "all" | "pending";
 
 const activeMetric = ref<SuggestionMetric>("pending");
 const noteContent = ref("");
+// 键盘笔记是否有未落库内容：接管后要用服务端数据覆盖 noteContent，
+// 若本端正在编辑则先强制保存，避免吞掉用户输入。
+const keyboardNoteDirty = ref(false);
 const handwritingPadRef = ref();
 type DrawingBoard = {
   id: number;
@@ -1081,7 +1084,17 @@ const websocket = useWebSocket({
     });
   },
   onTakeoverCompleted: () => {
-    void refreshInterviewTranscript();
+    // 接管瞬间会话归属切换到本端，另一端在接管前写入的画板 / 键盘笔记
+    // 本端还停留在进入页面时的旧快照，必须重新拉取才能与转录保持同一时点。
+    void Promise.all([
+      refreshInterviewTranscript(),
+      loadInterviewBoards(),
+      loadKeyboardNote()
+    ])
+      .then(() => restoreActiveDrawingBoardAfterReload())
+      .catch(error => {
+        console.warn("[InterviewPage] 接管后刷新画板 / 笔记失败", error);
+      });
   },
   onDisconnected: event => {
     console.warn("[InterviewPage] WebSocket 已断开", event.code, event.reason);
@@ -1329,7 +1342,12 @@ const isHandwritingMode = computed(() => activeMode.value === "handwriting");
 const canUseInterviewTools = computed(
   () =>
     interviewDetail.value?.status === "in_progress" &&
-    !isSessionWriteLocked.value
+    !isSessionWriteLocked.value &&
+    // 握手完成（收到 hello）才代表本端真正持有会话写权限。点击「继续访谈」后
+    // handleStartInterview 会立刻把 status 置为 in_progress，但 WS 此刻还在
+    // connecting / pending，要等 hello 回来才真正接管成功。不加这道门，用户就能在
+    // 接管生效前就开始写，把内容写进还不属于本端的会话。
+    isWebSocketConnected.value
 );
 
 /**
@@ -1500,6 +1518,7 @@ async function saveKeyboardNote() {
   )
     .then(() => {
       keyboardNoteSaveStatus.value = "success";
+      keyboardNoteDirty.value = false;
       return true;
     })
     .catch(error => {
@@ -1516,10 +1535,17 @@ async function saveKeyboardNote() {
 function scheduleKeyboardNoteSave() {
   clearKeyboardNoteSaveTimer();
   keyboardNoteSaveStatus.value = "idle";
+  keyboardNoteDirty.value = true;
   keyboardNoteSaveTimerId = window.setTimeout(() => {
     keyboardNoteSaveTimerId = null;
     void saveKeyboardNote();
   }, autoSaveInterval);
+}
+
+/** 接管刷新笔记前，把本端未落库的编辑内容强制提交，避免被服务端数据覆盖。 */
+async function flushKeyboardNoteBeforeOverwrite(): Promise<void> {
+  clearKeyboardNoteSaveTimer();
+  await saveKeyboardNote();
 }
 
 async function flushPendingSaves() {
@@ -1631,6 +1657,11 @@ const loadInterviewBoards = async () => {
     await getInterviewBoardsApi(sessionId);
   const items = Array.isArray(response?.items) ? response.items : [];
 
+  // 接管后重新拉取时保留用户当前所在的画板：loadInterviewBoards 原本无条件把激活项
+  // 重置为第一块（仅适用于首屏初始化），接管刷新复用它会把用户从当前画板踢回去。
+  const previousActiveId = activeDrawingBoardId.value;
+  const keepCurrentBoard = drawingBoards.value.length > 0;
+
   if (items.length === 0) {
     drawingBoards.value = [
       {
@@ -1653,7 +1684,13 @@ const loadInterviewBoards = async () => {
     strokes: (item.canvas_payload?.strokes ?? []) as HandwritingStroke[],
     redoStrokes: []
   }));
-  activeDrawingBoardId.value = drawingBoards.value[0].id;
+  const stillExists = drawingBoards.value.some(
+    board => board.id === previousActiveId
+  );
+  activeDrawingBoardId.value =
+    keepCurrentBoard && stillExists
+      ? previousActiveId
+      : drawingBoards.value[0].id;
   nextDrawingBoardId =
     Math.max(...drawingBoards.value.map(board => board.id)) + 1;
 };
@@ -1662,8 +1699,15 @@ const loadKeyboardNote = async () => {
   const sessionId = route.params.id as string;
   if (!sessionId) return;
 
+  // 接管前本端可能正在键盘面板上编辑未保存内容；此时用服务端数据覆盖会吞掉用户输入。
+  // 键盘笔记有 5s 自动保存，正常编辑早已落库，因此仅在「接管前确实没落库」时跳过覆盖。
+  if (keyboardNoteDirty.value) {
+    void flushKeyboardNoteBeforeOverwrite();
+    return;
+  }
   const response = await getKeyboardInterviewNoteApi(sessionId);
   noteContent.value = response.item?.text ?? "";
+  keyboardNoteDirty.value = false;
 };
 
 const restoreDrawingBoard = async (board: DrawingBoard) => {
@@ -1688,10 +1732,23 @@ const restoreDrawingBoard = async (board: DrawingBoard) => {
   // 内存里就会变成「strokes=[] + dataUrl=非空白历史图」。此时若走无背景分支，
   // 背景层会被清空，切回该画板就变成白板、历史内容静默丢失。
   if (legacyStrokes.length > 0 && looksLikeHandwritingPadStrokes) {
-    instance.loadStrokes(legacyStrokes as HandwritingStroke[]);
+    await instance.loadStrokes(legacyStrokes as HandwritingStroke[]);
     return;
   }
-  instance.loadStrokes([], board.dataUrl);
+  await instance.loadStrokes([], board.dataUrl);
+};
+
+/**
+ * loadInterviewBoards 只替换 drawingBoards 数据，不会把新内容刷进 HandwritingPad 画布
+ * （那条路径由 setMode 首次进入手写时触发，且被 handwritingBoardInitialized 守卫只跑一次）。
+ * 接管后必须显式把当前激活画板重新灌进画布，否则画布仍是接管前的旧画面。
+ */
+const restoreActiveDrawingBoardAfterReload = async () => {
+  const activeBoard = drawingBoards.value.find(
+    board => board.id === activeDrawingBoardId.value
+  );
+  if (!activeBoard) return;
+  await restoreDrawingBoard(activeBoard);
 };
 
 const selectDrawingBoard = async (board: DrawingBoard) => {

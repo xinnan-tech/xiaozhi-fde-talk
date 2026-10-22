@@ -2,13 +2,24 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 export interface HandwritingPoint {
+  /**
+   * 归一化坐标（0~1，相对绘制时画布的 CSS 尺寸）。
+   * 不存绝对像素：绝对坐标换一台设备 / 换一个窗口尺寸回放就会溢出画布，
+   * 表现为「内容被放大且看不全」。归一化后任何尺寸下都能完整还原。
+   */
   x: number;
+  /** 归一化坐标（0~1），语义同 x。 */
   y: number;
 }
 
 export interface HandwritingStroke {
+  /** 归一化点序列；实时绘制过程中 currentStroke 暂存绝对坐标，落笔时才归一化。 */
   points: HandwritingPoint[];
   color: string;
+  /**
+   * 笔宽保持绝对 CSS 像素，不随画布缩放：否则拖动窗口会让已有笔画粗细突变，
+   * 且新笔画与回放笔画的粗细对不上。
+   */
   size: number;
   tool: "pen" | "eraser";
 }
@@ -90,6 +101,29 @@ function getPosition(e: MouseEvent | TouchEvent): HandwritingPoint {
     x: clientX - rect.left,
     y: clientY - rect.top
   };
+}
+
+/**
+ * 绝对 CSS 坐标 → 归一化坐标（0~1）。
+ * 落笔提交时调用：把「这一笔画在画布哪个相对位置」固化下来，与设备无关。
+ */
+function normalizePoints(points: HandwritingPoint[]): HandwritingPoint[] {
+  return points.map(point => ({
+    x: cssWidth.value > 0 ? point.x / cssWidth.value : 0,
+    y: cssHeight.value > 0 ? point.y / cssHeight.value : 0
+  }));
+}
+
+/**
+ * 归一化坐标（0~1）→ 当前画布的绝对 CSS 坐标。
+ * 回放时调用：无论在哪个设备 / 哪个窗口尺寸打开，都按当前画布重新铺开，
+ * 内容始终完整可见。缩放策略为 xy 独立填满，画布比例变化时字迹会随之拉伸。
+ */
+function denormalizePoints(points: HandwritingPoint[]): HandwritingPoint[] {
+  return points.map(point => ({
+    x: point.x * cssWidth.value,
+    y: point.y * cssHeight.value
+  }));
 }
 
 function drawStroke(
@@ -197,7 +231,13 @@ function paintStrokesLayer(): void {
   }
   lctx.scale(dpr, dpr);
   for (const stroke of strokes.value) {
-    drawStroke(lctx, stroke.points, stroke.color, stroke.size, stroke.tool);
+    drawStroke(
+      lctx,
+      denormalizePoints(stroke.points),
+      stroke.color,
+      stroke.size,
+      stroke.tool
+    );
   }
   lctx.restore();
 }
@@ -384,7 +424,8 @@ function handleEnd(): void {
   if (currentStroke.value.length > 0) {
     const size = currentSize.value;
     strokes.value.push({
-      points: [...currentStroke.value],
+      // currentStroke 是实时绘制用的绝对坐标，落笔时才归一化存储。
+      points: normalizePoints(currentStroke.value),
       color: currentColor.value,
       size,
       tool: currentTool.value
@@ -448,7 +489,7 @@ function getStrokes(): HandwritingStroke[] {
 function loadStrokes(
   next: HandwritingStroke[],
   backgroundDataUrl?: string
-): void {
+): Promise<void> {
   strokes.value = next.map(stroke => ({
     points: stroke.points.map(p => ({ x: p.x, y: p.y })),
     color: stroke.color,
@@ -459,26 +500,36 @@ function loadStrokes(
   // 把 PNG 当作背景叠到当前 canvas，保证视觉与历史结果一致，再让新笔画覆盖。
   if (backgroundDataUrl) {
     ensureBackgroundLayer();
-    const tempImg = new Image();
-    tempImg.onload = () => {
-      backgroundImage = tempImg;
-      paintBackgroundLayer();
-      // 历史 PNG 只进背景层，笔画层重画时不再填白底，历史画面不会被擦掉。
-      paintStrokesLayer();
-      renderVisibleFromLayer();
-      publishState();
-    };
-    tempImg.onerror = () => {
-      // 历史 PNG 加载失败：清空背景层并退回到"白底 + 笔画"的行为，避免白板残留。
-      backgroundImage = null;
-      backgroundLayer = null;
-      backgroundLayerCtx = null;
-      paintStrokesLayer();
-      renderVisibleFromLayer();
-      publishState();
-    };
-    tempImg.src = backgroundDataUrl;
-    return;
+    // 先清空背景层：等待解码期间若沿用上一块画板的背景，新画布会短暂显示错内容。
+    backgroundImage = null;
+    backgroundLayer = null;
+    backgroundLayerCtx = null;
+    // 必须等图片解码完成再 resolve：父组件 restoreDrawingBoard 的 await 依赖这个
+    // Promise 来保证「activeDrawingBoardId 已切换」与「画布已切换」严格同步，
+    // 否则父组件在这段空窗期读画布会把上一块画板的内容写进当前画板记录。
+    return new Promise<void>(resolve => {
+      const tempImg = new Image();
+      tempImg.onload = () => {
+        backgroundImage = tempImg;
+        paintBackgroundLayer();
+        // 历史 PNG 只进背景层，笔画层重画时不再填白底，历史画面不会被擦掉。
+        paintStrokesLayer();
+        renderVisibleFromLayer();
+        publishState();
+        resolve();
+      };
+      tempImg.onerror = () => {
+        // 历史 PNG 加载失败：清空背景层并退回到"白底 + 笔画"的行为，避免白板残留。
+        backgroundImage = null;
+        backgroundLayer = null;
+        backgroundLayerCtx = null;
+        paintStrokesLayer();
+        renderVisibleFromLayer();
+        publishState();
+        resolve();
+      };
+      tempImg.src = backgroundDataUrl;
+    });
   }
   // 没有历史背景：显式清空背景层，防止从老画板切到新画板后残留上一张的历史画面。
   backgroundImage = null;
@@ -487,6 +538,7 @@ function loadStrokes(
   paintStrokesLayer();
   renderVisibleFromLayer();
   publishState();
+  return Promise.resolve();
 }
 
 // 将透明区域铺白后导出 PNG dataURL，供父组件上传后端。

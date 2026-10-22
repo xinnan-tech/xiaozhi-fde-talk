@@ -199,6 +199,11 @@ const isInterviewInProgress = computed(
 );
 const activeMode = ref("transcript");
 const activeModeIndex = ref(2);
+// 本端对当前会话没有写权限，两种来源：
+//   1. 被别的会话接管（服务端下发 connection.kicked）；
+//   2. 连接冲突时用户选择「取消」，放弃接管（connection.conflict → 取消）。
+// 两者语义一致——会话归另一端所有，本端只能查看转录，手写 / 键盘笔记必须锁定。
+const isSessionWriteLocked = ref(false);
 type SuggestionStatus = InterviewDetailItem["status"];
 type SuggestionMetric = SuggestionStatus | "all" | "pending";
 
@@ -594,6 +599,8 @@ const handleStartInterview = async () => {
 
   // 暂停后 WS 层 isReconnectAllowed=false，需手动复位才能再次重连。
   allowReconnect();
+  // 接管 / 重新开始访谈意味着本端重新拿回会话写权限，解锁手写与键盘入口。
+  isSessionWriteLocked.value = false;
   openWebSocket();
 
   // suspended 状态恢复：立即调 resume API 更新 DB（不依赖 WS 连接状态）。
@@ -875,6 +882,10 @@ const handleTakeoverConflict = async (message: string) => {
     websocket.close();
     isInterviewStarted.value = false;
     stopInterviewTimer();
+    // 用户放弃接管 = 主动让出该会话。此刻会话归另一端所有，本端不能再写；
+    // 但服务端不会补发 connection.kicked，所以这里必须显式锁定写权限，
+    // 否则 status 仍是 in_progress，手写 / 键盘 tab 会错误地保持可选。
+    lockSessionWrite();
   }
 };
 
@@ -998,6 +1009,7 @@ const handleServerMessage = (message: InterviewServerMessage) => {
     stopMicrophone();
     isInterviewStarted.value = false;
     stopInterviewTimer();
+    lockSessionWrite();
     ElMessage.warning(message.reason || t("interview.runtime.kicked"));
     return;
   }
@@ -1269,6 +1281,12 @@ const handleBack = async () => {
 };
 
 const setMode = async (mode: string) => {
+  // 会话无写权限 / 访谈非进行中时锁定手写与键盘入口，
+  // 防止绕过 UI 直接调用落到不可写的会话上。
+  if (mode !== "transcript" && !canUseInterviewTools.value) {
+    mode = "transcript";
+    activeModeIndex.value = 2;
+  }
   // 手写组件使用 v-show 保留画布实例，切换时只关闭画板抽屉。
   if (isHandwritingMode.value && mode !== "handwriting") {
     isDrawingBoardDrawerOpen.value = false;
@@ -1309,8 +1327,23 @@ const setMode = async (mode: string) => {
 const isKeyboardMode = computed(() => activeMode.value === "keyboard");
 const isHandwritingMode = computed(() => activeMode.value === "handwriting");
 const canUseInterviewTools = computed(
-  () => interviewDetail.value?.status === "in_progress"
+  () =>
+    interviewDetail.value?.status === "in_progress" &&
+    !isSessionWriteLocked.value
 );
+
+/**
+ * 锁定本端会话写权限：会话已归另一端所有（被接管，或冲突时用户选择放弃接管），
+ * 手写 / 键盘必须禁用。同时把视图强制切回转录——tab 变灰拦不住已经停在
+ * 手写面板上的用户继续编辑，那部分笔画会失去同步目标，属于用户可感知的数据丢失。
+ */
+function lockSessionWrite(): void {
+  isSessionWriteLocked.value = true;
+  if (activeMode.value !== "transcript") {
+    activeModeIndex.value = 2;
+    void setMode("transcript");
+  }
+}
 const activeSaveStatus = computed(() => {
   if (isKeyboardMode.value) return keyboardNoteSaveStatus.value;
   if (isHandwritingMode.value) return signatureSaveStatus.value;

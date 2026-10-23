@@ -1,0 +1,658 @@
+<script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+
+export interface HandwritingPoint {
+  /**
+   * 归一化坐标（0~1，相对绘制时画布的 CSS 尺寸）。
+   * 不存绝对像素：绝对坐标换一台设备 / 换一个窗口尺寸回放就会溢出画布，
+   * 表现为「内容被放大且看不全」。归一化后任何尺寸下都能完整还原。
+   */
+  x: number;
+  /** 归一化坐标（0~1），语义同 x。 */
+  y: number;
+}
+
+export interface HandwritingStroke {
+  /** 归一化点序列；实时绘制过程中 currentStroke 暂存绝对坐标，落笔时才归一化。 */
+  points: HandwritingPoint[];
+  color: string;
+  /**
+   * 笔宽保持绝对 CSS 像素，不随画布缩放：否则拖动窗口会让已有笔画粗细突变，
+   * 且新笔画与回放笔画的粗细对不上。
+   */
+  size: number;
+  tool: "pen" | "eraser";
+}
+
+const emit = defineEmits<{
+  (event: "ready"): void;
+  (event: "strokeEnd"): void;
+  (event: "update", payload: HandwritingPadState): void;
+}>();
+
+/**
+ * 对外回传的完整笔画状态；父组件拿到后写回自己的多画板记录，
+ * 用于驱动撤销/重做按钮可用性。
+ */
+export interface HandwritingPadState {
+  strokes: HandwritingStroke[];
+  redoStack: HandwritingStroke[];
+}
+
+function publishState(): void {
+  emit("update", {
+    strokes: strokes.value,
+    redoStack: redoStack.value
+  });
+}
+
+defineOptions({
+  name: "HandwritingPad"
+});
+
+const canvasRef = ref<HTMLCanvasElement | null>(null);
+// 离屏画布：仅在笔画真正发生变化时整张重画一次（handleEnd / undo / redo / clear / load），
+// 鼠标悬停移动光标时只做一次 drawImage + 一个圆，避免每帧都 O(N) 重画所有笔画。
+let strokesLayer: HTMLCanvasElement | null = null;
+let strokesLayerCtx: CanvasRenderingContext2D | null = null;
+let backgroundLayer: HTMLCanvasElement | null = null;
+let backgroundLayerCtx: CanvasRenderingContext2D | null = null;
+// 缓存已解码的历史 PNG，resize 时无需重新走一次异步 Image 解码。
+let backgroundImage: HTMLImageElement | null = null;
+// 记录当前 canvas 的 CSS 尺寸，用于在 ResizeObserver 触发的重绘里复用。
+const cssWidth = ref(1);
+const cssHeight = ref(1);
+let ctx: CanvasRenderingContext2D | null = null;
+let dpr = 1;
+let resizeObserver: ResizeObserver | null = null;
+
+const strokes = ref<HandwritingStroke[]>([]);
+const redoStack = ref<HandwritingStroke[]>([]);
+const currentStroke = ref<HandwritingPoint[]>([]);
+const isDrawing = ref(false);
+const lastX = ref(0);
+const lastY = ref(0);
+const currentTool = ref<"pen" | "eraser">("pen");
+const currentColor = ref("#000000");
+const currentSize = ref(4);
+// 鼠标悬停时的光标预览位置；落笔或离开画布时置 null，避免光标圆与笔画重叠。
+const cursorPos = ref<HandwritingPoint | null>(null);
+
+function getPosition(e: MouseEvent | TouchEvent): HandwritingPoint {
+  const canvas = canvasRef.value;
+  if (!canvas) return { x: 0, y: 0 };
+  const rect = canvas.getBoundingClientRect();
+  let clientX: number;
+  let clientY: number;
+  if ("touches" in e && e.touches.length > 0) {
+    const touch = e.touches[0];
+    clientX = touch.clientX;
+    clientY = touch.clientY;
+  } else if ("changedTouches" in e && e.changedTouches.length > 0) {
+    const touch = e.changedTouches[0];
+    clientX = touch.clientX;
+    clientY = touch.clientY;
+  } else {
+    const mouse = e as MouseEvent;
+    clientX = mouse.clientX;
+    clientY = mouse.clientY;
+  }
+  return {
+    x: clientX - rect.left,
+    y: clientY - rect.top
+  };
+}
+
+/**
+ * 绝对 CSS 坐标 → 归一化坐标（0~1）。
+ * 落笔提交时调用：把「这一笔画在画布哪个相对位置」固化下来，与设备无关。
+ */
+function normalizePoints(points: HandwritingPoint[]): HandwritingPoint[] {
+  return points.map(point => ({
+    x: cssWidth.value > 0 ? point.x / cssWidth.value : 0,
+    y: cssHeight.value > 0 ? point.y / cssHeight.value : 0
+  }));
+}
+
+/**
+ * 归一化坐标（0~1）→ 当前画布的绝对 CSS 坐标。
+ * 回放时调用：无论在哪个设备 / 哪个窗口尺寸打开，都按当前画布重新铺开，
+ * 内容始终完整可见。缩放策略为 xy 独立填满，画布比例变化时字迹会随之拉伸。
+ */
+function denormalizePoints(points: HandwritingPoint[]): HandwritingPoint[] {
+  return points.map(point => ({
+    x: point.x * cssWidth.value,
+    y: point.y * cssHeight.value
+  }));
+}
+
+function drawStroke(
+  drawCtx: CanvasRenderingContext2D,
+  points: HandwritingPoint[],
+  color: string,
+  size: number,
+  tool: "pen" | "eraser"
+): void {
+  if (points.length === 0) return;
+  drawCtx.save();
+  drawCtx.beginPath();
+  drawCtx.strokeStyle = color;
+  drawCtx.fillStyle = color;
+  drawCtx.lineWidth = size;
+  drawCtx.lineCap = "round";
+  drawCtx.lineJoin = "round";
+  drawCtx.globalCompositeOperation =
+    tool === "eraser" ? "destination-out" : "source-over";
+  if (points.length === 1) {
+    drawCtx.arc(points[0].x, points[0].y, size / 2, 0, Math.PI * 2);
+    drawCtx.fill();
+  } else {
+    drawCtx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      drawCtx.lineTo(points[i].x, points[i].y);
+    }
+    drawCtx.stroke();
+  }
+  drawCtx.restore();
+}
+
+// 用白色背景铺底，保证从透明区域导出 PNG 时不会变成黑色。
+function fillBackground(
+  target: CanvasRenderingContext2D,
+  w: number,
+  h: number
+) {
+  target.save();
+  target.fillStyle = "#ffffff";
+  target.fillRect(0, 0, w, h);
+  target.restore();
+}
+
+/**
+ * 确保离屏画布存在且跟当前可见画布尺寸一致；
+ * 仅在 resize 或初始化时调用一次，同尺寸下是空操作。
+ */
+function ensureStrokesLayer(): void {
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const targetWidth = canvas.width;
+  const targetHeight = canvas.height;
+  if (!strokesLayer) {
+    strokesLayer = document.createElement("canvas");
+    strokesLayerCtx = strokesLayer.getContext("2d");
+  }
+  if (
+    !strokesLayerCtx ||
+    strokesLayer.width !== targetWidth ||
+    strokesLayer.height !== targetHeight
+  ) {
+    strokesLayer.width = targetWidth;
+    strokesLayer.height = targetHeight;
+  }
+}
+
+/**
+ * 确保历史 PNG 背景层存在且与可见画布同尺寸。
+ * 与 ensureStrokesLayer 同构，但独立维护：resize 时两层各自缩放，互不覆盖。
+ */
+function ensureBackgroundLayer(): void {
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const targetWidth = canvas.width;
+  const targetHeight = canvas.height;
+  if (!backgroundLayer) {
+    backgroundLayer = document.createElement("canvas");
+    backgroundLayerCtx = backgroundLayer.getContext("2d");
+  }
+  if (
+    !backgroundLayerCtx ||
+    backgroundLayer.width !== targetWidth ||
+    backgroundLayer.height !== targetHeight
+  ) {
+    backgroundLayer.width = targetWidth;
+    backgroundLayer.height = targetHeight;
+  }
+}
+
+/**
+ * 这里如果再填一层白底会把历史画面整个盖住，导致首次落笔后旧内容被静默擦掉。
+ */
+function paintStrokesLayer(): void {
+  ensureStrokesLayer();
+  const lctx = strokesLayerCtx;
+  const layer = strokesLayer;
+  if (!lctx || !layer) return;
+  lctx.save();
+  lctx.setTransform(1, 0, 0, 1, 0, 0);
+  lctx.clearRect(0, 0, layer.width, layer.height);
+  if (!backgroundImage) {
+    lctx.fillStyle = "#ffffff";
+    lctx.fillRect(0, 0, layer.width, layer.height);
+  }
+  lctx.scale(dpr, dpr);
+  for (const stroke of strokes.value) {
+    drawStroke(
+      lctx,
+      denormalizePoints(stroke.points),
+      stroke.color,
+      stroke.size,
+      stroke.tool
+    );
+  }
+  lctx.restore();
+}
+
+/**
+ * 把已解码的历史 PNG 铺到背景层（不铺白底，保留 PNG 自身的像素）。
+ * 只在 loadStrokes 首次设置 / resize 时调用，笔画变化不触发。
+ */
+function paintBackgroundLayer(): void {
+  if (!backgroundLayerCtx || !backgroundLayer || !backgroundImage) return;
+  backgroundLayerCtx.save();
+  backgroundLayerCtx.setTransform(1, 0, 0, 1, 0, 0);
+  backgroundLayerCtx.clearRect(
+    0,
+    0,
+    backgroundLayer.width,
+    backgroundLayer.height
+  );
+  backgroundLayerCtx.drawImage(
+    backgroundImage,
+    0,
+    0,
+    backgroundLayer.width,
+    backgroundLayer.height
+  );
+  backgroundLayerCtx.restore();
+}
+
+/**
+ * 在可见画布左上角画光标圆；沿用 dpr 的坐标系变换。
+ */
+function drawCursorCircleOn(target: CanvasRenderingContext2D): void {
+  if (!cursorPos.value) return;
+  const { x, y } = cursorPos.value;
+  const radius = Math.max(currentSize.value / 2, 1);
+  target.save();
+  target.scale(dpr, dpr);
+  target.lineWidth = 1;
+  if (currentTool.value === "eraser") {
+    target.setLineDash([4, 4]);
+    target.strokeStyle = "#888888";
+  } else {
+    target.setLineDash([]);
+    target.strokeStyle = currentColor.value;
+  }
+  target.beginPath();
+  target.arc(x, y, radius, 0, Math.PI * 2);
+  target.stroke();
+  target.restore();
+}
+
+/**
+ * 把离屏背景层 + 笔画层依次 blit 到可见画布，再在顶层叠一个光标圆。
+ * 这是鼠标悬停 / 工具色变更路径的主入口，O(1) 一次 drawImage + 一个 arc。
+ *
+ * 注意：setTransform 会冲掉之前留下来的 dpr 缩放，用 save/restore 包起来保证调用后
+ * 可见 ctx 的"持久变换"仍是 dpr-scaled，后续调 drawStroke 落点正确。
+ */
+function renderVisibleFromLayer(): void {
+  if (!ctx || !canvasRef.value || !strokesLayer) return;
+  const canvas = canvasRef.value;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // 背景层（历史 PNG）先行，笔画层（含新笔）覆盖其上。
+  if (backgroundLayer && backgroundImage) {
+    ctx.drawImage(backgroundLayer, 0, 0);
+  }
+  ctx.drawImage(strokesLayer, 0, 0);
+  ctx.restore();
+  // drawCursorCircleOn 内部 save/restore，会自行退回 ctx 之前的状态。
+  drawCursorCircleOn(ctx);
+}
+
+/**
+ * 笔画数据真发生了变化时用：先重画离屏层，再 blit 到可见画布。
+ */
+function redrawCanvas(): void {
+  paintStrokesLayer();
+  renderVisibleFromLayer();
+}
+
+/** 光标移动时专用：只走 blit + 圆，不重画笔画。 */
+function drawCursor(): void {
+  renderVisibleFromLayer();
+}
+
+// 按当前 cssWidth/cssHeight 重新初始化 canvas 像素分辨率，触发坐标变换与白底。
+function resizeCanvas(): void {
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const nextWidth = Math.max(1, Math.floor(rect.width));
+  const nextHeight = Math.max(1, Math.floor(rect.height));
+  if (nextWidth === cssWidth.value && nextHeight === cssHeight.value) {
+    return;
+  }
+  cssWidth.value = nextWidth;
+  cssHeight.value = nextHeight;
+  dpr = window.devicePixelRatio || 1;
+  canvas.width = nextWidth * dpr;
+  canvas.height = nextHeight * dpr;
+  ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  // 设置 canvas.width/height 会把 ctx 状态全部清零，这里重新挂上 dpr 缩放，
+  // 否则后续直接调 drawStroke 落到内部 1:1 像素上，移动端 dpr>1 时笔迹会偏。
+  ctx.scale(dpr, dpr);
+  // 尺寸变了：背景层要跟着 resize 并重新铺一次历史 PNG，否则历史画面会被拉伸变形或直接丢失。
+  if (backgroundImage) {
+    ensureBackgroundLayer();
+    paintBackgroundLayer();
+  }
+  redrawCanvas();
+}
+
+function handleStart(e: MouseEvent | TouchEvent): void {
+  // 模板只在 touch 事件上挂了 .prevent 修饰符，鼠标事件没有，
+  // 因此这里的 preventDefault 不是重复调用，而是补齐鼠标路径。
+  e.preventDefault();
+  if (!ctx) return;
+  isDrawing.value = true;
+  const pos = getPosition(e);
+  lastX.value = pos.x;
+  lastY.value = pos.y;
+  currentStroke.value = [{ x: pos.x, y: pos.y }];
+  const size = currentSize.value;
+  drawStroke(
+    ctx,
+    currentStroke.value,
+    currentColor.value,
+    size,
+    currentTool.value
+  );
+}
+
+function handleMove(e: MouseEvent | TouchEvent): void {
+  if (!ctx) return;
+  const pos = getPosition(e);
+  if (isDrawing.value) {
+    // 同handleStart：鼠标路径没有 .prevent 修饰符，这里必须自己挡一次。
+    e.preventDefault();
+    // 正在落笔时悬浮圆必须让位，避免压笔尖位置出现鬼影；先清一次再补一笔。
+    if (cursorPos.value) {
+      cursorPos.value = null;
+      renderVisibleFromLayer();
+    }
+    const size = currentSize.value;
+    drawStroke(
+      ctx,
+      [
+        { x: lastX.value, y: lastY.value },
+        { x: pos.x, y: pos.y }
+      ],
+      currentColor.value,
+      size,
+      currentTool.value
+    );
+    currentStroke.value.push({ x: pos.x, y: pos.y });
+    lastX.value = pos.x;
+    lastY.value = pos.y;
+    return;
+  }
+  // 鼠标悬停：画一个随 currentSize 变化的圆作光标预览。
+  cursorPos.value = pos;
+  drawCursor();
+}
+
+function handleCanvasLeave(): void {
+  // 落笔中离开：保留原"拖出 canvas 也能提交"的语义，先 commit 那一笔。
+  if (isDrawing.value) {
+    handleEnd();
+    return;
+  }
+  // 纯悬停离开：清掉光标预览，恢复纯笔画画面。
+  if (cursorPos.value) {
+    cursorPos.value = null;
+    renderVisibleFromLayer();
+  }
+}
+
+function handleEnd(): void {
+  if (!isDrawing.value) return;
+  isDrawing.value = false;
+  if (currentStroke.value.length > 0) {
+    const size = currentSize.value;
+    strokes.value.push({
+      // currentStroke 是实时绘制用的绝对坐标，落笔时才归一化存储。
+      points: normalizePoints(currentStroke.value),
+      color: currentColor.value,
+      size,
+      tool: currentTool.value
+    });
+    redoStack.value = [];
+    publishState();
+    // 落笔期间笔画是直接画到可见 canvas 的，离屏层这会儿是旧的，
+    // 同步一次让下次光标移动不会出现该笔丢失的鬼影。
+    paintStrokesLayer();
+    renderVisibleFromLayer();
+  }
+  currentStroke.value = [];
+  emit("strokeEnd");
+}
+
+function undo(): void {
+  if (strokes.value.length === 0) return;
+  const last = strokes.value.pop();
+  if (last) redoStack.value.push(last);
+  redrawCanvas();
+  publishState();
+}
+
+function redo(): void {
+  if (redoStack.value.length === 0) return;
+  const stroke = redoStack.value.pop();
+  if (!stroke) return;
+  strokes.value.push(stroke);
+  redrawCanvas();
+  publishState();
+}
+
+function clear(): void {
+  strokes.value = [];
+  redoStack.value = [];
+  redrawCanvas();
+  publishState();
+}
+
+function setTool(tool: "pen" | "eraser"): void {
+  currentTool.value = tool;
+}
+
+function setPenColor(color: string): void {
+  currentColor.value = color;
+}
+
+function setPenSize(size: number): void {
+  currentSize.value = Math.max(1, size);
+}
+
+function getStrokes(): HandwritingStroke[] {
+  return strokes.value.map(stroke => ({
+    points: stroke.points.map(p => ({ x: p.x, y: p.y })),
+    color: stroke.color,
+    size: stroke.size,
+    tool: stroke.tool
+  }));
+}
+
+function loadStrokes(
+  next: HandwritingStroke[],
+  backgroundDataUrl?: string
+): Promise<void> {
+  strokes.value = next.map(stroke => ({
+    points: stroke.points.map(p => ({ x: p.x, y: p.y })),
+    color: stroke.color,
+    size: stroke.size,
+    tool: stroke.tool
+  }));
+  redoStack.value = [];
+  // 把 PNG 当作背景叠到当前 canvas，保证视觉与历史结果一致，再让新笔画覆盖。
+  if (backgroundDataUrl) {
+    ensureBackgroundLayer();
+    // 先清空背景层：等待解码期间若沿用上一块画板的背景，新画布会短暂显示错内容。
+    backgroundImage = null;
+    backgroundLayer = null;
+    backgroundLayerCtx = null;
+    // 必须等图片解码完成再 resolve：父组件 restoreDrawingBoard 的 await 依赖这个
+    // Promise 来保证「activeDrawingBoardId 已切换」与「画布已切换」严格同步，
+    // 否则父组件在这段空窗期读画布会把上一块画板的内容写进当前画板记录。
+    return new Promise<void>(resolve => {
+      const tempImg = new Image();
+      tempImg.onload = () => {
+        backgroundImage = tempImg;
+        paintBackgroundLayer();
+        // 历史 PNG 只进背景层，笔画层重画时不再填白底，历史画面不会被擦掉。
+        paintStrokesLayer();
+        renderVisibleFromLayer();
+        publishState();
+        resolve();
+      };
+      tempImg.onerror = () => {
+        // 历史 PNG 加载失败：清空背景层并退回到"白底 + 笔画"的行为，避免白板残留。
+        backgroundImage = null;
+        backgroundLayer = null;
+        backgroundLayerCtx = null;
+        paintStrokesLayer();
+        renderVisibleFromLayer();
+        publishState();
+        resolve();
+      };
+      tempImg.src = backgroundDataUrl;
+    });
+  }
+  // 没有历史背景：显式清空背景层，防止从老画板切到新画板后残留上一张的历史画面。
+  backgroundImage = null;
+  backgroundLayer = null;
+  backgroundLayerCtx = null;
+  paintStrokesLayer();
+  renderVisibleFromLayer();
+  publishState();
+  return Promise.resolve();
+}
+
+// 将透明区域铺白后导出 PNG dataURL，供父组件上传后端。
+function saveImage(): string {
+  const canvas = canvasRef.value;
+  if (!canvas) return "";
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = canvas.width;
+  exportCanvas.height = canvas.height;
+  const exportCtx = exportCanvas.getContext("2d");
+  if (!exportCtx) return "";
+  fillBackground(exportCtx, exportCanvas.width, exportCanvas.height);
+  exportCtx.drawImage(canvas, 0, 0);
+  return exportCanvas.toDataURL("image/png");
+}
+
+onMounted(() => {
+  if (!canvasRef.value) return;
+  dpr = window.devicePixelRatio || 1;
+  ctx = canvasRef.value.getContext("2d");
+  // getContext("2d") 在 GPU 上下文耗尽 / 隐私模式等场景可能返回 null，
+  // 这里显式守卫而不是用非空断言，避免后续 fill / drawImage 直接 TypeError。
+  if (!ctx) return;
+  // 画板内容完全由父组件通过 loadStrokes 驱动（切板 / 恢复 / 迁移兼容都走它）。
+  resizeCanvas();
+  const target = canvasRef.value.parentElement;
+  if (target && typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver(() => resizeCanvas());
+    resizeObserver.observe(target);
+  }
+  emit("ready");
+});
+
+// 工具或粗细变化：刷新光标圆 + 在画布顶部弹出"画笔 / 橡皮擦粗细"提示。
+watch(
+  [currentSize, currentTool],
+  () => {
+    if (cursorPos.value) drawCursor();
+  },
+  { immediate: false }
+);
+
+onBeforeUnmount(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+});
+
+defineExpose({
+  getStrokes,
+  loadStrokes,
+  saveImage,
+  clear,
+  undo,
+  redo,
+  setTool,
+  setPenColor,
+  setPenSize
+});
+</script>
+
+<template>
+  <div class="handwriting-pad-shell">
+    <div class="canvas-container">
+      <!--
+        刻意不绑 touchleave：Touch Events 规范里没有这个事件，浏览器永不派发；手指滑出
+        画板时 touchmove 会继续派发给 touchstart 时锁定的 target（这也是 touch-action:
+        none 能阻止页面跟滚的前提），属规范行为而非缺陷。
+        touchcancel 则是真需要接的：来电 / 通知弹出、多指手势打断、边缘返回手势接管等
+        场景下系统会派发它；不接的话 isDrawing 会卡在 true 直到下次 touchstart，期间
+        用户只移动手指会走落笔分支凭空产生一笔脏数据。
+      -->
+      <canvas
+        ref="canvasRef"
+        class="handwriting-pad-canvas"
+        @mousedown="handleStart"
+        @mousemove="handleMove"
+        @mouseup="handleEnd"
+        @mouseleave="handleCanvasLeave"
+        @touchstart.prevent="handleStart"
+        @touchmove.prevent="handleMove"
+        @touchend.prevent="handleEnd"
+        @touchcancel.prevent="handleEnd"
+      />
+    </div>
+  </div>
+</template>
+
+<style lang="scss" scoped>
+.handwriting-pad-shell {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-container {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 8%);
+
+  .handwriting-pad-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: none;
+    background: #fff;
+    border-radius: 8px;
+    touch-action: none;
+  }
+}
+</style>

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import {
   computed,
   nextTick,
@@ -53,10 +53,10 @@ import {
   type InterviewCanvasListResponse
 } from "@/api/interview";
 import { usePcmRecorder } from "@/composables/usePcmRecorder";
-import {
-  useSignatureHistory,
-  type SignatureHistoryState
-} from "@/composables/useSignatureHistory";
+import HandwritingPad, {
+  type HandwritingPadState,
+  type HandwritingStroke
+} from "@/components/interview/HandwritingPad.vue";
 import {
   useWebSocket,
   type InterviewServerMessage
@@ -199,18 +199,32 @@ const isInterviewInProgress = computed(
 );
 const activeMode = ref("transcript");
 const activeModeIndex = ref(2);
+// 本端对当前会话没有写权限，两种来源：
+//   1. 被别的会话接管（服务端下发 connection.kicked）；
+//   2. 连接冲突时用户选择「取消」，放弃接管（connection.conflict → 取消）。
+// 两者语义一致——会话归另一端所有，本端只能查看转录，手写 / 键盘笔记必须锁定。
+const isSessionWriteLocked = ref(false);
 type SuggestionStatus = InterviewDetailItem["status"];
 type SuggestionMetric = SuggestionStatus | "all" | "pending";
 
 const activeMetric = ref<SuggestionMetric>("pending");
 const noteContent = ref("");
-const signatureRef = ref();
+// 键盘笔记是否有未落库内容：接管后要用服务端数据覆盖 noteContent，
+// 若本端正在编辑则先强制保存，避免吞掉用户输入。
+const keyboardNoteDirty = ref(false);
+const handwritingPadRef = ref();
 type DrawingBoard = {
   id: number;
   name: string;
   dataUrl: string;
-  strokes: SignatureHistoryState["strokes"];
-  redoStrokes: SignatureHistoryState["redoStrokes"];
+  strokes: HandwritingStroke[];
+  redoStrokes: HandwritingStroke[];
+};
+
+type PendingBoardExport = {
+  boardId: number;
+  strokes: HandwritingStroke[];
+  dataUrl: string;
 };
 
 const drawingBoards = ref<DrawingBoard[]>([
@@ -224,17 +238,19 @@ const drawingBoards = ref<DrawingBoard[]>([
 ]);
 const activeDrawingBoardId = ref(1);
 const isDrawingBoardDrawerOpen = ref(false);
-let signatureExportTimerId: number | null = null;
+const pendingBoardExports = new Map<number, PendingBoardExport>();
+const boardExportTimerIds = new Map<number, number>();
+// 保存请求必须串行：并发时若后一块画板直接复用前一个 in-flight promise，
+// 它的保存会被静默丢弃，因此用链式队列把每份快照都提交出去。
+let boardExportChain: Promise<boolean> = Promise.resolve(true);
 let keyboardNoteSaveTimerId: number | null = null;
 let handwritingBoardInitialized = false;
-let signatureSavePromise: Promise<boolean> | null = null;
 let keyboardNoteSavePromise: Promise<boolean> | null = null;
 let interviewActionPending = false;
 const autoSaveInterval = 5000; // 5秒自动保存一次
 let nextDrawingBoardId = 2;
 const signatureSaveStatus = ref<"idle" | "saving" | "success">("idle");
 const keyboardNoteSaveStatus = ref<"idle" | "saving" | "success">("idle");
-const signatureHistory = useSignatureHistory(signatureRef);
 const activeDrawingBoard = computed(() =>
   drawingBoards.value.find(board => board.id === activeDrawingBoardId.value)
 );
@@ -253,32 +269,88 @@ const brushColorPresets = [
 ];
 const selectedBrushColor = ref(brushColorPresets[0]);
 const isEraserMode = ref(false);
-const penStrokeWidth = ref(2);
-const signatureOptions = {
-  penColor: selectedBrushColor.value,
-  backgroundColor: "rgb(255, 255, 255)",
-  minWidth: 2,
-  maxWidth: 2,
-  throttle: 12,
-  minDistance: 5,
-  compositeOperation: "source-over",
-  canvasContextOptions: {
-    willReadFrequently: true
+
+// 画笔 / 橡皮擦粗细各自独立记住，用户切换工具时不会把另一头的设置吃掉；
+// 走 window.localStorage 同步读写，UI 选项就是单个数字，没必要上 localforage 的 async 抽象。
+const PEN_WIDTH_KEY = "interview.handwriting.pen-width";
+const ERASER_WIDTH_KEY = "interview.handwriting.eraser-width";
+// 笔画粗细范围。迁移前 vue3-signature 上限10px，但手写场景（尤其移动端手指书写）
+// 需要更粗的笔画才能覆盖有效面积，因此放宽到 1-50px；step 取 1px 整数刻度便于点选。
+// 模板的 el-slider :min / :max / :step 全部绑这里，避免两处各写一份改漏。
+const strokeWidthMin = 1;
+const strokeWidthMax = 50;
+const strokeWidthStep = 1;
+const DEFAULT_STROKE_WIDTH = 2;
+
+function readPersistedStrokeWidth(key: string): number {
+  if (typeof window === "undefined") return DEFAULT_STROKE_WIDTH;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return DEFAULT_STROKE_WIDTH;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return DEFAULT_STROKE_WIDTH;
+    return Math.min(strokeWidthMax, Math.max(strokeWidthMin, parsed));
+  } catch {
+    // localStorage 在隐私模式 / 配额受限场景下可能抛错，回退到默认值即可。
+    return DEFAULT_STROKE_WIDTH;
   }
+}
+
+function writePersistedStrokeWidth(key: string, value: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, String(value));
+  } catch {
+    // 静默失败：隐私模式 / 配额超限不会阻塞当前会话。
+  }
+}
+
+const penStrokeWidth = ref(readPersistedStrokeWidth(PEN_WIDTH_KEY));
+const eraserStrokeWidth = ref(readPersistedStrokeWidth(ERASER_WIDTH_KEY));
+
+// 滑动条读 / 写当前选中工具的粗细：涂画笔时绑 penStrokeWidth，切到橡皮时绑 eraserStrokeWidth。
+const activeStrokeWidth = computed<number>({
+  get: () =>
+    isEraserMode.value ? eraserStrokeWidth.value : penStrokeWidth.value,
+  set: value => {
+    if (isEraserMode.value) {
+      eraserStrokeWidth.value = value;
+    } else {
+      penStrokeWidth.value = value;
+    }
+  }
+});
+
+watch(penStrokeWidth, value => {
+  writePersistedStrokeWidth(PEN_WIDTH_KEY, value);
+});
+watch(eraserStrokeWidth, value => {
+  writePersistedStrokeWidth(ERASER_WIDTH_KEY, value);
+});
+
+/**
+ * el-slider 的 format-tooltip：只回写当前工具标识，数值已经在 slider 旁的 Npx 常驻显示。
+ */
+function formatStrokeWidthTooltip(_value: number): string {
+  return isEraserMode.value
+    ? t("interview.handwriting.eraser_width")
+    : t("interview.handwriting.pen_width");
+}
+
+// 把父组件的画笔/橡皮/粗细变更同步到 HandwritingPad 实例，避免组件内部状态与 UI 选项脱钩。
+const syncHandwritingPadStyle = () => {
+  const instance = handwritingPadRef.value;
+  if (!instance) return;
+  instance.setPenColor(selectedBrushColor.value);
+  instance.setPenSize(activeStrokeWidth.value);
+  instance.setTool(isEraserMode.value ? "eraser" : "pen");
 };
 
-const syncSignatureStyle = () => {
-  const signature = signatureRef.value?.getInstance?.();
-  if (!signature) return;
-  signature.minWidth = penStrokeWidth.value;
-  signature.maxWidth = penStrokeWidth.value;
-  signature.penColor = selectedBrushColor.value;
-  signature.compositeOperation = isEraserMode.value
-    ? "destination-out"
-    : "source-over";
-};
-
-watch(penStrokeWidth, syncSignatureStyle);
+watch(
+  [penStrokeWidth, eraserStrokeWidth, selectedBrushColor, isEraserMode],
+  syncHandwritingPadStyle,
+  { immediate: true }
+);
 
 const noteInputRef = ref();
 
@@ -539,6 +611,8 @@ const handleStartInterview = async () => {
 
   // 暂停后 WS 层 isReconnectAllowed=false，需手动复位才能再次重连。
   allowReconnect();
+  // 接管 / 重新开始访谈意味着本端重新拿回会话写权限，解锁手写与键盘入口。
+  isSessionWriteLocked.value = false;
   openWebSocket();
 
   // suspended 状态恢复：立即调 resume API 更新 DB（不依赖 WS 连接状态）。
@@ -820,6 +894,10 @@ const handleTakeoverConflict = async (message: string) => {
     websocket.close();
     isInterviewStarted.value = false;
     stopInterviewTimer();
+    // 用户放弃接管 = 主动让出该会话。此刻会话归另一端所有，本端不能再写；
+    // 但服务端不会补发 connection.kicked，所以这里必须显式锁定写权限，
+    // 否则 status 仍是 in_progress，手写 / 键盘 tab 会错误地保持可选。
+    lockSessionWrite();
   }
 };
 
@@ -943,6 +1021,7 @@ const handleServerMessage = (message: InterviewServerMessage) => {
     stopMicrophone();
     isInterviewStarted.value = false;
     stopInterviewTimer();
+    lockSessionWrite();
     ElMessage.warning(message.reason || t("interview.runtime.kicked"));
     return;
   }
@@ -1014,7 +1093,17 @@ const websocket = useWebSocket({
     });
   },
   onTakeoverCompleted: () => {
-    void refreshInterviewTranscript();
+    // 接管瞬间会话归属切换到本端，另一端在接管前写入的画板 / 键盘笔记
+    // 本端还停留在进入页面时的旧快照，必须重新拉取才能与转录保持同一时点。
+    void Promise.all([
+      refreshInterviewTranscript(),
+      loadInterviewBoards(),
+      loadKeyboardNote()
+    ])
+      .then(() => restoreActiveDrawingBoardAfterReload())
+      .catch(error => {
+        console.warn("[InterviewPage] 接管后刷新画板 / 笔记失败", error);
+      });
   },
   onDisconnected: event => {
     console.warn("[InterviewPage] WebSocket 已断开", event.code, event.reason);
@@ -1214,6 +1303,12 @@ const handleBack = async () => {
 };
 
 const setMode = async (mode: string) => {
+  // 会话无写权限 / 访谈非进行中时锁定手写与键盘入口，
+  // 防止绕过 UI 直接调用落到不可写的会话上。
+  if (mode !== "transcript" && !canUseInterviewTools.value) {
+    mode = "transcript";
+    activeModeIndex.value = 2;
+  }
   // 手写组件使用 v-show 保留画布实例，切换时只关闭画板抽屉。
   if (isHandwritingMode.value && mode !== "handwriting") {
     isDrawingBoardDrawerOpen.value = false;
@@ -1223,8 +1318,9 @@ const setMode = async (mode: string) => {
   // 首次显示隐藏的手写组件时，需要恢复画板内容。
   if (mode === "handwriting") {
     await nextTick();
-    const canvas = signatureRef.value?.getInstance?.().canvas;
-    if (canvas?.width === 0 || canvas?.height === 0) {
+    // HandwritingPad 用 ResizeObserver 自动跟随父容器尺寸变化，这里只兜底兼容
+    // v-show 后再次出现时让父容器重排，确保子元素先有非零宽高再走恢复分支。
+    if (!handwritingBoardInitialized) {
       window.dispatchEvent(new Event("resize"));
     }
     if (!handwritingBoardInitialized) {
@@ -1253,8 +1349,28 @@ const setMode = async (mode: string) => {
 const isKeyboardMode = computed(() => activeMode.value === "keyboard");
 const isHandwritingMode = computed(() => activeMode.value === "handwriting");
 const canUseInterviewTools = computed(
-  () => interviewDetail.value?.status === "in_progress"
+  () =>
+    interviewDetail.value?.status === "in_progress" &&
+    !isSessionWriteLocked.value &&
+    // 握手完成（收到 hello）才代表本端真正持有会话写权限。点击「继续访谈」后
+    // handleStartInterview 会立刻把 status 置为 in_progress，但 WS 此刻还在
+    // connecting / pending，要等 hello 回来才真正接管成功。不加这道门，用户就能在
+    // 接管生效前就开始写，把内容写进还不属于本端的会话。
+    isWebSocketConnected.value
 );
+
+/**
+ * 锁定本端会话写权限：会话已归另一端所有（被接管，或冲突时用户选择放弃接管），
+ * 手写 / 键盘必须禁用。同时把视图强制切回转录——tab 变灰拦不住已经停在
+ * 手写面板上的用户继续编辑，那部分笔画会失去同步目标，属于用户可感知的数据丢失。
+ */
+function lockSessionWrite(): void {
+  isSessionWriteLocked.value = true;
+  if (activeMode.value !== "transcript") {
+    activeModeIndex.value = 2;
+    void setMode("transcript");
+  }
+}
 const activeSaveStatus = computed(() => {
   if (isKeyboardMode.value) return keyboardNoteSaveStatus.value;
   if (isHandwritingMode.value) return signatureSaveStatus.value;
@@ -1317,40 +1433,47 @@ const focusNoteEditor = () => {
 const setBrushColor = (color: string) => {
   selectedBrushColor.value = color;
   isEraserMode.value = false;
-  syncSignatureStyle();
+  syncHandwritingPadStyle();
 };
 
 const toggleEraserMode = () => {
   isEraserMode.value = !isEraserMode.value;
-  syncSignatureStyle();
+  syncHandwritingPadStyle();
 };
 
-async function handleUndo() {
+function handleUndo() {
   const activeBoard = drawingBoards.value.find(
     board => board.id === activeDrawingBoardId.value
   );
   if (!activeBoard) return;
-  activeBoard.dataUrl = await signatureHistory.undo(activeBoard);
+  // HandwritingPad 内部维护自身撤销栈，调用后通过 update 事件回写到画板记录。
+  handwritingPadRef.value?.undo?.();
 }
 
-function captureDrawingSnapshot() {
-  const activeBoard = drawingBoards.value.find(
-    board => board.id === activeDrawingBoardId.value
-  );
-  if (activeBoard) signatureHistory.captureSnapshot(activeBoard);
-}
-
-async function handleRedo() {
+/**
+ * HandwritingPad 内部笔画状态变化时回写当前激活画板记录，让 canUndoDrawing / canRedoDrawing
+ * 这两个 computed 实时反映 UI 可用性，并保证 scheduleSignatureAutoExport 取到最新 strokes。
+ */
+function handleHandwritingPadStateChange(state: HandwritingPadState): void {
   const activeBoard = drawingBoards.value.find(
     board => board.id === activeDrawingBoardId.value
   );
   if (!activeBoard) return;
-  activeBoard.dataUrl = await signatureHistory.redo(activeBoard);
+  activeBoard.strokes = state.strokes;
+  activeBoard.redoStrokes = state.redoStack;
+}
+
+function handleRedo() {
+  const activeBoard = drawingBoards.value.find(
+    board => board.id === activeDrawingBoardId.value
+  );
+  if (!activeBoard) return;
+  handwritingPadRef.value?.redo?.();
 }
 
 function selectBrushMode() {
   isEraserMode.value = false;
-  syncSignatureStyle();
+  syncHandwritingPadStyle();
 }
 
 const updateActiveDrawingBoardThumbnail = () => {
@@ -1358,14 +1481,40 @@ const updateActiveDrawingBoardThumbnail = () => {
     board => board.id === activeDrawingBoardId.value
   );
   if (!activeBoard) return;
-  activeBoard.dataUrl = signatureHistory.sync(activeBoard);
+  // 把当前 HandwritingPad 内部的笔画同步进 drawingBoards 缓存（含 strokes 与 PNG 缩略图）。
+  // 刻意不同步 redoStrokes：这条路径的语义是「切板 / 加板 / 删板前的最后快照」，
+  // 紧接着的 restoreDrawingBoard → loadStrokes 会把该画板整体替换并清空重做栈，
+  // 此时把旧重做栈写回只会让中间态误导 canRedoDrawing。重做栈是画板内状态，
+  // 跨画板保留也不符合语义——否则在 A 板撤销后切到 B 板点重做会冒出 A 板的笔画。
+  const instance = handwritingPadRef.value;
+  if (!instance) return;
+  const nextStrokes = instance.getStrokes?.();
+  if (Array.isArray(nextStrokes)) {
+    activeBoard.strokes = nextStrokes;
+  }
+  const nextDataUrl = instance.saveImage?.();
+  if (typeof nextDataUrl === "string" && nextDataUrl) {
+    activeBoard.dataUrl = nextDataUrl;
+  }
 };
 
 function clearSignatureExportTimer() {
-  if (signatureExportTimerId !== null) {
-    window.clearTimeout(signatureExportTimerId);
-    signatureExportTimerId = null;
-  }
+  boardExportTimerIds.forEach(timerId => window.clearTimeout(timerId));
+  boardExportTimerIds.clear();
+}
+
+/** 只重置某块画板的防抖定时器，保留它已入队的快照。 */
+function clearBoardExportTimer(boardId: number) {
+  const timerId = boardExportTimerIds.get(boardId);
+  if (timerId === undefined) return;
+  window.clearTimeout(timerId);
+  boardExportTimerIds.delete(boardId);
+}
+
+/** 取消单块画板待保存任务，画板被删除时必须调用，否则 5s 后会把它在服务端复活。 */
+function cancelBoardExport(boardId: number) {
+  clearBoardExportTimer(boardId);
+  pendingBoardExports.delete(boardId);
 }
 
 function clearKeyboardNoteSaveTimer() {
@@ -1390,6 +1539,7 @@ async function saveKeyboardNote() {
   )
     .then(() => {
       keyboardNoteSaveStatus.value = "success";
+      keyboardNoteDirty.value = false;
       return true;
     })
     .catch(error => {
@@ -1406,22 +1556,28 @@ async function saveKeyboardNote() {
 function scheduleKeyboardNoteSave() {
   clearKeyboardNoteSaveTimer();
   keyboardNoteSaveStatus.value = "idle";
+  keyboardNoteDirty.value = true;
   keyboardNoteSaveTimerId = window.setTimeout(() => {
     keyboardNoteSaveTimerId = null;
     void saveKeyboardNote();
   }, autoSaveInterval);
 }
 
+/** 接管刷新笔记前，把本端未落库的编辑内容强制提交，避免被服务端数据覆盖。 */
+async function flushKeyboardNoteBeforeOverwrite(): Promise<void> {
+  clearKeyboardNoteSaveTimer();
+  await saveKeyboardNote();
+}
+
 async function flushPendingSaves() {
-  const hasPendingSignatureSave = signatureExportTimerId !== null;
+  const hasPendingSignatureSave = pendingBoardExports.size > 0;
   const hasPendingKeyboardSave = keyboardNoteSaveTimerId !== null;
 
   clearSignatureExportTimer();
   clearKeyboardNoteSaveTimer();
 
   const results = await Promise.all([
-    signatureSavePromise ??
-      (hasPendingSignatureSave ? saveSignature() : Promise.resolve(true)),
+    hasPendingSignatureSave ? flushBoardExports() : Promise.resolve(true),
     keyboardNoteSavePromise ??
       (hasPendingKeyboardSave ? saveKeyboardNote() : Promise.resolve(true))
   ]);
@@ -1430,14 +1586,13 @@ async function flushPendingSaves() {
 }
 
 /**
- * 导出当前画板的笔画轨迹、canvas图，保存到后端
+ * 提交单块画板的落笔快照。只依赖快照本身，与当前显示的是哪块板无关。
  */
-async function exportSignature(dataUrl?: string): Promise<boolean> {
-  clearSignatureExportTimer();
-  const strokes = signatureHistory.readStrokes();
-  if (strokes.length === 0) return true;
-
-  const imageDataUrl = dataUrl ?? signatureHistory.saveImage();
+async function exportBoardSnapshot(
+  snapshot: PendingBoardExport
+): Promise<boolean> {
+  if (snapshot.strokes.length === 0) return true;
+  const imageDataUrl = snapshot.dataUrl;
   if (!imageDataUrl) return false;
 
   const filedata = imageDataUrl.replace(
@@ -1445,8 +1600,8 @@ async function exportSignature(dataUrl?: string): Promise<boolean> {
     ""
   );
   const canvasBoard: CanvasBoardType = {
-    id: activeDrawingBoardId.value,
-    payload: { strokes },
+    id: snapshot.boardId,
+    payload: { strokes: snapshot.strokes },
     filedata,
     client_updated_at: new Date().toISOString()
   };
@@ -1463,30 +1618,57 @@ async function exportSignature(dataUrl?: string): Promise<boolean> {
   }
 }
 
-function saveSignature(dataUrl?: string) {
-  if (signatureSavePromise) return signatureSavePromise;
-  signatureSavePromise = exportSignature(dataUrl).finally(() => {
-    signatureSavePromise = null;
+/**
+ * 把当前所有待保存快照按加入顺序串行提交。
+ * 串行而非并发：并发时后一块画板会撞上仍在飞的请求，两者返回同一个 promise，
+ * 结果那块板的内容被静默吞掉。
+ */
+function flushBoardExports(): Promise<boolean> {
+  const snapshots = [...pendingBoardExports.values()];
+  pendingBoardExports.clear();
+  if (snapshots.length === 0) return Promise.resolve(true);
+
+  boardExportChain = boardExportChain.then(async () => {
+    const results: boolean[] = [];
+    for (const snapshot of snapshots) {
+      results.push(await exportBoardSnapshot(snapshot));
+    }
+    return results.every(Boolean);
   });
-  return signatureSavePromise;
+  return boardExportChain;
 }
 
 function scheduleSignatureAutoExport() {
+  const snapshot = captureActiveBoardExportSnapshot();
+  if (!snapshot) return;
+
+  // 只重置本板自己的防抖。B 板继续落笔不会取消 A 板排队中的保存。
+  clearBoardExportTimer(snapshot.boardId);
+  pendingBoardExports.set(snapshot.boardId, snapshot);
+  boardExportTimerIds.set(
+    snapshot.boardId,
+    window.setTimeout(() => {
+      boardExportTimerIds.delete(snapshot.boardId);
+      void flushBoardExports();
+    }, autoSaveInterval)
+  );
+}
+
+/**
+ * 抓取当前激活画板的待保存快照。dataUrl 必须在这里同步导出：
+ * 切换到键盘模式后签名组件会卸载，届时已经取不到画布内容了。
+ */
+function captureActiveBoardExportSnapshot(): PendingBoardExport | null {
   updateActiveDrawingBoardThumbnail();
-  clearSignatureExportTimer();
   const activeBoard = drawingBoards.value.find(
     board => board.id === activeDrawingBoardId.value
   );
-  if (!activeBoard || activeBoard.strokes.length === 0) return;
-
-  // 切换到键盘后签名组件会卸载，因此提前保存这次待导出的数据快照。
-  const strokes = [...activeBoard.strokes];
-  const dataUrl = activeBoard.dataUrl;
-
-  signatureExportTimerId = window.setTimeout(() => {
-    signatureExportTimerId = null;
-    void saveSignature(dataUrl);
-  }, autoSaveInterval);
+  if (!activeBoard || activeBoard.strokes.length === 0) return null;
+  return {
+    boardId: activeBoard.id,
+    strokes: [...activeBoard.strokes],
+    dataUrl: activeBoard.dataUrl
+  };
 }
 
 function toggleDrawingBoardDrawer() {
@@ -1520,6 +1702,11 @@ const loadInterviewBoards = async () => {
     await getInterviewBoardsApi(sessionId);
   const items = Array.isArray(response?.items) ? response.items : [];
 
+  // 接管后重新拉取时保留用户当前所在的画板：loadInterviewBoards 原本无条件把激活项
+  // 重置为第一块（仅适用于首屏初始化），接管刷新复用它会把用户从当前画板踢回去。
+  const previousActiveId = activeDrawingBoardId.value;
+  const keepCurrentBoard = drawingBoards.value.length > 0;
+
   if (items.length === 0) {
     drawingBoards.value = [
       {
@@ -1539,10 +1726,16 @@ const loadInterviewBoards = async () => {
     id: item.canvas_index,
     name: t("interview.handwriting.board", { number: index + 1 }),
     dataUrl: createDrawingBoardImageUrl(item.image_base64, item.image_format),
-    strokes: item.canvas_payload?.strokes ?? [],
+    strokes: (item.canvas_payload?.strokes ?? []) as HandwritingStroke[],
     redoStrokes: []
   }));
-  activeDrawingBoardId.value = drawingBoards.value[0].id;
+  const stillExists = drawingBoards.value.some(
+    board => board.id === previousActiveId
+  );
+  activeDrawingBoardId.value =
+    keepCurrentBoard && stillExists
+      ? previousActiveId
+      : drawingBoards.value[0].id;
   nextDrawingBoardId =
     Math.max(...drawingBoards.value.map(board => board.id)) + 1;
 };
@@ -1551,12 +1744,56 @@ const loadKeyboardNote = async () => {
   const sessionId = route.params.id as string;
   if (!sessionId) return;
 
+  // 接管前本端可能正在键盘面板上编辑未保存内容；此时用服务端数据覆盖会吞掉用户输入。
+  // 键盘笔记有 5s 自动保存，正常编辑早已落库，因此仅在「接管前确实没落库」时跳过覆盖。
+  if (keyboardNoteDirty.value) {
+    void flushKeyboardNoteBeforeOverwrite();
+    return;
+  }
   const response = await getKeyboardInterviewNoteApi(sessionId);
   noteContent.value = response.item?.text ?? "";
+  keyboardNoteDirty.value = false;
 };
 
 const restoreDrawingBoard = async (board: DrawingBoard) => {
-  await signatureHistory.restore(board);
+  // strokes 字段服务侧 schema 在迁移前是 Vue3Signature 私有结构，无法被 HandwritingPad 复用；
+  // 兼容策略：把缩略图 PNG 作为画板底图，新笔画继续叠在上面，覆盖一次保存即完成数据迁移。
+  const instance = handwritingPadRef.value;
+  if (!instance) return;
+  const legacyStrokes = Array.isArray(board.strokes) ? board.strokes : [];
+  const looksLikeHandwritingPadStrokes = legacyStrokes.every(
+    stroke =>
+      stroke &&
+      typeof stroke === "object" &&
+      Array.isArray((stroke as HandwritingStroke).points) &&
+      typeof (stroke as HandwritingStroke).color === "string" &&
+      typeof (stroke as HandwritingStroke).size === "number" &&
+      ((stroke as HandwritingStroke).tool === "pen" ||
+        (stroke as HandwritingStroke).tool === "eraser")
+  );
+  // 必须额外校验 length > 0：[].every() 恒为 true，而老画板通过
+  // loadStrokes([], dataUrl) 加载后 strokes 为空、历史图在背景层；只要用户在
+  // 落笔前跑过一次 updateActiveDrawingBoardThumbnail（打开画板抽屉 / 切画板都会），
+  // 内存里就会变成「strokes=[] + dataUrl=非空白历史图」。此时若走无背景分支，
+  // 背景层会被清空，切回该画板就变成白板、历史内容静默丢失。
+  if (legacyStrokes.length > 0 && looksLikeHandwritingPadStrokes) {
+    await instance.loadStrokes(legacyStrokes as HandwritingStroke[]);
+    return;
+  }
+  await instance.loadStrokes([], board.dataUrl);
+};
+
+/**
+ * loadInterviewBoards 只替换 drawingBoards 数据，不会把新内容刷进 HandwritingPad 画布
+ * （那条路径由 setMode 首次进入手写时触发，且被 handwritingBoardInitialized 守卫只跑一次）。
+ * 接管后必须显式把当前激活画板重新灌进画布，否则画布仍是接管前的旧画面。
+ */
+const restoreActiveDrawingBoardAfterReload = async () => {
+  const activeBoard = drawingBoards.value.find(
+    board => board.id === activeDrawingBoardId.value
+  );
+  if (!activeBoard) return;
+  await restoreDrawingBoard(activeBoard);
 };
 
 const selectDrawingBoard = async (board: DrawingBoard) => {
@@ -1600,6 +1837,10 @@ const deleteDrawingBoard = async (board: DrawingBoard) => {
     console.error("[InterviewPage] 删除画板失败", error);
     return;
   }
+
+  // 画板已从服务端删除，排队中的快照必须一并作废，否则防抖定时器到点后
+  // 会用同一个 canvas_index 把它重新写回去。
+  cancelBoardExport(board.id);
 
   const boardIndex = drawingBoards.value.findIndex(
     item => item.id === board.id
@@ -2239,30 +2480,28 @@ onMounted(() => {
                     />
                     <div class="stroke-width-control">
                       <el-slider
-                        v-model="penStrokeWidth"
-                        :min="1"
-                        :max="10"
-                        :step="0.5"
-                        :show-tooltip="false"
+                        v-model="activeStrokeWidth"
+                        :min="strokeWidthMin"
+                        :max="strokeWidthMax"
+                        :step="strokeWidthStep"
+                        :show-tooltip="true"
+                        :format-tooltip="formatStrokeWidthTooltip"
+                        tooltip-class="interview-stroke-tooltip"
                         size="small"
                       />
-                      <span>{{ penStrokeWidth }}px</span>
+                      <span>{{ activeStrokeWidth }}px</span>
                     </div>
                   </div>
                 </div>
               </div>
 
               <div class="handwriting-pad">
-                <Vue3Signature
-                  ref="signatureRef"
-                  class="signature-canvas"
-                  :sigOption="signatureOptions"
-                  :w="'100%'"
-                  :h="'100%'"
-                  :clearOnResize="false"
-                  @ready="syncSignatureStyle"
-                  @beginStroke="captureDrawingSnapshot"
-                  @endStroke="scheduleSignatureAutoExport"
+                <HandwritingPad
+                  ref="handwritingPadRef"
+                  class="handwriting-pad-shell"
+                  @ready="syncHandwritingPadStyle"
+                  @strokeEnd="scheduleSignatureAutoExport"
+                  @update="handleHandwritingPadStateChange"
                 />
               </div>
             </div>
@@ -3556,7 +3795,7 @@ onMounted(() => {
     box-shadow: 0 10px 24px rgb(31 47 86 / 7%);
   }
 
-  .signature-canvas {
+  .handwriting-pad-shell {
     display: block;
     width: 100%;
     height: 100%;

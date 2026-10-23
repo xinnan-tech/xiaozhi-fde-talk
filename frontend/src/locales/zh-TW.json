@@ -423,6 +423,8 @@
   "interview.handwriting.delete": "刪除",
   "interview.handwriting.delete_board": "刪除畫板",
   "interview.handwriting.pen": "畫筆",
+  "interview.handwriting.pen_width": "畫筆粗細",
+  "interview.handwriting.eraser_width": "橡皮擦粗細",
   "interview.save.saving": "儲存中",
   "interview.save.success": "儲存成功",
   "interview.runtime.mic_permission": "無法開啟麥克風，請檢查瀏覽器權限",

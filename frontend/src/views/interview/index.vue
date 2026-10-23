@@ -221,6 +221,12 @@ type DrawingBoard = {
   redoStrokes: HandwritingStroke[];
 };
 
+type PendingBoardExport = {
+  boardId: number;
+  strokes: HandwritingStroke[];
+  dataUrl: string;
+};
+
 const drawingBoards = ref<DrawingBoard[]>([
   {
     id: 1,
@@ -232,10 +238,13 @@ const drawingBoards = ref<DrawingBoard[]>([
 ]);
 const activeDrawingBoardId = ref(1);
 const isDrawingBoardDrawerOpen = ref(false);
-let signatureExportTimerId: number | null = null;
+const pendingBoardExports = new Map<number, PendingBoardExport>();
+const boardExportTimerIds = new Map<number, number>();
+// 保存请求必须串行：并发时若后一块画板直接复用前一个 in-flight promise，
+// 它的保存会被静默丢弃，因此用链式队列把每份快照都提交出去。
+let boardExportChain: Promise<boolean> = Promise.resolve(true);
 let keyboardNoteSaveTimerId: number | null = null;
 let handwritingBoardInitialized = false;
-let signatureSavePromise: Promise<boolean> | null = null;
 let keyboardNoteSavePromise: Promise<boolean> | null = null;
 let interviewActionPending = false;
 const autoSaveInterval = 5000; // 5秒自动保存一次
@@ -1490,10 +1499,22 @@ const updateActiveDrawingBoardThumbnail = () => {
 };
 
 function clearSignatureExportTimer() {
-  if (signatureExportTimerId !== null) {
-    window.clearTimeout(signatureExportTimerId);
-    signatureExportTimerId = null;
-  }
+  boardExportTimerIds.forEach(timerId => window.clearTimeout(timerId));
+  boardExportTimerIds.clear();
+}
+
+/** 只重置某块画板的防抖定时器，保留它已入队的快照。 */
+function clearBoardExportTimer(boardId: number) {
+  const timerId = boardExportTimerIds.get(boardId);
+  if (timerId === undefined) return;
+  window.clearTimeout(timerId);
+  boardExportTimerIds.delete(boardId);
+}
+
+/** 取消单块画板待保存任务，画板被删除时必须调用，否则 5s 后会把它在服务端复活。 */
+function cancelBoardExport(boardId: number) {
+  clearBoardExportTimer(boardId);
+  pendingBoardExports.delete(boardId);
 }
 
 function clearKeyboardNoteSaveTimer() {
@@ -1549,15 +1570,14 @@ async function flushKeyboardNoteBeforeOverwrite(): Promise<void> {
 }
 
 async function flushPendingSaves() {
-  const hasPendingSignatureSave = signatureExportTimerId !== null;
+  const hasPendingSignatureSave = pendingBoardExports.size > 0;
   const hasPendingKeyboardSave = keyboardNoteSaveTimerId !== null;
 
   clearSignatureExportTimer();
   clearKeyboardNoteSaveTimer();
 
   const results = await Promise.all([
-    signatureSavePromise ??
-      (hasPendingSignatureSave ? saveSignature() : Promise.resolve(true)),
+    hasPendingSignatureSave ? flushBoardExports() : Promise.resolve(true),
     keyboardNoteSavePromise ??
       (hasPendingKeyboardSave ? saveKeyboardNote() : Promise.resolve(true))
   ]);
@@ -1566,15 +1586,13 @@ async function flushPendingSaves() {
 }
 
 /**
- * 导出当前画板的笔画轨迹、canvas图，保存到后端
+ * 提交单块画板的落笔快照。只依赖快照本身，与当前显示的是哪块板无关。
  */
-async function exportSignature(dataUrl?: string): Promise<boolean> {
-  clearSignatureExportTimer();
-  const instance = handwritingPadRef.value;
-  const strokes = instance?.getStrokes?.() ?? [];
-  if (strokes.length === 0) return true;
-
-  const imageDataUrl = dataUrl ?? instance?.saveImage?.() ?? "";
+async function exportBoardSnapshot(
+  snapshot: PendingBoardExport
+): Promise<boolean> {
+  if (snapshot.strokes.length === 0) return true;
+  const imageDataUrl = snapshot.dataUrl;
   if (!imageDataUrl) return false;
 
   const filedata = imageDataUrl.replace(
@@ -1582,8 +1600,8 @@ async function exportSignature(dataUrl?: string): Promise<boolean> {
     ""
   );
   const canvasBoard: CanvasBoardType = {
-    id: activeDrawingBoardId.value,
-    payload: { strokes },
+    id: snapshot.boardId,
+    payload: { strokes: snapshot.strokes },
     filedata,
     client_updated_at: new Date().toISOString()
   };
@@ -1600,30 +1618,57 @@ async function exportSignature(dataUrl?: string): Promise<boolean> {
   }
 }
 
-function saveSignature(dataUrl?: string) {
-  if (signatureSavePromise) return signatureSavePromise;
-  signatureSavePromise = exportSignature(dataUrl).finally(() => {
-    signatureSavePromise = null;
+/**
+ * 把当前所有待保存快照按加入顺序串行提交。
+ * 串行而非并发：并发时后一块画板会撞上仍在飞的请求，两者返回同一个 promise，
+ * 结果那块板的内容被静默吞掉。
+ */
+function flushBoardExports(): Promise<boolean> {
+  const snapshots = [...pendingBoardExports.values()];
+  pendingBoardExports.clear();
+  if (snapshots.length === 0) return Promise.resolve(true);
+
+  boardExportChain = boardExportChain.then(async () => {
+    const results: boolean[] = [];
+    for (const snapshot of snapshots) {
+      results.push(await exportBoardSnapshot(snapshot));
+    }
+    return results.every(Boolean);
   });
-  return signatureSavePromise;
+  return boardExportChain;
 }
 
 function scheduleSignatureAutoExport() {
+  const snapshot = captureActiveBoardExportSnapshot();
+  if (!snapshot) return;
+
+  // 只重置本板自己的防抖。B 板继续落笔不会取消 A 板排队中的保存。
+  clearBoardExportTimer(snapshot.boardId);
+  pendingBoardExports.set(snapshot.boardId, snapshot);
+  boardExportTimerIds.set(
+    snapshot.boardId,
+    window.setTimeout(() => {
+      boardExportTimerIds.delete(snapshot.boardId);
+      void flushBoardExports();
+    }, autoSaveInterval)
+  );
+}
+
+/**
+ * 抓取当前激活画板的待保存快照。dataUrl 必须在这里同步导出：
+ * 切换到键盘模式后签名组件会卸载，届时已经取不到画布内容了。
+ */
+function captureActiveBoardExportSnapshot(): PendingBoardExport | null {
   updateActiveDrawingBoardThumbnail();
-  clearSignatureExportTimer();
   const activeBoard = drawingBoards.value.find(
     board => board.id === activeDrawingBoardId.value
   );
-  if (!activeBoard || activeBoard.strokes.length === 0) return;
-
-  // 切换到键盘后签名组件会卸载，因此提前保存这次待导出的数据快照。
-  const strokes = [...activeBoard.strokes];
-  const dataUrl = activeBoard.dataUrl;
-
-  signatureExportTimerId = window.setTimeout(() => {
-    signatureExportTimerId = null;
-    void saveSignature(dataUrl);
-  }, autoSaveInterval);
+  if (!activeBoard || activeBoard.strokes.length === 0) return null;
+  return {
+    boardId: activeBoard.id,
+    strokes: [...activeBoard.strokes],
+    dataUrl: activeBoard.dataUrl
+  };
 }
 
 function toggleDrawingBoardDrawer() {
@@ -1792,6 +1837,10 @@ const deleteDrawingBoard = async (board: DrawingBoard) => {
     console.error("[InterviewPage] 删除画板失败", error);
     return;
   }
+
+  // 画板已从服务端删除，排队中的快照必须一并作废，否则防抖定时器到点后
+  // 会用同一个 canvas_index 把它重新写回去。
+  cancelBoardExport(board.id);
 
   const boardIndex = drawingBoards.value.findIndex(
     item => item.id === board.id

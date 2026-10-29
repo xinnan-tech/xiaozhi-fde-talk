@@ -55,10 +55,6 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 // 鼠标悬停移动光标时只做一次 drawImage + 一个圆，避免每帧都 O(N) 重画所有笔画。
 let strokesLayer: HTMLCanvasElement | null = null;
 let strokesLayerCtx: CanvasRenderingContext2D | null = null;
-let backgroundLayer: HTMLCanvasElement | null = null;
-let backgroundLayerCtx: CanvasRenderingContext2D | null = null;
-// 缓存已解码的历史 PNG，resize 时无需重新走一次异步 Image 解码。
-let backgroundImage: HTMLImageElement | null = null;
 // 记录当前 canvas 的 CSS 尺寸，用于在 ResizeObserver 触发的重绘里复用。
 const cssWidth = ref(1);
 const cssHeight = ref(1);
@@ -134,15 +130,18 @@ function drawStroke(
   tool: "pen" | "eraser"
 ): void {
   if (points.length === 0) return;
+  // 橡皮改成"直接铺白"，不再用 destination-out 打洞：画板已经没有背景层，
+  // 没有下一层可以露出来，打洞只会在画布上留下透明像素（实时预览透出容器底色，
+  // 导出时才被铺白），白白制造"所见非所得"。铺白之后实时画面与导出 PNG 完全一致。
+  const strokeColor = tool === "eraser" ? "#ffffff" : color;
   drawCtx.save();
   drawCtx.beginPath();
-  drawCtx.strokeStyle = color;
-  drawCtx.fillStyle = color;
+  drawCtx.strokeStyle = strokeColor;
+  drawCtx.fillStyle = strokeColor;
   drawCtx.lineWidth = size;
   drawCtx.lineCap = "round";
   drawCtx.lineJoin = "round";
-  drawCtx.globalCompositeOperation =
-    tool === "eraser" ? "destination-out" : "source-over";
+  drawCtx.globalCompositeOperation = "source-over";
   if (points.length === 1) {
     drawCtx.arc(points[0].x, points[0].y, size / 2, 0, Math.PI * 2);
     drawCtx.fill();
@@ -192,30 +191,9 @@ function ensureStrokesLayer(): void {
 }
 
 /**
- * 确保历史 PNG 背景层存在且与可见画布同尺寸。
- * 与 ensureStrokesLayer 同构，但独立维护：resize 时两层各自缩放，互不覆盖。
- */
-function ensureBackgroundLayer(): void {
-  const canvas = canvasRef.value;
-  if (!canvas) return;
-  const targetWidth = canvas.width;
-  const targetHeight = canvas.height;
-  if (!backgroundLayer) {
-    backgroundLayer = document.createElement("canvas");
-    backgroundLayerCtx = backgroundLayer.getContext("2d");
-  }
-  if (
-    !backgroundLayerCtx ||
-    backgroundLayer.width !== targetWidth ||
-    backgroundLayer.height !== targetHeight
-  ) {
-    backgroundLayer.width = targetWidth;
-    backgroundLayer.height = targetHeight;
-  }
-}
-
-/**
- * 这里如果再填一层白底会把历史画面整个盖住，导致首次落笔后旧内容被静默擦掉。
+ * 笔画层 = 白纸 + 笔画。
+ * 白底无条件铺：画板不再叠加任何背景层，画布永远是一张白纸，
+ * 橡皮（铺白）也是画在白底上，实时预览与导出的 PNG 完全一致。
  */
 function paintStrokesLayer(): void {
   ensureStrokesLayer();
@@ -225,10 +203,8 @@ function paintStrokesLayer(): void {
   lctx.save();
   lctx.setTransform(1, 0, 0, 1, 0, 0);
   lctx.clearRect(0, 0, layer.width, layer.height);
-  if (!backgroundImage) {
-    lctx.fillStyle = "#ffffff";
-    lctx.fillRect(0, 0, layer.width, layer.height);
-  }
+  lctx.fillStyle = "#ffffff";
+  lctx.fillRect(0, 0, layer.width, layer.height);
   lctx.scale(dpr, dpr);
   for (const stroke of strokes.value) {
     drawStroke(
@@ -240,30 +216,6 @@ function paintStrokesLayer(): void {
     );
   }
   lctx.restore();
-}
-
-/**
- * 把已解码的历史 PNG 铺到背景层（不铺白底，保留 PNG 自身的像素）。
- * 只在 loadStrokes 首次设置 / resize 时调用，笔画变化不触发。
- */
-function paintBackgroundLayer(): void {
-  if (!backgroundLayerCtx || !backgroundLayer || !backgroundImage) return;
-  backgroundLayerCtx.save();
-  backgroundLayerCtx.setTransform(1, 0, 0, 1, 0, 0);
-  backgroundLayerCtx.clearRect(
-    0,
-    0,
-    backgroundLayer.width,
-    backgroundLayer.height
-  );
-  backgroundLayerCtx.drawImage(
-    backgroundImage,
-    0,
-    0,
-    backgroundLayer.width,
-    backgroundLayer.height
-  );
-  backgroundLayerCtx.restore();
 }
 
 /**
@@ -290,7 +242,7 @@ function drawCursorCircleOn(target: CanvasRenderingContext2D): void {
 }
 
 /**
- * 把离屏背景层 + 笔画层依次 blit 到可见画布，再在顶层叠一个光标圆。
+ * 把离屏笔画层 blit 到可见画布，再在顶层叠一个光标圆。
  * 这是鼠标悬停 / 工具色变更路径的主入口，O(1) 一次 drawImage + 一个 arc。
  *
  * 注意：setTransform 会冲掉之前留下来的 dpr 缩放，用 save/restore 包起来保证调用后
@@ -302,10 +254,6 @@ function renderVisibleFromLayer(): void {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // 背景层（历史 PNG）先行，笔画层（含新笔）覆盖其上。
-  if (backgroundLayer && backgroundImage) {
-    ctx.drawImage(backgroundLayer, 0, 0);
-  }
   ctx.drawImage(strokesLayer, 0, 0);
   ctx.restore();
   // drawCursorCircleOn 内部 save/restore，会自行退回 ctx 之前的状态。
@@ -345,11 +293,7 @@ function resizeCanvas(): void {
   // 设置 canvas.width/height 会把 ctx 状态全部清零，这里重新挂上 dpr 缩放，
   // 否则后续直接调 drawStroke 落到内部 1:1 像素上，移动端 dpr>1 时笔迹会偏。
   ctx.scale(dpr, dpr);
-  // 尺寸变了：背景层要跟着 resize 并重新铺一次历史 PNG，否则历史画面会被拉伸变形或直接丢失。
-  if (backgroundImage) {
-    ensureBackgroundLayer();
-    paintBackgroundLayer();
-  }
+  // 尺寸变了：笔画层跟着 resize，笔画按新的 CSS 尺寸重新铺开。
   redrawCanvas();
 }
 
@@ -486,55 +430,18 @@ function getStrokes(): HandwritingStroke[] {
   }));
 }
 
-function loadStrokes(
-  next: HandwritingStroke[],
-  backgroundDataUrl?: string
-): Promise<void> {
-  strokes.value = next.map(stroke => ({
+/**
+ * 获取服务器的笔画轨迹重建画板
+ */
+function loadStrokes(next: HandwritingStroke[]): Promise<void> {
+  const list = Array.isArray(next) ? next : [];
+  strokes.value = list.map(stroke => ({
     points: stroke.points.map(p => ({ x: p.x, y: p.y })),
     color: stroke.color,
     size: stroke.size,
     tool: stroke.tool
   }));
   redoStack.value = [];
-  // 把 PNG 当作背景叠到当前 canvas，保证视觉与历史结果一致，再让新笔画覆盖。
-  if (backgroundDataUrl) {
-    ensureBackgroundLayer();
-    // 先清空背景层：等待解码期间若沿用上一块画板的背景，新画布会短暂显示错内容。
-    backgroundImage = null;
-    backgroundLayer = null;
-    backgroundLayerCtx = null;
-    // 必须等图片解码完成再 resolve：父组件 restoreDrawingBoard 的 await 依赖这个
-    // Promise 来保证「activeDrawingBoardId 已切换」与「画布已切换」严格同步，
-    // 否则父组件在这段空窗期读画布会把上一块画板的内容写进当前画板记录。
-    return new Promise<void>(resolve => {
-      const tempImg = new Image();
-      tempImg.onload = () => {
-        backgroundImage = tempImg;
-        paintBackgroundLayer();
-        // 历史 PNG 只进背景层，笔画层重画时不再填白底，历史画面不会被擦掉。
-        paintStrokesLayer();
-        renderVisibleFromLayer();
-        publishState();
-        resolve();
-      };
-      tempImg.onerror = () => {
-        // 历史 PNG 加载失败：清空背景层并退回到"白底 + 笔画"的行为，避免白板残留。
-        backgroundImage = null;
-        backgroundLayer = null;
-        backgroundLayerCtx = null;
-        paintStrokesLayer();
-        renderVisibleFromLayer();
-        publishState();
-        resolve();
-      };
-      tempImg.src = backgroundDataUrl;
-    });
-  }
-  // 没有历史背景：显式清空背景层，防止从老画板切到新画板后残留上一张的历史画面。
-  backgroundImage = null;
-  backgroundLayer = null;
-  backgroundLayerCtx = null;
   paintStrokesLayer();
   renderVisibleFromLayer();
   publishState();
@@ -562,7 +469,7 @@ onMounted(() => {
   // getContext("2d") 在 GPU 上下文耗尽 / 隐私模式等场景可能返回 null，
   // 这里显式守卫而不是用非空断言，避免后续 fill / drawImage 直接 TypeError。
   if (!ctx) return;
-  // 画板内容完全由父组件通过 loadStrokes 驱动（切板 / 恢复 / 迁移兼容都走它）。
+  // 画板内容完全由父组件通过 loadStrokes 驱动（切板 / 恢复都走它）。
   resizeCanvas();
   const target = canvasRef.value.parentElement;
   if (target && typeof ResizeObserver !== "undefined") {

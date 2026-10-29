@@ -219,12 +219,17 @@ type DrawingBoard = {
   dataUrl: string;
   strokes: HandwritingStroke[];
   redoStrokes: HandwritingStroke[];
+  /**
+   * 板子是否有过内容（画过至少一笔）
+   */
+  hasContent: boolean;
 };
 
 type PendingBoardExport = {
   boardId: number;
   strokes: HandwritingStroke[];
   dataUrl: string;
+  hasContent: boolean;
 };
 
 const drawingBoards = ref<DrawingBoard[]>([
@@ -233,7 +238,8 @@ const drawingBoards = ref<DrawingBoard[]>([
     name: t("interview.handwriting.board", { number: 1 }),
     dataUrl: "",
     strokes: [],
-    redoStrokes: []
+    redoStrokes: [],
+    hasContent: false
   }
 ]);
 const activeDrawingBoardId = ref(1);
@@ -1448,6 +1454,9 @@ function handleUndo() {
   if (!activeBoard) return;
   // HandwritingPad 内部维护自身撤销栈，调用后通过 update 事件回写到画板记录。
   handwritingPadRef.value?.undo?.();
+  // 撤销本身也要落库：否则服务端留的还是撤销前的笔画，刷新后这一笔会回来。
+  // 不挂在 @update 上 —— loadStrokes 也会 emit update，会导致刚打开板子就上传一次。
+  scheduleSignatureAutoExport();
 }
 
 /**
@@ -1461,6 +1470,8 @@ function handleHandwritingPadStateChange(state: HandwritingPadState): void {
   if (!activeBoard) return;
   activeBoard.strokes = state.strokes;
   activeBoard.redoStrokes = state.redoStack;
+  // 画过内容就标记为「有内容」：撤销会把笔画清空，但服务端状态必须跟着清空。
+  if (state.strokes.length > 0) activeBoard.hasContent = true;
 }
 
 function handleRedo() {
@@ -1469,6 +1480,8 @@ function handleRedo() {
   );
   if (!activeBoard) return;
   handwritingPadRef.value?.redo?.();
+  // 同 handleUndo：重做改变了画板内容，必须跟着落库。
+  scheduleSignatureAutoExport();
 }
 
 function selectBrushMode() {
@@ -1491,6 +1504,7 @@ const updateActiveDrawingBoardThumbnail = () => {
   const nextStrokes = instance.getStrokes?.();
   if (Array.isArray(nextStrokes)) {
     activeBoard.strokes = nextStrokes;
+    if (nextStrokes.length > 0) activeBoard.hasContent = true;
   }
   const nextDataUrl = instance.saveImage?.();
   if (typeof nextDataUrl === "string" && nextDataUrl) {
@@ -1591,7 +1605,9 @@ async function flushPendingSaves() {
 async function exportBoardSnapshot(
   snapshot: PendingBoardExport
 ): Promise<boolean> {
-  if (snapshot.strokes.length === 0) return true;
+  // strokes 为空但这块板子有过内容（被撤销光了）：仍然要上传，
+  // 把服务端的笔画清空、图换成空白板，否则刷新后旧笔画复活。
+  if (snapshot.strokes.length === 0 && !snapshot.hasContent) return true;
   const imageDataUrl = snapshot.dataUrl;
   if (!imageDataUrl) return false;
 
@@ -1663,11 +1679,13 @@ function captureActiveBoardExportSnapshot(): PendingBoardExport | null {
   const activeBoard = drawingBoards.value.find(
     board => board.id === activeDrawingBoardId.value
   );
-  if (!activeBoard || activeBoard.strokes.length === 0) return null;
+  if (!activeBoard) return null;
+  if (activeBoard.strokes.length === 0 && !activeBoard.hasContent) return null;
   return {
     boardId: activeBoard.id,
     strokes: [...activeBoard.strokes],
-    dataUrl: activeBoard.dataUrl
+    dataUrl: activeBoard.dataUrl,
+    hasContent: activeBoard.hasContent
   };
 }
 
@@ -1714,7 +1732,8 @@ const loadInterviewBoards = async () => {
         name: t("interview.handwriting.board", { number: 1 }),
         dataUrl: "",
         strokes: [],
-        redoStrokes: []
+        redoStrokes: [],
+        hasContent: false
       }
     ];
     activeDrawingBoardId.value = 1;
@@ -1722,13 +1741,17 @@ const loadInterviewBoards = async () => {
     return;
   }
 
-  drawingBoards.value = items.map((item, index) => ({
-    id: item.canvas_index,
-    name: t("interview.handwriting.board", { number: index + 1 }),
-    dataUrl: createDrawingBoardImageUrl(item.image_base64, item.image_format),
-    strokes: (item.canvas_payload?.strokes ?? []) as HandwritingStroke[],
-    redoStrokes: []
-  }));
+  drawingBoards.value = items.map((item, index) => {
+    const strokes = (item.canvas_payload?.strokes ?? []) as HandwritingStroke[];
+    return {
+      id: item.canvas_index,
+      name: t("interview.handwriting.board", { number: index + 1 }),
+      dataUrl: createDrawingBoardImageUrl(item.image_base64, item.image_format),
+      strokes,
+      redoStrokes: [],
+      hasContent: strokes.length > 0
+    };
+  });
   const stillExists = drawingBoards.value.some(
     board => board.id === previousActiveId
   );
@@ -1756,31 +1779,9 @@ const loadKeyboardNote = async () => {
 };
 
 const restoreDrawingBoard = async (board: DrawingBoard) => {
-  // strokes 字段服务侧 schema 在迁移前是 Vue3Signature 私有结构，无法被 HandwritingPad 复用；
-  // 兼容策略：把缩略图 PNG 作为画板底图，新笔画继续叠在上面，覆盖一次保存即完成数据迁移。
   const instance = handwritingPadRef.value;
   if (!instance) return;
-  const legacyStrokes = Array.isArray(board.strokes) ? board.strokes : [];
-  const looksLikeHandwritingPadStrokes = legacyStrokes.every(
-    stroke =>
-      stroke &&
-      typeof stroke === "object" &&
-      Array.isArray((stroke as HandwritingStroke).points) &&
-      typeof (stroke as HandwritingStroke).color === "string" &&
-      typeof (stroke as HandwritingStroke).size === "number" &&
-      ((stroke as HandwritingStroke).tool === "pen" ||
-        (stroke as HandwritingStroke).tool === "eraser")
-  );
-  // 必须额外校验 length > 0：[].every() 恒为 true，而老画板通过
-  // loadStrokes([], dataUrl) 加载后 strokes 为空、历史图在背景层；只要用户在
-  // 落笔前跑过一次 updateActiveDrawingBoardThumbnail（打开画板抽屉 / 切画板都会），
-  // 内存里就会变成「strokes=[] + dataUrl=非空白历史图」。此时若走无背景分支，
-  // 背景层会被清空，切回该画板就变成白板、历史内容静默丢失。
-  if (legacyStrokes.length > 0 && looksLikeHandwritingPadStrokes) {
-    await instance.loadStrokes(legacyStrokes as HandwritingStroke[]);
-    return;
-  }
-  await instance.loadStrokes([], board.dataUrl);
+  await instance.loadStrokes(board.strokes);
 };
 
 /**
@@ -1813,7 +1814,8 @@ const addDrawingBoard = async () => {
     name: "",
     dataUrl: "",
     strokes: [],
-    redoStrokes: []
+    redoStrokes: [],
+    hasContent: false
   };
   drawingBoards.value.push(board);
   renumberDrawingBoards();

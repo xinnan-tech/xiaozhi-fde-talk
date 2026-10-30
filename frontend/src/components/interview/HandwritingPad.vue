@@ -226,7 +226,7 @@ function drawCursorCircleOn(target: CanvasRenderingContext2D): void {
   const { x, y } = cursorPos.value;
   const radius = Math.max(currentSize.value / 2, 1);
   target.save();
-  target.scale(dpr, dpr);
+  target.setTransform(dpr, 0, 0, dpr, 0, 0);
   target.lineWidth = 1;
   if (currentTool.value === "eraser") {
     target.setLineDash([4, 4]);

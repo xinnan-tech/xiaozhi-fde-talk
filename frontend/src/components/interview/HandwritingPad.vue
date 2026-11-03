@@ -130,6 +130,9 @@ function drawStroke(
   tool: "pen" | "eraser"
 ): void {
   if (points.length === 0) return;
+  // size 非法（比如旧格式数据缺字段）时半径会变成 NaN，canvas 直接抛
+  // IndexSizeError，整层重绘连带 loadStrokes 一起挂掉，这里提前挡一道。
+  if (!Number.isFinite(size) || size <= 0) return;
   // 橡皮改成"直接铺白"，不再用 destination-out 打洞：画板已经没有背景层，
   // 没有下一层可以露出来，打洞只会在画布上留下透明像素（实时预览透出容器底色，
   // 导出时才被铺白），白白制造"所见非所得"。铺白之后实时画面与导出 PNG 完全一致。
@@ -431,11 +434,50 @@ function getStrokes(): HandwritingStroke[] {
 }
 
 /**
+ * 笔画数据的形状校验（纯防御，不做旧格式换算）。
+ *
+ * 服务端可能存着格式不对的笔画数据（字段名/坐标量纲与当前格式不一致）：
+ * 直接回放会出两种问题——
+ * 1. 坐标被当成 0~1 归一化坐标再乘当前画布宽高 → 内容飞到画布外，画板空白；
+ * 2. size 缺失 → 单点笔画的 arc 半径变成 NaN → canvas 抛 IndexSizeError，
+ *    paintStrokesLayer / loadStrokes 一起抛出，整个手写面板初始化失败。
+ *
+ * 这里只保证「不合法的东西不会进画布」：字段不全 / 坐标非有限的笔画直接丢弃。
+ * 老画板本身不在支持范围内（图片只做缩略图 + OCR），丢弃后就是一张白板。
+ */
+function isValidStroke(stroke: unknown): stroke is HandwritingStroke {
+  if (!stroke || typeof stroke !== "object") return false;
+  const s = stroke as Record<string, unknown>;
+  if (typeof s.color !== "string" || s.color.length === 0) return false;
+  if (typeof s.size !== "number" || !Number.isFinite(s.size) || s.size <= 0) {
+    return false;
+  }
+  if (s.tool !== "pen" && s.tool !== "eraser") return false;
+  if (!Array.isArray(s.points) || s.points.length === 0) return false;
+  return s.points.every(point => {
+    if (!point || typeof point !== "object") return false;
+    const p = point as Record<string, unknown>;
+    return (
+      typeof p.x === "number" &&
+      Number.isFinite(p.x) &&
+      typeof p.y === "number" &&
+      Number.isFinite(p.y)
+    );
+  });
+}
+
+/**
  * 获取服务器的笔画轨迹重建画板
  */
 function loadStrokes(next: HandwritingStroke[]): Promise<void> {
   const list = Array.isArray(next) ? next : [];
-  strokes.value = list.map(stroke => ({
+  const valid = list.filter(isValidStroke);
+  if (valid.length !== list.length) {
+    console.warn(
+      `[HandwritingPad] 已忽略 ${list.length - valid.length} 条格式非法的笔画`
+    );
+  }
+  strokes.value = valid.map(stroke => ({
     points: stroke.points.map(p => ({ x: p.x, y: p.y })),
     color: stroke.color,
     size: stroke.size,

@@ -426,6 +426,7 @@
   "interview.handwriting.pen_width": "Pen width",
   "interview.handwriting.eraser_width": "Eraser width",
   "interview.save.saving": "Saving",
+  "interview.save.saving_pending": "Saving, please wait…",
   "interview.save.success": "Saved",
   "interview.runtime.mic_permission": "Unable to access the microphone. Check your browser permissions.",
   "interview.runtime.mic_permission_title": "Microphone permission required",

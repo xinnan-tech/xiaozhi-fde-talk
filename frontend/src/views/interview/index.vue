@@ -249,6 +249,9 @@ const boardExportTimerIds = new Map<number, number>();
 // 保存请求必须串行：并发时若后一块画板直接复用前一个 in-flight promise，
 // 它的保存会被静默丢弃，因此用链式队列把每份快照都提交出去。
 let boardExportChain: Promise<boolean> = Promise.resolve(true);
+// 已入队但还没落库的画板保存份数（含排队中和在途的）。
+// 暂停/结束访谈时用它判断"是不是真的要等"，避免没东西要存也弹提示。
+let boardExportPending = 0;
 let keyboardNoteSaveTimerId: number | null = null;
 let handwritingBoardInitialized = false;
 let keyboardNoteSavePromise: Promise<boolean> | null = null;
@@ -1590,13 +1593,35 @@ async function flushPendingSaves() {
   clearSignatureExportTimer();
   clearKeyboardNoteSaveTimer();
 
-  const results = await Promise.all([
-    hasPendingSignatureSave ? flushBoardExports() : Promise.resolve(true),
-    keyboardNoteSavePromise ??
-      (hasPendingKeyboardSave ? saveKeyboardNote() : Promise.resolve(true))
-  ]);
+  const needSaveHint =
+    hasPendingSignatureSave ||
+    hasPendingKeyboardSave ||
+    boardExportPending > 0 ||
+    keyboardNoteSavePromise !== null;
+  const savingHint = needSaveHint
+    ? ElMessage({
+        message: t("interview.save.saving_pending"),
+        type: "primary",
+        duration: 0
+      })
+    : null;
 
-  return results.every(Boolean);
+  try {
+    const results = await Promise.all([
+      hasPendingSignatureSave
+        ? flushBoardExports()
+        : boardExportChain.then(
+            () => true,
+            () => true
+          ),
+      keyboardNoteSavePromise ??
+        (hasPendingKeyboardSave ? saveKeyboardNote() : Promise.resolve(true))
+    ]);
+
+    return results.every(Boolean);
+  } finally {
+    savingHint?.close();
+  }
 }
 
 /**
@@ -1644,13 +1669,18 @@ function flushBoardExports(): Promise<boolean> {
   pendingBoardExports.clear();
   if (snapshots.length === 0) return Promise.resolve(true);
 
-  boardExportChain = boardExportChain.then(async () => {
-    const results: boolean[] = [];
-    for (const snapshot of snapshots) {
-      results.push(await exportBoardSnapshot(snapshot));
-    }
-    return results.every(Boolean);
-  });
+  boardExportPending += snapshots.length;
+  boardExportChain = boardExportChain
+    .then(async () => {
+      const results: boolean[] = [];
+      for (const snapshot of snapshots) {
+        results.push(await exportBoardSnapshot(snapshot));
+      }
+      return results.every(Boolean);
+    })
+    .finally(() => {
+      boardExportPending -= snapshots.length;
+    });
   return boardExportChain;
 }
 

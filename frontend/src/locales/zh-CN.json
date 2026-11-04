@@ -426,6 +426,7 @@
   "interview.handwriting.pen_width": "画笔粗细",
   "interview.handwriting.eraser_width": "橡皮擦粗细",
   "interview.save.saving": "正在保存",
+  "interview.save.saving_pending": "正在保存，请稍候…",
   "interview.save.success": "保存成功",
   "interview.runtime.mic_permission": "无法开启麦克风，请检查浏览器权限",
   "interview.runtime.mic_permission_title": "需要麦克风权限",

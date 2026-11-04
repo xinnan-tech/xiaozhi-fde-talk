@@ -1333,6 +1333,14 @@ const setMode = async (mode: string) => {
       window.dispatchEvent(new Event("resize"));
     }
     if (!handwritingBoardInitialized) {
+      // 先等画板列表回来：接口没回就恢复画布的话，画布会按默认的空板初始化，
+      // 之后接口回来的数据不会再灌进画布（handwritingBoardInitialized 已置 true），
+      // 用户在空白画布上落笔会把服务端那块板的笔画覆盖掉。
+      // 失败不往上抛：错误已经由调用方的 catch 报过，这里吞掉继续走，
+      // 没有列表时按默认空板恢复，至少不会把别的板子写坏。
+      if (interviewBoardsPromise) {
+        await interviewBoardsPromise.catch(() => undefined);
+      }
       await new Promise<void>(resolve => {
         window.requestAnimationFrame(() => {
           window.requestAnimationFrame(() => resolve());
@@ -1742,7 +1750,7 @@ const createDrawingBoardImageUrl = (
   return `data:image/${imageFormat || "png"};base64,${imageBase64}`;
 };
 
-const loadInterviewBoards = async () => {
+const fetchInterviewBoards = async () => {
   const sessionId = route.params.id as string;
   if (!sessionId) return;
 
@@ -1791,6 +1799,26 @@ const loadInterviewBoards = async () => {
       : drawingBoards.value[0].id;
   nextDrawingBoardId =
     Math.max(...drawingBoards.value.map(board => board.id)) + 1;
+};
+
+/**
+ * 画板列表的加载 promise。
+ *
+ * 手写模式首次初始化时必须先等它回来：接口没回就恢复画布的话，画布会按默认的
+ * 空板（id=1）初始化，而 handwritingBoardInitialized 置 true 之后接口回来的数据
+ * 不会再灌进画布，用户在空白画布上落笔就会把服务端那块板的笔画覆盖掉。
+ * 加载结束后置回 null（数据已经落到 drawingBoards，不用再等）。
+ */
+let interviewBoardsPromise: Promise<void> | null = null;
+
+const loadInterviewBoards = async (): Promise<void> => {
+  const task = fetchInterviewBoards();
+  interviewBoardsPromise = task;
+  try {
+    await task;
+  } finally {
+    if (interviewBoardsPromise === task) interviewBoardsPromise = null;
+  }
 };
 
 const loadKeyboardNote = async () => {

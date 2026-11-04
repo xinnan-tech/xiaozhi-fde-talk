@@ -1749,7 +1749,7 @@ const loadInterviewBoards = async () => {
       dataUrl: createDrawingBoardImageUrl(item.image_base64, item.image_format),
       strokes,
       redoStrokes: [],
-      hasContent: strokes.length > 0
+      hasContent: false
     };
   });
   const stillExists = drawingBoards.value.some(

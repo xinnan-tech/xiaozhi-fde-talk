@@ -66,6 +66,9 @@ const strokes = ref<HandwritingStroke[]>([]);
 const redoStack = ref<HandwritingStroke[]>([]);
 const currentStroke = ref<HandwritingPoint[]>([]);
 const isDrawing = ref(false);
+// 当前正在书写的触点 identifier（触摸路径专用，鼠标路径恒为 null）。
+// 多指触摸时只认第一根按下的手指，其余触点全部忽略。
+let activeTouchId: number | null = null;
 const lastX = ref(0);
 const lastY = ref(0);
 const currentTool = ref<"pen" | "eraser">("pen");
@@ -74,18 +77,26 @@ const currentSize = ref(4);
 // 鼠标悬停时的光标预览位置；落笔或离开画布时置 null，避免光标圆与笔画重叠。
 const cursorPos = ref<HandwritingPoint | null>(null);
 
-function getPosition(e: MouseEvent | TouchEvent): HandwritingPoint {
+/**
+ * 取当前书写位置。
+ *
+ * 触摸时只认 activeTouchId 那根手指：多指触摸下第二根手指的
+ * touchstart / touchmove / touchend 一律忽略，否则会重置当前笔画，
+ * 写出混了两根手指的错乱笔画。取不到属于自己那根手指的触点时返回 null，
+ * 调用方整段忽略这次事件。
+ */
+function getPosition(e: MouseEvent | TouchEvent): HandwritingPoint | null {
   const canvas = canvasRef.value;
-  if (!canvas) return { x: 0, y: 0 };
+  if (!canvas) return null;
   const rect = canvas.getBoundingClientRect();
   let clientX: number;
   let clientY: number;
-  if ("touches" in e && e.touches.length > 0) {
-    const touch = e.touches[0];
-    clientX = touch.clientX;
-    clientY = touch.clientY;
-  } else if ("changedTouches" in e && e.changedTouches.length > 0) {
-    const touch = e.changedTouches[0];
+  if ("touches" in e) {
+    if (activeTouchId === null) return null;
+    const touch =
+      findTouchById(e.touches, activeTouchId) ??
+      findTouchById(e.changedTouches, activeTouchId);
+    if (!touch) return null;
     clientX = touch.clientX;
     clientY = touch.clientY;
   } else {
@@ -97,6 +108,15 @@ function getPosition(e: MouseEvent | TouchEvent): HandwritingPoint {
     x: clientX - rect.left,
     y: clientY - rect.top
   };
+}
+
+/** 在触点列表里按 identifier 找触点；找不到返回 null。 */
+function findTouchById(list: TouchList, identifier: number): Touch | null {
+  for (let i = 0; i < list.length; i++) {
+    const touch = list[i];
+    if (touch && touch.identifier === identifier) return touch;
+  }
+  return null;
 }
 
 /**
@@ -305,8 +325,22 @@ function handleStart(e: MouseEvent | TouchEvent): void {
   // 因此这里的 preventDefault 不是重复调用，而是补齐鼠标路径。
   e.preventDefault();
   if (!ctx) return;
+  if ("touches" in e) {
+    // 已经在写了就忽略后续 touchstart：第二根手指按上来时不能重置
+    // currentStroke，否则第一根手指已画出的点会被丢掉。
+    if (activeTouchId !== null) return;
+    const first = e.changedTouches[0];
+    if (!first) return;
+    activeTouchId = first.identifier;
+  }
   isDrawing.value = true;
   const pos = getPosition(e);
+  if (!pos) {
+    // 取不到自己的触点：不能留下"画到一半"的悬空状态。
+    isDrawing.value = false;
+    activeTouchId = null;
+    return;
+  }
   lastX.value = pos.x;
   lastY.value = pos.y;
   currentStroke.value = [{ x: pos.x, y: pos.y }];
@@ -323,6 +357,9 @@ function handleStart(e: MouseEvent | TouchEvent): void {
 function handleMove(e: MouseEvent | TouchEvent): void {
   if (!ctx) return;
   const pos = getPosition(e);
+  // 不是当前书写的那根手指（多指触摸下的其它触点）：整段忽略，
+  // 既不画线也不更新光标预览。
+  if (!pos) return;
   if (isDrawing.value) {
     // 同handleStart：鼠标路径没有 .prevent 修饰符，这里必须自己挡一次。
     e.preventDefault();
@@ -355,7 +392,9 @@ function handleMove(e: MouseEvent | TouchEvent): void {
 function handleCanvasLeave(): void {
   // 落笔中离开：保留原"拖出 canvas 也能提交"的语义，先 commit 那一笔。
   if (isDrawing.value) {
-    handleEnd();
+    // 触摸绘制中不走这条：mouseleave 在触摸设备上可能被模拟事件触发，
+    // 会把还没写完的一笔提前提交。触摸路径由 touchend 自己收尾。
+    if (activeTouchId === null) handleEnd();
     return;
   }
   // 纯悬停离开：清掉光标预览，恢复纯笔画画面。
@@ -365,9 +404,16 @@ function handleCanvasLeave(): void {
   }
 }
 
-function handleEnd(): void {
+function handleEnd(e?: MouseEvent | TouchEvent): void {
   if (!isDrawing.value) return;
+  // 触摸抬起时只认自己那根手指：抬起的是第二根手指 / 手掌时不能结束这一笔，
+  // 否则会提交一条半截的笔画。
+  if (e && "changedTouches" in e) {
+    const lifted = e.changedTouches[0];
+    if (!lifted || lifted.identifier !== activeTouchId) return;
+  }
   isDrawing.value = false;
+  activeTouchId = null;
   if (currentStroke.value.length > 0) {
     const size = currentSize.value;
     strokes.value.push({

@@ -13,6 +13,7 @@ from app.transport.http.schemas import (
     BASE_INFO_TOTAL_MAX_BYTES,
     BASE_INFO_VALUE_MAX_BYTES,
     CreateInterviewRequest,
+    GOAL_MAX_BYTES,
     UpdateInterviewRequest,
     _validate_base_info_size,
 )
@@ -166,3 +167,58 @@ def test_validate_merged_base_info_within_limits_ok():
     new_patch = {f"n{i}": "y" * 100 for i in range(100)}  # ~11KB 增量
     merged = {**existing_base, **new_patch}  # ~22KB < 64KB
     _validate_base_info_size(merged)  # 不抛即通过
+
+
+# ---- goal 字节上限（PATCH/POST 同一放大器攻击面）----
+
+def test_create_goal_within_limit_ok():
+    """合法 goal（恰 4096 字节）→ 不抛。"""
+    CreateInterviewRequest(template_id="cs-revisit", goal="A" * GOAL_MAX_BYTES)
+
+
+def test_create_goal_over_limit_raises():
+    """goal 500KB → I18nError(GOAL_TOO_LONG, 422)。
+
+    此前 goal 是裸 Optional[str]，500KB 字符串直接落库，GET detail 全量带回；
+    list 接口 _session_summary 也带 goal，单用户 5 条即可把列表拖到 2MB+。
+    """
+    with pytest.raises(I18nError) as ei:
+        CreateInterviewRequest(template_id="cs-revisit", goal="A" * 500_000)
+    assert ei.value.code == Keys.SESSION_GOAL_TOO_LONG
+    assert ei.value.http_status == 422
+    assert ei.value.params["byte_len"] == 500_000
+    assert ei.value.params["max_bytes"] == GOAL_MAX_BYTES
+
+
+def test_create_goal_none_skips_check():
+    """Create 不传 goal → 不抛。"""
+    CreateInterviewRequest(template_id="cs-revisit", base_info={"project": "App X"})
+
+
+def test_update_goal_over_limit_raises():
+    """Update 路径同样校验（PATCH 才是真实被利用路径）。"""
+    with pytest.raises(I18nError) as ei:
+        UpdateInterviewRequest(goal="B" * (GOAL_MAX_BYTES + 1))
+    assert ei.value.code == Keys.SESSION_GOAL_TOO_LONG
+
+
+def test_update_goal_none_skips_check():
+    """Update 不传 goal（仅改 base_info）→ 跳过 goal 校验，不抛。"""
+    UpdateInterviewRequest(base_info={"memo": "x" * 100})
+
+
+def test_update_only_goal_at_limit_ok():
+    """Update 不传 base_info（仅改 goal）且 goal 在限内 → 不抛。"""
+    UpdateInterviewRequest(goal="refocus")
+
+
+def test_create_goal_emoji_multiplier_blocked_by_byte_count():
+    """4-byte emoji 撑爆：1025 个 🔥 = 4100 字节 > 4096 → 拒。
+    Pydantic 默认按字符计（1025 char），单靠 Field(max_length=N) 拦不住。
+    这里靠 UTF-8 字节校验补上。
+    """
+    emoji_goal = "🔥" * 1025  # 4100 UTF-8 bytes
+    with pytest.raises(I18nError) as ei:
+        CreateInterviewRequest(template_id="cs-revisit", goal=emoji_goal)
+    assert ei.value.code == Keys.SESSION_GOAL_TOO_LONG
+    assert ei.value.params["byte_len"] == 4100

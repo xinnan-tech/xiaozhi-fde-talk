@@ -8,11 +8,14 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-# base_info 单字段 / 整体字节上限。base_info 是 JSON 列，没有 per-field 索引，
-# 大字段会让 list / detail / export 全量查询被单条记录拖慢。值按 UTF-8 字节计，
-# 不按字符——防有人故意用 4-byte emoji 把字段撑爆。
+# base_info / goal 字节上限。base_info 是 JSON 列、goal 是 Text 列，都没有
+# per-field 索引，大字段会让 list / detail / export 全量查询被单条记录拖慢
+# （goal 在 _session_summary 里也带进 list 接口，单用户 5 条 500KB goal 就能
+# 把 list 撑到 2MB+——见 #167 修复后的同型放大器）。值按 UTF-8 字节计，不按
+# 字符——防有人故意用 4-byte emoji 把字段撑爆。
 BASE_INFO_VALUE_MAX_BYTES = 4 * 1024  # 4 KB / 字段
 BASE_INFO_TOTAL_MAX_BYTES = 64 * 1024  # 64 KB / base_info 整体
+GOAL_MAX_BYTES = 4 * 1024  # 4 KB / goal（与单字段 base_info 上限对齐）
 
 
 def _validate_base_info_size(base_info: dict) -> None:
@@ -54,6 +57,27 @@ def _validate_base_info_size(base_info: dict) -> None:
                 byte_len=field_bytes,
                 max_bytes=BASE_INFO_VALUE_MAX_BYTES,
             )
+
+
+def _validate_goal_size(goal: Optional[str]) -> None:
+    """goal 字节上限校验。None 视为未传（PATCH 增量语义），不校验。
+
+    与 _validate_base_info_size 同型思路：按 UTF-8 字节计，不按字符，
+    防 4-byte emoji 撑爆。422 + I18nError 由全局 handler 转本地化 detail。
+    """
+    if goal is None:
+        return
+    from app.core.i18n import Keys
+    from app.core.i18n.errors import I18nError
+
+    byte_len = len(goal.encode("utf-8"))
+    if byte_len > GOAL_MAX_BYTES:
+        raise I18nError(
+            Keys.SESSION_GOAL_TOO_LONG,
+            http_status=422,
+            byte_len=byte_len,
+            max_bytes=GOAL_MAX_BYTES,
+        )
 
 
 class LoginRequest(BaseModel):
@@ -225,8 +249,9 @@ class CreateInterviewRequest(BaseModel):
     goal: Optional[str] = None
 
     @model_validator(mode="after")
-    def _check_base_info_size(self) -> "CreateInterviewRequest":
+    def _check_size(self) -> "CreateInterviewRequest":
         _validate_base_info_size(self.base_info)
+        _validate_goal_size(self.goal)
         return self
 
 
@@ -238,9 +263,10 @@ class UpdateInterviewRequest(BaseModel):
     goal: Optional[str] = None
 
     @model_validator(mode="after")
-    def _check_base_info_size(self) -> "UpdateInterviewRequest":
+    def _check_size(self) -> "UpdateInterviewRequest":
         if self.base_info is not None:
             _validate_base_info_size(self.base_info)
+        _validate_goal_size(self.goal)
         return self
 
 

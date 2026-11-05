@@ -28,6 +28,7 @@ def test_numeric_keys_exact_set():
         "coach.max_pending_segments",
         "auth.jwt_expire_minutes",
         "auth.refresh_token_expire_days",
+        "auth.refresh_grace_seconds",
         "session.max_concurrent",
         "coach.pause_s",
         "coach.min_interval_s",
@@ -199,6 +200,7 @@ def test_numeric_max_value_exact_set():
     assert set(NUMERIC_MAX_VALUE.keys()) == {
         "auth.jwt_expire_minutes",
         "auth.refresh_token_expire_days",
+        "auth.refresh_grace_seconds",
         "session.max_concurrent",
         "coach.max_pending_segments",
         "asr.funasr_server.sample_rate",
@@ -296,6 +298,19 @@ def test_validate_value_rejects_refresh_token_days_overflow():
 def test_validate_value_accepts_refresh_token_days_default():
     """DEFAULTS refresh_token_expire_days=30 须在 365 上限内。"""
     validate_value("auth.refresh_token_expire_days", "30")
+
+
+def test_validate_value_rejects_refresh_grace_seconds_overflow():
+    """grace 窗是攻击者可在窗内 mint 新对的时间窗，上限 3600s 挡误配。"""
+    with pytest.raises(I18nError) as ei:
+        validate_value("auth.refresh_grace_seconds", "86400")
+    assert ei.value.code == Keys.CONFIG_INVALID_NUMERIC_TOO_LARGE.value
+    assert ei.value.http_status == 400
+    assert ei.value.params["max"] == 3600
+
+
+def test_validate_value_accepts_refresh_grace_seconds_default():
+    validate_value("auth.refresh_grace_seconds", "60")
 
 
 def test_validate_value_rejects_max_concurrent_absurd():

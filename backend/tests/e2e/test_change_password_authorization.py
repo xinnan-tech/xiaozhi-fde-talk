@@ -548,11 +548,10 @@ async def test_E3_old_refresh_revoked_after_self_password_change(empty_db):
         assert r.status_code == 200, r.text
 
         # 旧 refresh 调 /auth/refresh → 应 401（pwd_ver 不匹配，归 AUTH_REFRESH_REVOKED）
+        # /auth/refresh 只从 cookie 读 token——显式 set 保证测的就是 bob_refresh 本身
         if bob_refresh:
-            r = await c.post(
-                "/api/v1/auth/refresh",
-                json={"refresh_token": bob_refresh},
-            )
+            c.cookies.set("refresh-token", bob_refresh)
+            r = await c.post("/api/v1/auth/refresh")
             assert r.status_code == 401, (
                 f"改密后旧 refresh 调 /auth/refresh 应 401，实际 {r.status_code}：{r.text}"
             )

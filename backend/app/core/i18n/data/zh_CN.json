@@ -125,6 +125,7 @@
   "auth.refresh_invalid": "refresh token 无效",
   "auth.refresh_expired": "refresh token 已过期",
   "auth.refresh_revoked": "refresh token 已被吊销",
+  "auth.logout_revocation_failed": "登出失败：会话撤销未落库，请稍后重试",
   "validation.required": "不能为空",
   "validation.string_too_short": "长度不足：要求 ≥ {min} 个字符",
   "validation.string_too_long": "长度超出：上限 {max} 个字符",

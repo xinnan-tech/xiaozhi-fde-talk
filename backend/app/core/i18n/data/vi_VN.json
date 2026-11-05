@@ -125,6 +125,7 @@
   "auth.refresh_invalid": "refresh token không hợp lệ",
   "auth.refresh_expired": "refresh token đã hết hạn",
   "auth.refresh_revoked": "refresh token đã bị thu hồi",
+  "auth.logout_revocation_failed": "Đăng xuất thất bại: thu hồi phiên chưa được lưu, vui lòng thử lại sau",
   "validation.required": "không được để trống",
   "validation.string_too_short": "quá ngắn: yêu cầu ≥ {min} ký tự",
   "validation.string_too_long": "quá dài: tối đa {max} ký tự",

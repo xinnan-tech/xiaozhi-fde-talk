@@ -1,4 +1,6 @@
 from __future__ import annotations
+from unittest.mock import AsyncMock
+
 import pytest
 from app.domain.auth import CurrentUser
 from app.transport.base import extract_auth
@@ -68,6 +70,7 @@ async def test_refresh_new_access_role_from_db_overrides_old_claim(monkeypatch):
 
     from starlette.responses import Response
 
+    from app.persistence.repositories import refresh_session as rs_mod
     from app.persistence.repositories import user as user_mod
     from app.persistence.repositories.user import AuthState
     from app.services.auth.token import decode_token as real_decode
@@ -79,11 +82,8 @@ async def test_refresh_new_access_role_from_db_overrides_old_claim(monkeypatch):
         lambda _tok: {
             "sub": "u1", "username": "alice", "role": "admin",
             "pwd_ver": 1000, "type": "refresh", "jti": "j-test-role-refresh",
+            "exp": int(datetime(2030, 1, 1, tzinfo=timezone.utc).timestamp()),
         },
-    )
-    monkeypatch.setattr(
-        "app.transport.http.routes.auth.is_refresh_token_revoked",
-        lambda _jti: False,
     )
     # DB 快照：真实身份是 user/bob（pwd_ver 与 claim 一致，不触发吊销路径）
     async def fake_state(user_id):
@@ -93,10 +93,23 @@ async def test_refresh_new_access_role_from_db_overrides_old_claim(monkeypatch):
             username="bob",
         )
     monkeypatch.setattr(user_mod.user_repo, "get_auth_state", fake_state)
+    # refresh 路径不再调 is_refresh_token_revoked——rotation 走 refresh_sessions
+    # 表分类（active/rotated/revoked），单测无需 mock 此名。
+    # refresh_sessions 表 IO 全 stub：rotation 防御行分类 + rotate 提交都打 DB，
+    # 本测试只关心 access claim 的 role 来源，不该依赖真实表状态。
+    monkeypatch.setattr(rs_mod.refresh_session_repo, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(rs_mod.refresh_session_repo, "rotate", AsyncMock(return_value=None))
     # jwt_secret 由 SecretResolver 在 lifespan 注入——单测没跑 lifespan，
     # 补一个值让 create_access_token / decode_token 能真实签发 + 解码。
     from app.core.settings import get_settings
     monkeypatch.setattr(get_settings(), "jwt_secret", "unit-test-secret")
+    # create_refresh_token 内部读 get_auth_runtime_config（DB-backed config_store）；
+    # 单测不打 DB，整段 stub：返回 (token='', jti='j-fake-new', expires_at)。
+    from datetime import datetime as _dt
+    monkeypatch.setattr(
+        "app.transport.http.routes.auth.create_refresh_token",
+        AsyncMock(return_value=("", "j-fake-new", _dt(2099, 1, 1, tzinfo=timezone.utc))),
+    )
 
     class FakeRequest:
         """最小请求桩：client=None → _client_ip 返 "unknown"，绕开 XFF 分支。"""
@@ -104,7 +117,12 @@ async def test_refresh_new_access_role_from_db_overrides_old_claim(monkeypatch):
         client = None
         cookies = {"refresh-token": "stale-refresh-token"}
 
-    out = await auth_mod.refresh(FakeRequest(), Response())
+    # refresh 签名 db 默认 = Depends(get_db)，单测不跑 DI → 显式传 SessionLocal()。
+    # stub 之上 commit 也被绕开，db 只用于 get_auth_state 已被 monkeypatch；传 None
+    # 也安全（refresh 路径不再触 db.*），但保留 AsyncSession 实例更贴近真伪。
+    from app.persistence.db import SessionLocal
+    async with SessionLocal() as db:
+        out = await auth_mod.refresh(FakeRequest(), Response(), db=db)
     payload = real_decode(out["access_token"])
     assert payload["role"] == "user"        # DB 的 user 压过旧 claim 的 admin
     assert payload["username"] == "bob"

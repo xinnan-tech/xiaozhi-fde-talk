@@ -5,8 +5,11 @@ core/config_store（jwt_expire_minutes 是 B 类）。
 
 双 token 模型：
 - access_token：短 TTL，承载鉴权会话（默认 1440 分钟 = 24h）
-- refresh_token：长 TTL（默认 7 天），只用于在 /auth/refresh 换新 access_token，
-  不直接调用业务接口。jti 进 _revoked_refresh_jtis 即视为吊销（logout / 改密）。
+- refresh_token：长 TTL（默认 30 天），一次性使用（rotation）——
+  /auth/refresh 每次签发新 refresh 并把旧 jti 置 rotated；
+  旧 jti 在 grace 窗外再现视同泄露（reuse 检测 → 全家撤销）。
+  jti 的会话状态在 persistence/repositories/refresh_session.py
+  （DB 表 refresh_sessions，多 worker 共享、重启不丢）。
 """
 from __future__ import annotations
 
@@ -31,32 +34,6 @@ _ISSUER = "xiaozhi-fde-talk"
 # decode 后由调用方按 type 分发——避免 access token 被拿去刷 refresh（混用）。
 _TOKEN_TYPE_ACCESS = "access"
 _TOKEN_TYPE_REFRESH = "refresh"
-
-
-# ─────────────────────────────────────────────────────────────────────
-# refresh token 撤销表（内存；process 内有效）
-# ─────────────────────────────────────────────────────────────────────
-# 单实例部署足够——多 worker 部署（docker compose WEB_CONCURRENCY>1）下，
-# worker A 撤销 jti 但 worker B 仍允许该 jti 刷 access，直到 TTL 自然过期。
-# 后续可换 Redis set：signature 共享一个 Redis 实例，所有 worker 同步撤销状态。
-# 当前内存实现的明确取舍：单进程部署 OK；多 worker 部署存在残留窗口。
-
-_revoked_refresh_jtis: set[str] = set()
-
-
-def revoke_refresh_token(jti: str) -> None:
-    """撤掉一个 refresh token jti（logout 调用）。"""
-    _revoked_refresh_jtis.add(jti)
-
-
-def is_refresh_token_revoked(jti: str) -> bool:
-    """检查 refresh token jti 是否已撤销。"""
-    return jti in _revoked_refresh_jtis
-
-
-def _reset_revoked_for_test() -> None:
-    """仅供测试：清空撤销集合。生产路径不需要 reset。"""
-    _revoked_refresh_jtis.clear()
 
 
 async def create_access_token(
@@ -92,8 +69,8 @@ async def create_refresh_token(
     subject: str,
     pwd_ver: int,
     extra: Optional[dict[str, Any]] = None,
-) -> tuple[str, str]:
-    """签发 refresh token，返回 (token, jti)。
+) -> tuple[str, str, datetime]:
+    """签发 refresh token，返回 (token, jti, expires_at)。
 
     jti 单独返回供路由层在 logout 时撤销。refresh token 不能直接调业务接口——
     /auth/refresh 端点会校验 type=refresh + jti 未撤销后才换 access。
@@ -104,11 +81,12 @@ async def create_refresh_token(
     cfg = await get_auth_runtime_config()
     now = datetime.now(timezone.utc)
     jti = secrets.token_urlsafe(16)
+    expires_at = now + timedelta(days=cfg["refresh_token_expire_days"])
     payload: dict[str, Any] = {
         "sub": subject,
         "type": _TOKEN_TYPE_REFRESH,
         "iat": now,
-        "exp": now + timedelta(days=cfg["refresh_token_expire_days"]),
+        "exp": expires_at,
         "jti": jti,
         "iss": _ISSUER,
         "aud": _AUDIENCE,
@@ -116,7 +94,7 @@ async def create_refresh_token(
     }
     if extra:
         payload.update(extra)
-    return jwt.encode(payload, settings.jwt_secret, algorithm=_SIGNING_ALG), jti
+    return jwt.encode(payload, settings.jwt_secret, algorithm=_SIGNING_ALG), jti, expires_at
 
 
 def decode_token(token: str) -> dict[str, Any]:

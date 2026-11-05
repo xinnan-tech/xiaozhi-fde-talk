@@ -40,6 +40,7 @@ ALL_B_KEYS: list[str] = [
     # Coach
     "coach.pause_s", "coach.max_pending_segments", "coach.min_interval_s", "coach.llm_timeout_s",
     "auth.jwt_expire_minutes", "auth.allow_registration", "auth.refresh_token_expire_days",
+    "auth.refresh_grace_seconds",
     "session.grace_period_s",
     "session.idle_timeout_s",
     "session.idle_check_interval_s",
@@ -71,6 +72,7 @@ NUMERIC_KEYS: dict[str, type] = {
     "coach.max_pending_segments": int,
     "auth.jwt_expire_minutes": int,
     "auth.refresh_token_expire_days": int,
+    "auth.refresh_grace_seconds": int,
     "session.max_concurrent": int,
     "coach.pause_s": float,
     "coach.min_interval_s": float,
@@ -87,6 +89,9 @@ NUMERIC_MAX_VALUE: dict[str, int | float] = {
     "auth.jwt_expire_minutes": 30 * 24 * 60,
     # 365 天；refresh token 撤销表可接受的"用户不登录"最长窗口
     "auth.refresh_token_expire_days": 365,
+    # 3600s 上限：grace 窗是攻击者可在窗内 mint 新对的时间窗（无竞态也成立），
+    # 调大要意识到这是在放宽泄露收口速度
+    "auth.refresh_grace_seconds": 3600,
     # 1000；FunASR 单机房间容量上限
     "session.max_concurrent": 1000,
     # 1000；engine.py:277 用作 segment buffer 阈值，无上限会让兜底永远不命中
@@ -315,6 +320,7 @@ DEFAULTS: dict[str, str] = {
     "auth.jwt_expire_minutes": "10080",
     "auth.allow_registration": "false",
     "auth.refresh_token_expire_days": "30",
+    "auth.refresh_grace_seconds": "60",
     "session.grace_period_s": "60.0",
     "session.idle_timeout_s": "1800.0",
     "session.idle_check_interval_s": "30.0",
@@ -656,6 +662,7 @@ async def get_auth_runtime_config() -> dict[str, object]:
         "jwt_expire_minutes": int(await s.get("auth.jwt_expire_minutes") or "10080"),
         "allow_registration": (await s.get("auth.allow_registration") or "false") == "true",
         "refresh_token_expire_days": int(await s.get("auth.refresh_token_expire_days") or "30"),
+        "refresh_grace_seconds": int(await s.get("auth.refresh_grace_seconds") or "60"),
     }
 
 
